@@ -1,0 +1,172 @@
+@startuml D-Fence-UseCases
+' D-Fence - Use Case Diagram (Lab 2, v0.2)
+' SC2006/CZ2006 Lab 2 deliverable 1. Source of truth for the diagram image.
+' v0.2 changes: +1.5 Sign Out, +2.4 View Cluster Map, +4.4 Notify Crew Member;
+' 6.7 re-modelled as a direct association (was <<extend>> of 6.6);
+' 3.4 and 6.8 now include 4.3. See ../lab1/submission/AI-CRITIQUE.md section 6.
+' Render: paste into https://www.plantuml.com/plantuml, or use the PlantUML
+' extension in VS Code / IntelliJ, or `plantuml use-case-diagram.puml`.
+
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam shadowing false
+
+' ---------- Actors ----------
+actor "Registered User" as RU
+actor "Resident" as RES
+actor "Operations Manager" as OM
+actor "Cleaning Crew Member" as CCM
+actor "Scheduler" as SCH
+actor "OneMap" as ONEMAP
+actor "NEA Data Service" as NEA
+actor "Weather Data Service" as WX
+actor "Telegram Service" as TG
+
+' Actor generalization: the three human roles are all registered users
+RES --|> RU
+OM  --|> RU
+CCM --|> RU
+
+rectangle "D-Fence" {
+
+  ' ---------- 1. Account and access ----------
+  usecase "1.1 Register Account" as UC11
+  usecase "1.2 Sign In" as UC12
+  usecase "1.3 Reset Password" as UC13
+  usecase "1.4 Manage Staff Accounts" as UC14
+  usecase "1.5 Sign Out" as UC15
+
+  ' ---------- 2. Locations and exposure ----------
+  usecase "2.1 Add Saved Location" as UC21
+  usecase "2.2 Remove Saved Location" as UC22
+  usecase "2.3 View Exposure Status" as UC23
+  usecase "2.4 View Cluster Map" as UC24
+
+  ' ---------- 3. Reporting ----------
+  usecase "3.1 Submit Breeding-Site Report" as UC31
+  usecase "3.2 Confirm Existing Report" as UC32
+  usecase "3.3 Track Own Reports" as UC33
+  usecase "3.4 Moderate Report" as UC34
+
+  ' ---------- 4. Alerts ----------
+  usecase "4.1 Link Telegram Chat" as UC41
+  usecase "4.2 Configure Location Alerts" as UC42
+  usecase "4.3 Notify Resident" as UC43
+  usecase "4.4 Notify Crew Member" as UC44
+
+  ' ---------- 5. Operations oversight ----------
+  usecase "5.1 Monitor Operations Dashboard" as UC51
+  usecase "5.2 Review Priority Ranking" as UC52
+  usecase "5.3 Inspect Cluster Detail" as UC53
+  usecase "5.4 Monitor Data Source Health" as UC54
+
+  ' ---------- 6. Dispatch and field work ----------
+  usecase "6.1 Generate Daily Dispatch List" as UC61
+  usecase "6.2 Create Work Order" as UC62
+  usecase "6.3 Assign Work Order" as UC63
+  usecase "6.4 View Assigned Jobs" as UC64
+  usecase "6.5 Accept and Start Job" as UC65
+  usecase "6.6 Complete Job with Evidence" as UC66
+  usecase "6.7 Raise Issue on Job" as UC67
+  usecase "6.8 Verify Completed Work" as UC68
+  usecase "6.9 Cancel Work Order" as UC69
+
+  ' ---------- 7. Automated system behaviour ----------
+  usecase "7.1 Ingest Cluster Data" as UC71
+  usecase "7.2 Detect Cluster Change" as UC72
+  usecase "7.3 Ingest Rainfall Data" as UC73
+  usecase "7.4 Ingest Weather Forecast" as UC74
+  usecase "7.5 Compute Priority Scores" as UC75
+  usecase "7.6 Evaluate Alert Triggers" as UC76
+  usecase "7.7 Refresh Geocoding Token" as UC77
+
+  ' ---------- 8. Shared, included by others ----------
+  usecase "8.1 Geocode Address" as UC81
+  usecase "8.2 View Driver Breakdown" as UC82
+  usecase "8.3 Link Verified Reports" as UC83
+  usecase "8.4 Record Treatment" as UC84
+}
+
+' ---------- Actor associations ----------
+RU  -- UC12
+RU  -- UC13
+RU  -- UC15
+
+RES -- UC11
+RES -- UC21
+RES -- UC22
+RES -- UC23
+RES -- UC24
+RES -- UC31
+RES -- UC32
+RES -- UC33
+RES -- UC41
+RES -- UC42
+
+OM  -- UC14
+OM  -- UC34
+OM  -- UC51
+OM  -- UC52
+OM  -- UC53
+OM  -- UC54
+OM  -- UC61
+OM  -- UC62
+OM  -- UC63
+OM  -- UC68
+OM  -- UC69
+
+CCM -- UC64
+CCM -- UC65
+CCM -- UC66
+CCM -- UC67
+
+SCH -- UC71
+SCH -- UC73
+SCH -- UC74
+SCH -- UC75
+SCH -- UC76
+SCH -- UC77
+
+' ---------- Secondary / external actors ----------
+UC81 -- ONEMAP
+UC77 -- ONEMAP
+UC71 -- NEA
+UC73 -- WX
+UC74 -- WX
+UC43 -- TG
+UC44 -- TG
+UC44 -- CCM
+UC43 -- RES
+
+' ---------- Include relationships ----------
+UC21 ..> UC81 : <<include>>
+UC31 ..> UC81 : <<include>>
+UC52 ..> UC82 : <<include>>
+UC53 ..> UC82 : <<include>>
+UC62 ..> UC83 : <<include>>
+UC68 ..> UC84 : <<include>>
+UC71 ..> UC72 : <<include>>
+UC76 ..> UC43 : <<include>>
+UC34 ..> UC43 : <<include>>
+UC68 ..> UC43 : <<include>>
+UC63 ..> UC44 : <<include>>
+UC68 ..> UC44 : <<include>>
+UC61 ..> UC62 : <<include>>
+
+' ---------- Extend relationships ----------
+UC32 ..> UC31 : <<extend>>\n(duplicate detected)
+
+note right of UC75
+  Triggered by 7.1 completing
+  and by 6.8 verifying a work order.
+  Requirements 4.1.1-4.1.2, 8.5.3.
+end note
+
+note bottom of UC84
+  Writing a treatment record lowers
+  the cluster's next priority score.
+  This closes the loop: 4.1.17.
+end note
+
+@enduml

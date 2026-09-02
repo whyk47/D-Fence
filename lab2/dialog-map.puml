@@ -1,0 +1,149 @@
+@startuml D-Fence-DialogMap
+' D-Fence — Dialog map (dynamic model)
+' SC2006/CZ2006 Lab 2 deliverable 5. Fox p. 420: a state diagram whose nodes are
+' user interface states. States are the 27 screens of REQUIREMENTS.md 11.2;
+' transitions are the events permitted by 11.3.
+' 11.3.2: no transition exists that is not drawn here.
+
+skinparam shadowing false
+skinparam state {
+  BackgroundColor #FDFDF7
+  BorderColor #6B7280
+  FontSize 12
+}
+
+[*] --> Landing
+
+state "Landing (11.2.1)" as Landing
+state "Register (11.2.2)" as Register
+state "Sign In (11.2.3)" as SignIn
+state "Password Reset Request (11.2.4)" as ResetRequest
+state "Password Reset (11.2.4)" as ResetForm
+
+Landing --> Register : selectRegister
+Landing --> SignIn : selectSignIn
+Register --> SignIn : registered
+Register --> Landing : cancel
+SignIn --> ResetRequest : forgotPassword
+ResetRequest --> ResetForm : openResetLink
+ResetRequest --> SignIn : cancel
+ResetForm --> SignIn : passwordChanged / cancel
+SignIn --> ResidentMap : signInAsResident
+SignIn --> OpsDashboard : signInAsManager
+SignIn --> MyJobs : signInAsCrew
+
+state "Resident" as ResidentRegion {
+  state "Resident Map (11.2.5)" as ResidentMap
+  state "My Locations (11.2.6)" as MyLocations
+  state "Add Location (11.2.7)" as AddLocation
+  state "Report a Site (11.2.8)" as ReportSite
+  state "Duplicate Detected" as DuplicateModal <<modal>>
+  state "My Reports (11.2.9)" as MyReports
+  state "Report Detail (11.2.10)" as ReportDetail
+  state "Alert Settings (11.2.11)" as AlertSettings
+
+  ResidentMap --> MyLocations : openLocations
+  ResidentMap --> ReportSite : reportHere
+  ResidentMap --> MyReports : openReports
+  ResidentMap --> AlertSettings : openAlerts
+  MyLocations --> AddLocation : addLocation
+  MyLocations --> ResidentMap : back
+  AddLocation --> MyLocations : saved / cancelled
+  ReportSite --> DuplicateModal : duplicateDetected
+  DuplicateModal --> MyReports : confirmExisting
+  DuplicateModal --> ReportSite : dismiss
+  ReportSite --> MyReports : submitted
+  ReportSite --> ResidentMap : cancel
+  MyReports --> ReportDetail : selectReport
+  ReportDetail --> MyReports : back
+  MyReports --> ResidentMap : back
+  AlertSettings --> ResidentMap : back
+}
+
+state "Operations Manager" as OpsRegion {
+  state "Operations Dashboard (11.2.12)" as OpsDashboard
+  state "Cluster Detail (11.2.13)" as ClusterDetail
+  state "Moderation Queue (11.2.14)" as ModQueue
+  state "Report Review (11.2.15)" as ReportReview
+  state "Dispatch Proposal (11.2.16)" as DispatchProposal
+  state "Work Order Create (11.2.17)" as WOCreate
+  state "Work Order List (11.2.25)" as WOList
+  state "Work Order Detail (11.2.18)" as WODetail
+  state "Staff Accounts (11.2.22)" as StaffAccounts
+  state "Data Sources (11.2.23)" as DataSources
+
+  OpsDashboard --> ClusterDetail : selectCluster
+  OpsDashboard --> ModQueue : openModeration
+  OpsDashboard --> DispatchProposal : openDispatch
+  OpsDashboard --> WOList : openWorkOrders
+  WOList --> WODetail : selectWorkOrder
+  WOList --> WOCreate : newWorkOrder
+  WOList --> OpsDashboard : back
+  OpsDashboard --> StaffAccounts : openStaff
+  OpsDashboard --> DataSources : openSources
+  ClusterDetail --> WOCreate : createWorkOrder
+  ClusterDetail --> OpsDashboard : back
+  ModQueue --> ReportReview : selectReport
+  ReportReview --> ModQueue : verified / rejected / back
+  DispatchProposal --> WOCreate : editItem
+  DispatchProposal --> OpsDashboard : accepted / back
+  WOCreate --> WOList : created
+  WOCreate --> ClusterDetail : cancel
+  WODetail --> WOList : back
+  WODetail --> ClusterDetail : viewCluster
+  StaffAccounts --> OpsDashboard : back
+  DataSources --> OpsDashboard : back
+}
+
+state "Cleaning Crew" as CrewRegion {
+  state "My Jobs (11.2.19)" as MyJobs
+  state "Job Detail (11.2.20)" as JobDetail
+  state "Job Completion (11.2.21)" as JobCompletion
+
+  MyJobs --> JobDetail : selectJob
+  JobDetail --> MyJobs : back
+  JobDetail --> JobCompletion : completeJob
+  JobCompletion --> JobDetail : cancel / rejectedNoPhoto
+  JobCompletion --> MyJobs : submitted
+}
+
+state "Not Authorised (11.2.24)" as NotAuthorised
+state "Not Found (11.2.24)" as NotFound
+
+ResidentRegion --> NotAuthorised : forbiddenResource
+OpsRegion --> NotAuthorised : forbiddenResource
+CrewRegion --> NotAuthorised : forbiddenResource
+ResidentRegion --> NotFound : unknownRoute
+OpsRegion --> NotFound : unknownRoute
+CrewRegion --> NotFound : unknownRoute
+Landing --> NotFound : unknownRoute
+NotAuthorised --> Landing : back
+NotFound --> Landing : back
+
+ResidentRegion --> Landing : signOut
+OpsRegion --> Landing : signOut
+CrewRegion --> Landing : signOut
+
+note right of DuplicateModal
+  Modal. Permitted by 11.3.4 because it is a
+  single confirmation. Unsaved input on the
+  underlying form is preserved (11.3.5).
+end note
+
+note as N11_4
+  **Every state above has four implicit sub-states**
+  required by 11.4: loading, empty, error and stale.
+  They are declared here rather than drawn on each of
+  the 24 states, which would quadruple the diagram for
+  no analytical gain. Entering or leaving a sub-state is
+  not a navigation transition and does not change the
+  screen, so 11.3.2 is not violated.
+end note
+
+note bottom of NotAuthorised
+  Reached when the server refuses a resource the
+  role may not read (2.3.7). The interface never
+  decides this — it only displays the refusal.
+end note
+
+@enduml

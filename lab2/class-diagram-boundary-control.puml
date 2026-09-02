@@ -1,0 +1,279 @@
+@startuml D-Fence-BoundaryControl
+' D-Fence — Boundary and control classes (analysis model)
+' SC2006/CZ2006 Lab 2 deliverable 4. Bruegge ch. 5 stereotypes.
+' Boundary classes come from the 26-screen inventory (REQUIREMENTS.md 11.2, in which
+' 11.2.4 and 11.2.24 each define two screens) plus the five external services.
+' Control classes come from the use cases.
+' Entity classes are shown as references only — they are defined in class-diagram-entity.puml.
+
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+hide circle
+
+package "Boundary — Resident screens" #FDFDF7 {
+  class LandingUI <<boundary>>
+  class RegisterUI <<boundary>>
+  class SignInUI <<boundary>>
+  class PasswordResetRequestUI <<boundary>>
+  class PasswordResetUI <<boundary>>
+  class ResidentMapUI <<boundary>>
+  class MyLocationsUI <<boundary>>
+  class AddLocationUI <<boundary>>
+  class ReportSiteUI <<boundary>>
+  class MyReportsUI <<boundary>>
+  class ReportDetailUI <<boundary>>
+  class AlertSettingsUI <<boundary>>
+}
+
+package "Boundary — Operations screens" #FDFDF7 {
+  class OperationsDashboardUI <<boundary>>
+  class ClusterDetailUI <<boundary>>
+  class ModerationQueueUI <<boundary>>
+  class ReportReviewUI <<boundary>>
+  class DispatchProposalUI <<boundary>>
+  class WorkOrderCreateUI <<boundary>>
+  class WorkOrderListUI <<boundary>>
+  class WorkOrderDetailUI <<boundary>>
+  class StaffAccountsUI <<boundary>>
+  class DataSourcesUI <<boundary>>
+}
+
+package "Boundary — Crew screens" #FDFDF7 {
+  class MyJobsUI <<boundary>>
+  class JobDetailUI <<boundary>>
+  class JobCompletionUI <<boundary>>
+}
+
+package "Boundary — Shared screens" #FDFDF7 {
+  class NotAuthorisedUI <<boundary>>
+  class NotFoundUI <<boundary>>
+}
+
+package "Boundary — External services" #F7FAFD {
+  class NEAFeedGateway <<boundary>> {
+    fetchClusters()
+  }
+  class RainfallGateway <<boundary>> {
+    fetchStations()
+    fetchReadings()
+  }
+  class ForecastGateway <<boundary>> {
+    fetch24hForecast()
+  }
+  class OneMapGateway <<boundary>> {
+    search(address)
+    requestToken()
+  }
+  class TelegramGateway <<boundary>> {
+    sendMessage(chatId, text)
+  }
+}
+
+package "Control" #FAF7FD {
+  class AuthenticationController <<control>> {
+    register()
+    signIn()
+    signOut()
+    requestReset()
+    completeReset()
+  }
+  class StaffAccountController <<control>> {
+    createStaffAccount()
+    deactivateAccount()
+  }
+  class AccessControlService <<control>> {
+    authorise(account, resource)
+    logDenial()
+  }
+  class SavedLocationController <<control>> {
+    addLocation()
+    removeLocation()
+    evaluateExposure()
+  }
+  class GeocodingController <<control>> {
+    geocode(text)
+    refreshToken()
+  }
+  class ReportController <<control>> {
+    submitReport()
+    detectDuplicate()
+    confirmExisting()
+    listOwnReports()
+  }
+  class ModerationController <<control>> {
+    listQueue()
+    verify()
+    reject()
+  }
+  class IngestionController <<control>> {
+    runClusterIngestion()
+    detectClusterChange()
+    runRainfallIngestion()
+    runForecastIngestion()
+    recordRun()
+  }
+  class PriorityScoringEngine <<control>> {
+    computeScores()
+    normaliseDriver()
+    applyWeights()
+    assignTier()
+    rankClusters()
+    buildBreakdown()
+  }
+  class AlertTriggerEvaluator <<control>> {
+    evaluateTriggers()
+    applyDailyCap()
+  }
+  class AlertSubscriptionController <<control>> {
+    linkTelegramChat()
+    generateLinkCode()
+    setLocationAlerts()
+    setGrowthThreshold()
+  }
+  class NotificationController <<control>> {
+    notifyResident()
+    notifyCrewMember()
+    retryDelivery()
+  }
+  class DashboardController <<control>> {
+    buildOverview()
+    buildPriorityTable()
+    buildAttentionPanel()
+    reportSourceHealth()
+  }
+  class DispatchController <<control>> {
+    proposeDailyList()
+    createWorkOrder()
+    linkVerifiedReports()
+    assign()
+    reassign()
+    cancel()
+  }
+  class WorkOrderLifecycleController <<control>> {
+    accept()
+    start()
+    raiseIssue()
+    complete()
+    verify()
+    rejectCompletion()
+    recordTreatment()
+    isTransitionPermitted()
+  }
+}
+
+package "Entity (defined in class-diagram-entity.puml)" #F7F7F7 {
+  class Account <<entity>>
+  class SavedLocation <<entity>>
+  class Cluster <<entity>>
+  class PriorityScore <<entity>>
+  class Report <<entity>>
+  class WorkOrder <<entity>>
+  class TreatmentRecord <<entity>>
+  class Alert <<entity>>
+  class AuditRecord <<entity>>
+}
+
+' ---------- Boundary to control ----------
+RegisterUI --> AuthenticationController
+SignInUI --> AuthenticationController
+PasswordResetRequestUI --> AuthenticationController
+PasswordResetUI --> AuthenticationController
+LandingUI --> AuthenticationController
+
+AddLocationUI --> SavedLocationController
+MyLocationsUI --> SavedLocationController
+ResidentMapUI --> SavedLocationController
+AddLocationUI --> GeocodingController
+
+ReportSiteUI --> ReportController
+ReportSiteUI --> GeocodingController
+MyReportsUI --> ReportController
+ReportDetailUI --> ReportController
+AlertSettingsUI --> AlertSubscriptionController
+
+OperationsDashboardUI --> DashboardController
+ClusterDetailUI --> DashboardController
+ClusterDetailUI --> PriorityScoringEngine
+DataSourcesUI --> DashboardController
+DataSourcesUI --> IngestionController
+ModerationQueueUI --> ModerationController
+ReportReviewUI --> ModerationController
+DispatchProposalUI --> DispatchController
+WorkOrderCreateUI --> DispatchController
+WorkOrderListUI --> DispatchController
+WorkOrderDetailUI --> DispatchController
+WorkOrderDetailUI --> WorkOrderLifecycleController
+StaffAccountsUI --> StaffAccountController
+
+MyJobsUI --> WorkOrderLifecycleController
+JobDetailUI --> WorkOrderLifecycleController
+JobCompletionUI --> WorkOrderLifecycleController
+
+NotAuthorisedUI --> AccessControlService
+
+' ---------- Control to external boundary ----------
+IngestionController --> NEAFeedGateway
+IngestionController --> RainfallGateway
+IngestionController --> ForecastGateway
+GeocodingController --> OneMapGateway
+NotificationController --> TelegramGateway
+
+' ---------- Control to control ----------
+IngestionController --> PriorityScoringEngine : triggers rescoring
+IngestionController --> AlertTriggerEvaluator : triggers evaluation
+AlertTriggerEvaluator --> NotificationController
+AlertSubscriptionController --> NotificationController
+ModerationController --> NotificationController
+DispatchController --> NotificationController
+WorkOrderLifecycleController --> NotificationController
+WorkOrderLifecycleController --> PriorityScoringEngine : rescore after treatment
+DispatchController --> PriorityScoringEngine : reads ranking
+DispatchController --> WorkOrderLifecycleController : delegates every status change
+
+' ---------- Control to entity ----------
+AuthenticationController --> Account
+StaffAccountController --> Account
+AccessControlService --> Account
+AccessControlService --> AuditRecord
+SavedLocationController --> SavedLocation
+SavedLocationController --> Cluster
+ReportController --> Report
+ModerationController --> Report
+IngestionController --> Cluster
+PriorityScoringEngine --> PriorityScore
+PriorityScoringEngine --> Cluster
+AlertTriggerEvaluator --> Alert
+AlertSubscriptionController --> SavedLocation
+AlertSubscriptionController --> Account
+NotificationController --> Alert
+DashboardController --> PriorityScore
+DispatchController --> WorkOrder
+DispatchController --> Report
+WorkOrderLifecycleController --> WorkOrder
+WorkOrderLifecycleController --> TreatmentRecord
+
+note top of AccessControlService
+  Cross-cutting. Every controller consults it before
+  returning data (2.3.6: access rules are enforced on
+  the server, never by the interface).
+end note
+
+note bottom of WorkOrderLifecycleController
+  Owns the eight-state work-order machine. Every change
+  to WorkOrder.status passes through this class, including
+  the ones DispatchController initiates (assign, reassign,
+  cancel) — it decides what work should exist and who does
+  it, but delegates the transition itself, so 8.3.2 is
+  enforced in exactly one place.
+  isTransitionPermitted() is the designated Lab 4
+  basis-path test subject.
+end note
+
+note bottom of PriorityScoringEngine
+  The system's computational core. Designated Lab 4
+  subject for equivalence-class and boundary-value
+  testing (tier thresholds 40.0 and 70.0).
+end note
+
+@enduml

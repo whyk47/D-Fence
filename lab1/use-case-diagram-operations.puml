@@ -1,0 +1,58 @@
+@startuml D-Fence-Operations
+' Role view 2 of 3 — Operations Manager. Subset of use-case-diagram.puml, same IDs.
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam shadowing false
+
+actor "Registered User" as RU
+actor "Operations Manager" as OM
+actor "Telegram Service" as TG
+
+OM --|> RU
+
+rectangle "D-Fence — Operations" {
+  usecase "1.2 Sign In" as UC12
+  usecase "1.4 Manage Staff Accounts" as UC14
+  usecase "3.4 Moderate Report" as UC34
+  usecase "5.1 Monitor Operations Dashboard" as UC51
+  usecase "5.2 Review Priority Ranking" as UC52
+  usecase "5.3 Inspect Cluster Detail" as UC53
+  usecase "5.4 Monitor Data Source Health" as UC54
+  usecase "6.1 Generate Daily Dispatch List" as UC61
+  usecase "6.2 Create Work Order" as UC62
+  usecase "6.3 Assign Work Order" as UC63
+  usecase "6.8 Verify Completed Work" as UC68
+  usecase "6.9 Cancel Work Order" as UC69
+  usecase "8.2 View Driver Breakdown" as UC82
+  usecase "8.3 Link Verified Reports" as UC83
+  usecase "8.4 Record Treatment" as UC84
+}
+
+RU -- UC12
+OM -- UC14
+OM -- UC34
+OM -- UC51
+OM -- UC52
+OM -- UC53
+OM -- UC54
+OM -- UC61
+OM -- UC62
+OM -- UC63
+OM -- UC68
+OM -- UC69
+UC63 -- TG
+
+UC52 ..> UC82 : <<include>>
+UC53 ..> UC82 : <<include>>
+UC61 ..> UC62 : <<include>>
+UC62 ..> UC83 : <<include>>
+UC68 ..> UC84 : <<include>>
+UC69 ..> UC63 : <<extend>>\n(work no longer required)
+
+note bottom of UC84
+  Writing a treatment record lowers the
+  cluster's next priority score (4.1.17).
+  This closes the loop.
+end note
+@enduml

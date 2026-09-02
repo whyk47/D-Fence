@@ -1,0 +1,64 @@
+@startuml D-Fence-Crew-and-System
+' Role view 3 of 3 — Cleaning Crew and Scheduler. Subset of use-case-diagram.puml, same IDs.
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam shadowing false
+
+actor "Registered User" as RU
+actor "Cleaning Crew Member" as CCM
+actor "Scheduler" as SCH
+actor "NEA Data Service" as NEA
+actor "Weather Data Service" as WX
+actor "OneMap" as ONEMAP
+actor "Resident" as RES
+
+CCM --|> RU
+
+rectangle "D-Fence — Field work" {
+  usecase "1.2 Sign In" as UC12
+  usecase "6.4 View Assigned Jobs" as UC64
+  usecase "6.5 Accept and Start Job" as UC65
+  usecase "6.6 Complete Job with Evidence" as UC66
+  usecase "6.7 Raise Issue on Job" as UC67
+}
+
+rectangle "D-Fence — Automated behaviour" {
+  usecase "7.1 Ingest Cluster Data" as UC71
+  usecase "7.2 Detect Cluster Change" as UC72
+  usecase "7.3 Ingest Rainfall Data" as UC73
+  usecase "7.4 Ingest Weather Forecast" as UC74
+  usecase "7.5 Compute Priority Scores" as UC75
+  usecase "7.6 Evaluate Alert Triggers" as UC76
+  usecase "7.7 Refresh Geocoding Token" as UC77
+  usecase "4.3 Notify Resident" as UC43
+}
+
+RU  -- UC12
+CCM -- UC64
+CCM -- UC65
+CCM -- UC66
+CCM -- UC67
+
+SCH -- UC71
+SCH -- UC73
+SCH -- UC74
+SCH -- UC75
+SCH -- UC76
+SCH -- UC77
+
+UC71 -- NEA
+UC73 -- WX
+UC74 -- WX
+UC77 -- ONEMAP
+UC43 -- RES
+
+UC67 ..> UC66 : <<extend>>\n(obstruction found)
+UC71 ..> UC72 : <<include>>
+UC76 ..> UC43 : <<include>>
+
+note right of UC75
+  Triggered by 7.1 completing and by
+  6.8 verifying a work order (8.5.3).
+end note
+@enduml

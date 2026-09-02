@@ -1,0 +1,283 @@
+@startuml D-Fence-DesignEntity
+' D-Fence — Design class model, entity and persistence layers (Lab 3 deliverable 2, part 1b)
+' Transformed from lab2/class-diagram-entity.puml. The 23 analysis entities keep their names;
+' what is added here is types, visibility, operations, container classes and the persistence
+' relationships — Fox pp. 341-345 heuristics 2, 5, 6 and 7.
+
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+hide circle
+
+package "Entity — domain model" #F7F7F7 {
+  class Account <<entity>> {
+    + id : Uuid
+    + email : string
+    - passwordHash : string
+    + emailVerified : boolean
+    + role : Role
+    + isActive : boolean
+    - failedAttempts : number
+    - lockedUntil : Date
+    + telegramChatId : string
+    + createdAt : Date
+    + isLocked(now : Date) : boolean
+    + canAssume(role : Role) : boolean
+  }
+
+  class SavedLocation <<entity>> {
+    + id : Uuid
+    + accountId : Uuid
+    + inputText : string
+    + point : GeoPoint
+    + label : LocationLabel
+    + name : string
+    + exposureStatus : ExposureStatus
+    + rain24hMm : number
+    + rain72hMm : number
+    + evaluatedAt : Date
+    + isExposed() : boolean
+  }
+
+  class Cluster <<entity>> {
+    + id : Uuid
+    + objectId : string
+    + locality : string
+    + boundary : Polygon
+    + caseSize : number
+    + premisesMix : PremisesMix
+    + caseDelta : number
+    + changeClass : ChangeClass
+    + forecastRegion : ForecastRegion
+    + heavyRainExpected : boolean
+    + trajectory : Trajectory
+    + firstSeenAt : Date
+    + lastUpdatedAt : Date
+    + isActive : boolean
+    + latestSnapshot() : ClusterSnapshot
+    + deltaOver(days : number) : number
+    + daysSinceLastTreatment(now : Date) : number
+  }
+
+  class ClusterSnapshot <<entity>> {
+    + id : Uuid
+    + clusterId : Uuid
+    + retrievedAt : Date
+    + caseSize : number
+    + boundary : Polygon
+    + differsFrom(other : ClusterSnapshot) : boolean
+  }
+
+  class PriorityScore <<entity>> {
+    + id : Uuid
+    + clusterId : Uuid
+    + computedAt : Date
+    + score : number
+    + tier : PriorityTier
+    + isDegraded : boolean
+    + excludedDrivers : Driver[]
+    + rank : number
+    + breakdown() : DriverContribution[]
+    + explain() : string
+  }
+
+  class DriverContribution <<entity>> {
+    + driver : Driver
+    + rawValue : number
+    + normalisedValue : number
+    + weight : number
+    + contribution : number
+  }
+
+  class Report <<entity>> {
+    + id : Uuid
+    + reporterId : Uuid
+    + point : GeoPoint
+    + type : ReportType
+    + description : string
+    + clusterId : Uuid
+    + status : ReportStatus
+    + corroborationCount : number
+    + submittedAt : Date
+    + moderatedAt : Date
+    + moderationReason : string
+    + isOpen() : boolean
+    + isVerified() : boolean
+  }
+
+  class WorkOrder <<entity>> {
+    + id : Uuid
+    + clusterId : Uuid
+    + assigneeId : Uuid
+    + sourceReportId : Uuid
+    + taskType : TaskType
+    + scheduledDate : IsoDate
+    + priority : PriorityTier
+    + instructions : string
+    - status : WorkOrderStatus
+    + startedAt : Date
+    + cancellationReason : string
+    + issueFlag : boolean
+    + issueReason : string
+    + currentStatus() : WorkOrderStatus
+    + applyStatus(next : WorkOrderStatus) : void
+    + isOverdue(now : Date) : boolean
+    + isTerminal() : boolean
+  }
+
+  class TreatmentRecord <<entity>> {
+    + id : Uuid
+    + clusterId : Uuid
+    + workOrderId : Uuid
+    + taskType : TaskType
+    + completionDate : IsoDate
+  }
+
+  class Alert <<entity>> {
+    + id : Uuid
+    + savedLocationId : Uuid
+    + triggerType : AlertTrigger
+    + sentAt : Date
+    + outcome : DeliveryOutcome
+    + payload : string
+  }
+
+  class AuditRecord <<entity>> {
+    + id : Uuid
+    + accountId : Uuid
+    + action : string
+    + targetEntity : string
+    + targetId : Uuid
+    + occurredAt : Date
+  }
+
+  note bottom of WorkOrder
+    status is private with no public setter.
+    applyStatus() is package-visible in effect: it is
+    called only by WorkOrderLifecycleController, which
+    validates the transition first. This is 8.3.2
+    enforced by encapsulation rather than by convention.
+  end note
+
+  note bottom of Cluster
+    The other twelve entity classes — Session,
+    AlertSubscription, ReportPhoto, Corroboration,
+    CompletionEvidence, RainfallStation, RainfallReading,
+    ClusterRainfall, RegionForecast, IngestionRun,
+    SourceHealth, Configuration — keep the attributes
+    given in lab1/submission/DATA-DICTIONARY.md and are
+    typed in src/entity. They are omitted here only to
+    keep the diagram readable.
+  end note
+}
+
+package "Value types (heuristic 5)" #FDFDF7 {
+  class GeoPoint <<value>> {
+    + latitude : number
+    + longitude : number
+    + distanceTo(other : GeoPoint) : number
+  }
+  class Polygon <<value>> {
+    + rings : GeoPoint[][]
+    + contains(p : GeoPoint) : boolean
+    + toGeoJson() : string
+  }
+  class PremisesMix <<value>> {
+    + homes : number
+    + publicPlaces : number
+    + constructionSites : number
+    + total() : number
+  }
+  class TierThresholds <<value>> {
+    + high : number
+    + medium : number
+  }
+}
+
+package "Persistence — repositories (heuristics 6 and 7)" #F7FAFD {
+  interface Repository <<interface>> {
+    + findById(id : Uuid) : Promise<T>
+    + save(entity : T) : Promise<T>
+    + delete(id : Uuid) : Promise<void>
+  }
+  class ClusterRepository {
+    + findActive() : Promise<Cluster[]>
+    + findContaining(p : GeoPoint) : Promise<Cluster>
+    + findWithin(p : GeoPoint, metres : number) : Promise<Cluster[]>
+    + upsertFromFeed(batch : ParsedBatch) : Promise<number>
+    + appendSnapshot(s : ClusterSnapshot) : Promise<void>
+  }
+  class ReportRepository {
+    + findByReporter(accountId : Uuid) : Promise<Report[]>
+    + findPendingModeration() : Promise<Report[]>
+    + findNearbyOpen(p : GeoPoint, metres : number) : Promise<Report[]>
+    + findByWorkOrder(id : Uuid) : Promise<Report[]>
+  }
+  class WorkOrderRepository {
+    + findByAssignee(accountId : Uuid) : Promise<WorkOrder[]>
+    + findByCluster(id : Uuid) : Promise<WorkOrder[]>
+    + findIssueFlagged() : Promise<WorkOrder[]>
+    + updateStatus(id : Uuid, next : WorkOrderStatus) : Promise<WorkOrder>
+  }
+  class PriorityScoreRepository {
+    + findLatestForAll() : Promise<PriorityScore[]>
+    + findHistory(clusterId : Uuid, days : number) : Promise<PriorityScore[]>
+  }
+  class AccountRepository
+  class SavedLocationRepository
+  class AlertRepository
+  class TreatmentRecordRepository
+  class IngestionRunRepository
+  class AuditRecordRepository
+
+  Repository <|.. ClusterRepository
+  Repository <|.. ReportRepository
+  Repository <|.. WorkOrderRepository
+  Repository <|.. PriorityScoreRepository
+  Repository <|.. AccountRepository
+  Repository <|.. SavedLocationRepository
+  Repository <|.. AlertRepository
+  Repository <|.. TreatmentRecordRepository
+  Repository <|.. IngestionRunRepository
+  Repository <|.. AuditRecordRepository
+
+  class Database <<infrastructure>> {
+    + query(sql : string, params : unknown[]) : Promise<Row[]>
+    + transaction(work : UnitOfWork) : Promise<void>
+  }
+  ClusterRepository --> Database
+  ReportRepository --> Database
+  WorkOrderRepository --> Database
+}
+
+Account "1" -- "0..5" SavedLocation
+Account "1" -- "0..*" Report
+Account "1" -- "0..*" WorkOrder
+Cluster "1" *-- "1..*" ClusterSnapshot
+Cluster "1" -- "0..*" PriorityScore
+Cluster "1" -- "0..*" Report
+Cluster "1" -- "0..*" WorkOrder
+Cluster "1" -- "0..*" TreatmentRecord
+PriorityScore "1" *-- "1..7" DriverContribution
+Report "0..*" -- "0..1" WorkOrder : actioned by >
+WorkOrder "0..*" -- "0..1" Report : raised from >
+WorkOrder "1" -- "0..1" TreatmentRecord
+SavedLocation "1" -- "0..*" Alert
+SavedLocation "0..*" -- "0..1" Cluster
+Cluster *-- Polygon
+Cluster *-- PremisesMix
+SavedLocation *-- GeoPoint
+Report *-- GeoPoint
+
+note top of Repository
+  **Repository.** One per aggregate root. The rest of the
+  system never writes SQL: it asks a repository. Three
+  consequences the design depends on — spatial predicates
+  (ST_Contains, ST_DWithin, ST_Distance) stay in the
+  database where 1.2.5, 3.1.8 and 5.1.7 belong; the
+  control classes are unit-testable against in-memory
+  fakes, which 10.6.3 requires; and the store could be
+  replaced without touching a control class.
+end note
+
+@enduml

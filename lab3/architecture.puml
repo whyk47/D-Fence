@@ -1,0 +1,95 @@
+@startuml D-Fence-Architecture
+' D-Fence — System architecture (Lab 3 deliverable 2, part 3)
+' Subsystem decomposition and deployment, per Bruegge ch. 6 and 7.
+' Style: three-tier client/server with a separate scheduling process.
+
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam linetype ortho
+
+node "Browser (Chrome / Edge / Safari)\n360-1920 px, 10.7.1, 10.7.2" as Browser {
+  component "D-Fence Web Client\nReact 18 + TypeScript + Vite" as Client {
+    component "Screens (27)\n<<boundary>>" as Screens
+    component "Route Guard\nrole -> permitted region" as Guard
+    component "API Client\nfetch + query cache" as ApiClient
+    component "Map View\nLeaflet + OneMap tiles" as MapView
+  }
+}
+
+node "Application Server\nNode 20 + Express + TypeScript" as AppServer {
+  component "HTTP Boundary\nroute handlers, DTO validation\n<<boundary>>" as Routes
+  component "Access Control\nAccessControlService (2.3.6)\n<<control>>" as AC
+  component "Domain Services\n15 control classes\n<<control>>" as Services
+  component "Domain Model\n23 entity classes\n<<entity>>" as Domain
+  component "Persistence\nrepositories + SQL\n<<persistence>>" as Persistence
+  component "External Gateways\n5 adapters\n<<boundary>>" as Gateways
+}
+
+node "Scheduler Process\nnode-cron, same image" as Scheduler {
+  component "Ingestion Jobs\nrainfall 5 min, clusters hourly,\nforecast 6 h, token 48 h" as Jobs
+}
+
+database "PostgreSQL 15 + PostGIS\n(Supabase)" as DB {
+  component "Relational tables\n+ spatial indexes" as Tables
+  component "Row-Level Security\ndefence in depth" as RLS
+}
+
+cloud "Object Storage\nSupabase Storage\nreport + evidence photos" as Storage
+
+cloud "External data sources" as External {
+  component "NEA dengue clusters\nGeoJSON" as NEA
+  component "data.gov.sg rainfall\n5-min, 97 stations" as Rain
+  component "data.gov.sg 24 h forecast\n5 macro-regions" as Forecast
+  component "OneMap\nSearch + tiles, 3-day token" as OneMap
+  component "Telegram Bot API" as Telegram
+}
+
+Screens --> Guard
+Guard --> ApiClient
+MapView --> ApiClient
+ApiClient --> Routes : HTTPS / JSON (10.3.2)
+MapView ..> OneMap : tile requests (browser-direct)
+
+Routes --> AC : authorise every request
+AC --> Services
+Routes --> Services
+Services --> Domain
+Services --> Persistence
+Persistence --> Tables
+Persistence --> RLS
+Services --> Gateways
+Services --> Storage : signed, non-enumerable URLs (10.3.5)
+
+Jobs --> Services : IngestionController, PriorityScoringEngine,\nAlertTriggerEvaluator
+Gateways --> NEA
+Gateways --> Rain
+Gateways --> Forecast
+Gateways --> OneMap
+Gateways --> Telegram
+
+note right of Scheduler
+  A separate process, not a timer inside the web
+  server. Two reasons: 10.2.3 requires ingestion to
+  resume automatically after a restart, which is
+  simpler when scheduling is not tied to request
+  serving; and a slow ingestion cycle must not
+  consume the request threads that 10.1.2 and
+  10.1.5 constrain.
+end note
+
+note bottom of AC
+  Every request passes through here before any
+  service runs. 2.3.6 and 10.3.3 require server-side
+  enforcement; RLS in the database is the second
+  layer, not the first, because the requirement is
+  about the server, not the store.
+end note
+
+note bottom of Persistence
+  Repository layer. Spatial predicates (ST_Contains,
+  ST_DWithin, ST_Distance) execute in the database,
+  not in application code: 1.2.5, 3.1.8 and 5.1.7 are
+  nearest-neighbour and point-in-polygon queries.
+end note
+
+@enduml

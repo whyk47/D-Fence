@@ -1,0 +1,244 @@
+@startuml D-Fence-DesignControl
+' D-Fence — Design class model, control layer (Lab 3 deliverable 2, part 1a)
+' Transformed from lab2/class-diagram-boundary-control.puml by the Fox pp. 341-345 heuristics.
+' Operation signatures are TypeScript. Visibility: + public, - private, # protected.
+
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+hide circle
+
+package "Startup and configuration" #FDF7F7 {
+  class AppConfigurator <<startup>> {
+    - container : ServiceContainer
+    + bootstrap() : Promise<void>
+    + registerRepositories() : void
+    + registerGateways() : void
+    + registerControllers() : void
+    + loadConfiguration() : Promise<ConfigSet>
+    + restorePersistentState() : Promise<void>
+    + shutdown() : Promise<void>
+  }
+  class ServiceContainer {
+    - registry : Map<string, unknown>
+    + register(token : string, factory : Factory) : void
+    + resolve(token : string) : object
+  }
+  class ConfigSet {
+    + driverWeights : Map<Driver, number>
+    + tierThresholds : TierThresholds
+    + ingestionIntervals : Map<SourceKind, number>
+    + get(key : string) : string
+    + requireNumber(key : string) : number
+  }
+  AppConfigurator *-- ServiceContainer
+  AppConfigurator --> ConfigSet : loads
+}
+
+package "Access control" #FAF7FD {
+  class AccessControlService <<control>> {
+    - policy : AccessPolicy
+    - auditRepo : AuditRecordRepository
+    + authorise(principal : Principal, action : Action, resource : ResourceRef) : Promise<void>
+    + may(principal : Principal, action : Action, resource : ResourceRef) : Promise<boolean>
+    - denyAndLog(principal : Principal, resource : ResourceRef) : Promise<never>
+  }
+  class AccessPolicy {
+    - matrix : Map<Role, Set<Permission>>
+    + permissionsFor(role : Role) : Set<Permission>
+    + isOwnershipScoped(action : Action) : boolean
+  }
+  class Principal {
+    + accountId : Uuid
+    + role : Role
+    + sessionId : Uuid
+  }
+  AccessControlService *-- AccessPolicy
+  AccessControlService ..> Principal
+}
+
+package "Scoring" #FAF7FD {
+  class PriorityScoringEngine <<control>> {
+    - strategies : Map<Driver, NormalisationStrategy>
+    - config : ConfigSet
+    - scoreRepo : PriorityScoreRepository
+    + computeScores(clusters : Cluster[]) : Promise<ClusterRanking>
+    + scoreOne(cluster : Cluster) : PriorityScore
+    - buildBreakdown(cluster : Cluster) : DriverContribution[]
+    - applyWeights(contributions : DriverContribution[]) : number
+    + assignTier(score : number) : PriorityTier
+    - degradeForMissingDrivers(drivers : Driver[]) : Driver[]
+  }
+  interface NormalisationStrategy <<interface>> {
+    + normalise(raw : number, ctx : NormalisationContext) : number
+    + driver() : Driver
+  }
+  class MinMaxNormalisation
+  class LogScaleNormalisation
+  class CappedLinearNormalisation
+  class RecencyDecayNormalisation
+  class PremisesMixNormalisation
+  NormalisationStrategy <|.. MinMaxNormalisation
+  NormalisationStrategy <|.. LogScaleNormalisation
+  NormalisationStrategy <|.. CappedLinearNormalisation
+  NormalisationStrategy <|.. RecencyDecayNormalisation
+  NormalisationStrategy <|.. PremisesMixNormalisation
+
+  class ClusterRanking <<container>> {
+    - ordered : PriorityScore[]
+    + add(score : PriorityScore) : void
+    + rank() : void
+    + top(n : number) : PriorityScore[]
+    + byTier(tier : PriorityTier) : PriorityScore[]
+    + size() : number
+  }
+  PriorityScoringEngine o--> "1..7" NormalisationStrategy : strategies
+  PriorityScoringEngine --> ClusterRanking : produces
+}
+
+package "Ingestion" #FAF7FD {
+  abstract class AbstractIngestionJob <<control>> {
+    # gateway : ExternalGateway
+    # runRepo : IngestionRunRepository
+    + run() : Promise<IngestionRun>
+    # {abstract} sourceKind() : SourceKind
+    # {abstract} fetch() : Promise<RawPayload>
+    # {abstract} parse(raw : RawPayload) : Promise<ParsedBatch>
+    # {abstract} persist(batch : ParsedBatch) : Promise<number>
+    # onFailure(error : Error) : Promise<void>
+    # markStale() : Promise<void>
+  }
+  class ClusterIngestionJob {
+    - clusterRepo : ClusterRepository
+    - detectChange(previous : ClusterSnapshot, current : ClusterSnapshot) : ChangeClass
+  }
+  class RainfallIngestionJob
+  class ForecastIngestionJob
+  AbstractIngestionJob <|-- ClusterIngestionJob
+  AbstractIngestionJob <|-- RainfallIngestionJob
+  AbstractIngestionJob <|-- ForecastIngestionJob
+
+  class IngestionController <<control>> {
+    - jobs : Map<SourceKind, AbstractIngestionJob>
+    - publisher : DomainEventPublisher
+    + runIngestion(kind : SourceKind) : Promise<IngestionRun>
+    + reportSourceHealth() : Promise<SourceHealth[]>
+    + resumeAfterRestart() : Promise<void>
+  }
+  IngestionController o--> AbstractIngestionJob
+}
+
+package "Domain events" #FAF7FD {
+  class DomainEventPublisher {
+    - subscribers : Map<EventKind, DomainEventSubscriber[]>
+    + subscribe(kind : EventKind, s : DomainEventSubscriber) : void
+    + publish(event : DomainEvent) : Promise<void>
+  }
+  interface DomainEventSubscriber <<interface>> {
+    + handles() : EventKind[]
+    + on(event : DomainEvent) : Promise<void>
+  }
+  class AlertTriggerEvaluator <<control>> {
+    - alertRepo : AlertRepository
+    - notifier : NotificationController
+    + evaluateTriggers(changed : Cluster[]) : Promise<Alert[]>
+    - isWithin150m(loc : SavedLocation, c : Cluster) : Promise<boolean>
+    - applyDailyCap(accountId : Uuid, candidates : Alert[]) : Alert[]
+  }
+  DomainEventSubscriber <|.. AlertTriggerEvaluator
+  DomainEventSubscriber <|.. PriorityScoringEngine
+  IngestionController --> DomainEventPublisher : publishes IngestionCompleted
+  DomainEventPublisher --> DomainEventSubscriber
+}
+
+package "Work-order lifecycle" #FAF7FD {
+  class WorkOrderLifecycleController <<control>> {
+    - table : WorkOrderTransitionTable
+    - woRepo : WorkOrderRepository
+    - treatmentRepo : TreatmentRecordRepository
+    - notifier : NotificationController
+    - scoring : PriorityScoringEngine
+    + isTransitionPermitted(from : WorkOrderStatus, to : WorkOrderStatus, by : Role) : boolean
+    + transition(id : Uuid, to : WorkOrderStatus, by : Principal) : Promise<WorkOrder>
+    + accept(id : Uuid, by : Principal) : Promise<WorkOrder>
+    + start(id : Uuid, by : Principal) : Promise<WorkOrder>
+    + raiseIssue(id : Uuid, reason : string, by : Principal) : Promise<WorkOrder>
+    + complete(id : Uuid, evidence : CompletionEvidence, by : Principal) : Promise<WorkOrder>
+    + verify(id : Uuid, by : Principal) : Promise<TreatmentRecord>
+    + rejectCompletion(id : Uuid, reason : string, by : Principal) : Promise<WorkOrder>
+  }
+  class WorkOrderTransitionTable {
+    - permitted : Map<WorkOrderStatus, TransitionRule[]>
+    + rulesFrom(status : WorkOrderStatus) : TransitionRule[]
+    + find(from : WorkOrderStatus, to : WorkOrderStatus) : TransitionRule
+  }
+  class TransitionRule {
+    + to : WorkOrderStatus
+    + actor : Role
+    + guard : Predicate
+    + requirement : string
+  }
+  class DispatchController <<control>> {
+    - lifecycle : WorkOrderLifecycleController
+    - woRepo : WorkOrderRepository
+    - reportRepo : ReportRepository
+    + proposeDailyList(date : IsoDate) : Promise<DispatchProposal>
+    + createWorkOrder(draft : WorkOrderDraft, by : Principal) : Promise<WorkOrder>
+    + linkVerifiedReports(id : Uuid, reportIds : Uuid[]) : Promise<void>
+    + assign(id : Uuid, crewId : Uuid, by : Principal) : Promise<WorkOrder>
+    + reassign(id : Uuid, crewId : Uuid, by : Principal) : Promise<WorkOrder>
+    + cancel(id : Uuid, reason : string, by : Principal) : Promise<WorkOrder>
+  }
+  WorkOrderLifecycleController *-- WorkOrderTransitionTable
+  WorkOrderTransitionTable *-- "0..*" TransitionRule
+  DispatchController --> WorkOrderLifecycleController : every status change
+}
+
+package "Remaining control classes (full signatures in src/control)" #FAF7FD {
+  class AuthenticationController <<control>>
+  class StaffAccountController <<control>>
+  class SavedLocationController <<control>>
+  class GeocodingController <<control>>
+  class ReportController <<control>>
+  class ModerationController <<control>>
+  class AlertSubscriptionController <<control>>
+  class NotificationController <<control>>
+  class DashboardController <<control>>
+}
+
+note top of AbstractIngestionJob
+  **Template Method.** run() is fixed: record start, fetch,
+  parse, persist, record outcome, publish event, and on
+  failure mark the source stale (10.2.2) without losing
+  stored data (10.2.4). The three sources differ only in
+  fetch/parse/persist, so 10.2.2 and 10.2.3 are implemented
+  once instead of three times.
+end note
+
+note right of NormalisationStrategy
+  **Strategy.** Requirement 4.1.4 obliges a normalisation
+  method per driver and never named one — this was open
+  item 1 from Lab 2. A strategy per driver settles it as a
+  design decision rather than a constant buried in the
+  engine, and 10.6.2 already puts the weights in
+  configuration.
+end note
+
+note bottom of WorkOrderTransitionTable
+  **Table-driven state machine, deliberately not the GoF
+  State pattern.** State would spread eight transitions
+  across eight classes; the rule in 8.3.2 would then be
+  true of the set but visible in no single place. The table
+  keeps isTransitionPermitted() as one method with a
+  bounded branch structure — which is also what makes it
+  the Lab 4 basis-path test subject.
+end note
+
+note bottom of DomainEventPublisher
+  **Observer.** Ingestion must trigger rescoring and alert
+  evaluation without the jobs knowing who listens. Adding a
+  subscriber later — the Lab 5 extensibility argument —
+  touches no existing job.
+end note
+
+@enduml

@@ -1,0 +1,146 @@
+@startuml D-Fence-DesignBoundary
+' D-Fence — Design class model, boundary layer (Lab 3 deliverable 2, part 1c)
+' Fox heuristic 1: analysis actors become interface classes. Two kinds of boundary exist here —
+' the HTTP surface the browser talks to, and the adapters to the five external services.
+
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+hide circle
+
+package "Boundary — HTTP surface (server)" #FDFDF7 {
+  class ExpressApp {
+    + mount(router : Router) : void
+    + listen(port : number) : void
+  }
+  abstract class RouteHandler <<boundary>> {
+    # ac : AccessControlService
+    + handle(req : Request, res : Response) : Promise<void>
+    # principalOf(req : Request) : Principal
+    # validate(schema : Schema, body : unknown) : object
+    # fail(res : Response, error : DomainError) : void
+  }
+  class AuthRoutes
+  class LocationRoutes
+  class ReportRoutes
+  class ClusterRoutes
+  class DashboardRoutes
+  class WorkOrderRoutes
+  class CrewRoutes
+  class AdminRoutes
+  RouteHandler <|-- AuthRoutes
+  RouteHandler <|-- LocationRoutes
+  RouteHandler <|-- ReportRoutes
+  RouteHandler <|-- ClusterRoutes
+  RouteHandler <|-- DashboardRoutes
+  RouteHandler <|-- WorkOrderRoutes
+  RouteHandler <|-- CrewRoutes
+  RouteHandler <|-- AdminRoutes
+  ExpressApp o--> RouteHandler
+}
+
+package "Boundary — external gateways (Adapter)" #F7FAFD {
+  interface ExternalGateway <<interface>> {
+    + sourceKind() : SourceKind
+    + isHealthy() : Promise<boolean>
+  }
+  interface ClusterSource <<interface>> {
+    + fetchClusters() : Promise<RawPayload>
+  }
+  interface RainfallSource <<interface>> {
+    + fetchStations() : Promise<RawPayload>
+    + fetchReadings(since : Date) : Promise<RawPayload>
+  }
+  interface ForecastSource <<interface>> {
+    + fetch24hForecast() : Promise<RawPayload>
+  }
+  interface GeocodingSource <<interface>> {
+    + search(address : string) : Promise<GeoPoint[]>
+  }
+  interface NotificationChannel <<interface>> {
+    + send(chatId : string, text : string) : Promise<DeliveryOutcome>
+  }
+
+  class NEAFeedGateway <<boundary>>
+  class RainfallGateway <<boundary>>
+  class ForecastGateway <<boundary>>
+  class OneMapGateway <<boundary>> {
+    - token : string
+    - tokenExpiry : Date
+    + requestToken() : Promise<void>
+    - ensureToken() : Promise<void>
+  }
+  class TelegramGateway <<boundary>>
+
+  ExternalGateway <|-- ClusterSource
+  ExternalGateway <|-- RainfallSource
+  ExternalGateway <|-- ForecastSource
+  ExternalGateway <|-- GeocodingSource
+  ClusterSource <|.. NEAFeedGateway
+  RainfallSource <|.. RainfallGateway
+  ForecastSource <|.. ForecastGateway
+  GeocodingSource <|.. OneMapGateway
+  NotificationChannel <|.. TelegramGateway
+
+  class HttpClient <<infrastructure>> {
+    + get(url : string, opts : RequestOptions) : Promise<Response>
+    + post(url : string, body : unknown) : Promise<Response>
+    - withRetry(fn : Thunk, attempts : number) : Promise<Response>
+    - withRateLimit(key : string) : Promise<void>
+  }
+  NEAFeedGateway --> HttpClient
+  RainfallGateway --> HttpClient
+  ForecastGateway --> HttpClient
+  OneMapGateway --> HttpClient
+  TelegramGateway --> HttpClient
+}
+
+package "Boundary — web client (React)" #FDFDF7 {
+  class AppShell {
+    + role : Role
+    + navigationFor(role : Role) : NavItem[]
+  }
+  class RouteGuard {
+    + require(role : Role) : Element
+  }
+  class ApiClient {
+    + get(path : string) : Promise<T>
+    + post(path : string, body : unknown) : Promise<T>
+    - onUnauthorised() : void
+  }
+  class ScreenComponent <<boundary>> {
+    + state : LoadState
+    + render() : Element
+  }
+  note right of ScreenComponent
+    27 screens (REQUIREMENTS.md 11.2), one component each,
+    in client/src/screens grouped by role. Every one carries
+    the four §11.4 sub-states — loading, empty, error, stale
+    — as a single LoadState value rather than four booleans,
+    so an impossible combination cannot be represented.
+  end note
+  AppShell o--> ScreenComponent
+  AppShell *-- RouteGuard
+  ScreenComponent --> ApiClient
+}
+
+note top of ExternalGateway
+  **Adapter.** Each gateway converts one external protocol
+  into the interface the control layer expects. Three things
+  follow: 10.4.6 rate limiting and retry live in one place
+  (HttpClient); a control class can be unit-tested against a
+  fake gateway, which 10.6.3 requires; and the two sources
+  still unverified — the NEA feed's update frequency and
+  OneMap Search — are each isolated behind one class, so a
+  surprise costs one file.
+end note
+
+note bottom of RouteHandler
+  Every handler calls AccessControlService.authorise()
+  before touching a control class. 2.3.6 and 10.3.3 require
+  enforcement on the server, and putting the call in the
+  abstract base is how the design makes forgetting it
+  visible rather than silent.
+end note
+
+@enduml

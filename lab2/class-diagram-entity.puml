@@ -1,0 +1,335 @@
+@startuml D-Fence-EntityClasses
+' D-Fence — Entity class diagram (analysis model)
+' SC2006/CZ2006 Lab 2 deliverable 3. Derived from ../lab1/submission/DATA-DICTIONARY.md.
+' Stereotype <<entity>> per Bruegge ch. 5. Design detail (visibility, keys, methods)
+' belongs to the Lab 3 design class model, not here.
+
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+hide circle
+hide methods
+
+package "People and access" {
+  class Account <<entity>> {
+    email
+    passwordHash
+    emailVerified
+    role : Role
+    isActive
+    failedAttempts
+    lockedUntil
+    telegramChatId
+    createdAt
+  }
+  class Session <<entity>> {
+    issuedAt
+    lastActiveAt
+    terminatedAt
+  }
+  class AuditRecord <<entity>> {
+    action
+    targetEntity
+    targetId
+    occurredAt
+  }
+  enum Role <<enumeration>> {
+    Resident
+    OperationsManager
+    CleaningCrew
+  }
+}
+
+package "Locations and alerts" {
+  class SavedLocation <<entity>> {
+    inputText
+    latitude
+    longitude
+    label : LocationLabel
+    name
+    exposureStatus : ExposureStatus
+    rain24hMm
+    rain72hMm
+    evaluatedAt
+  }
+  class AlertSubscription <<entity>> {
+    enabled
+    growthThreshold
+  }
+  class Alert <<entity>> {
+    triggerType : AlertTrigger
+    sentAt
+    outcome
+    payload
+  }
+  enum LocationLabel <<enumeration>> {
+    Home
+    Workplace
+    School
+    Other
+  }
+  enum ExposureStatus <<enumeration>> {
+    IN_CLUSTER
+    WITHIN_150M
+    CLEAR
+  }
+  enum AlertTrigger <<enumeration>> {
+    EnteredCluster
+    ClusterGrowth
+    HeavyRainForecast
+  }
+}
+
+package "Clusters and environment" {
+  class Cluster <<entity>> {
+    objectId
+    locality
+    boundary
+    caseSize
+    homes
+    publicPlaces
+    constructionSites
+    premisesMix
+    caseDelta
+    changeClass : ChangeClass
+    forecastRegion : ForecastRegion
+    heavyRainExpected
+    trajectory : Trajectory
+    firstSeenAt
+    lastUpdatedAt
+    isActive
+  }
+  class ClusterSnapshot <<entity>> {
+    retrievedAt
+    caseSize
+    homes
+    publicPlaces
+    constructionSites
+    boundary
+    fmelUpdD
+  }
+  class RainfallStation <<entity>> {
+    stationId
+    name
+    latitude
+    longitude
+  }
+  class RainfallReading <<entity>> {
+    readingAt
+    valueMm
+  }
+  class ClusterRainfall <<entity>> {
+    currentMm
+    accum24hMm
+    accum72hMm
+    isStale
+  }
+  class RegionForecast <<entity>> {
+    region : ForecastRegion
+    forecastText
+    heavyRainExpected
+    validFrom
+    validTo
+  }
+  enum ChangeClass <<enumeration>> {
+    NEW
+    GROWN
+    UNCHANGED
+    SHRUNK
+    CLOSED
+  }
+  enum ForecastRegion <<enumeration>> {
+    north
+    south
+    east
+    west
+    central
+  }
+  enum Trajectory <<enumeration>> {
+    Growing
+    Stable
+    Receding
+  }
+}
+
+package "Scoring" {
+  class PriorityScore <<entity>> {
+    computedAt
+    score
+    tier : PriorityTier
+    isDegraded
+    excludedDrivers
+    rank
+  }
+  class DriverContribution <<entity>> {
+    driver : Driver
+    rawValue
+    normalisedValue
+    weight
+    contribution
+  }
+  enum PriorityTier <<enumeration>> {
+    High
+    Medium
+    Low
+  }
+  enum Driver <<enumeration>> {
+    CaseSize
+    CaseGrowthDelta
+    Rainfall24h
+    Rainfall72h
+    VerifiedOpenReportCount
+    DaysSinceLastTreatment
+    PremisesMix
+  }
+}
+
+package "Community reporting" {
+  class Report <<entity>> {
+    latitude
+    longitude
+    type : ReportType
+    description
+    localityBinding
+    status : ReportStatus
+    corroborationCount
+    submittedAt
+    moderatedAt
+    moderationReason
+  }
+  class ReportPhoto <<entity>> {
+    file
+    visibility
+  }
+  class Corroboration <<entity>> {
+    confirmedAt
+  }
+  enum ReportType <<enumeration>> {
+    StandingWater
+    UnclearedRefuse
+    BlockedDrain
+    OvergrownVegetation
+    Other
+  }
+  enum ReportStatus <<enumeration>> {
+    Submitted
+    Verified
+    Rejected
+    Actioned
+    Closed
+  }
+}
+
+package "Dispatch and field work" {
+  class WorkOrder <<entity>> {
+    taskType : TaskType
+    scheduledDate
+    priority : PriorityTier
+    instructions
+    status : WorkOrderStatus
+    startedAt
+    isOverdue
+    cancellationReason
+    issueFlag
+    issueReason
+  }
+  class CompletionEvidence <<entity>> {
+    completedAt
+    taskPerformed
+    notes
+    rejectionReason
+  }
+  class TreatmentRecord <<entity>> {
+    taskType : TaskType
+    completionDate
+  }
+  enum TaskType <<enumeration>> {
+    Fogging
+    Larviciding
+    RefuseClearance
+    DrainClearance
+    Inspection
+  }
+  enum WorkOrderStatus <<enumeration>> {
+    Created
+    Assigned
+    Accepted
+    InProgress
+    Completed
+    Verified
+    Rejected
+    Cancelled
+  }
+}
+
+package "Operations support" {
+  class IngestionRun <<entity>> {
+    source
+    startedAt
+    endedAt
+    featureCount
+    outcome
+    trigger
+  }
+  class SourceHealth <<entity>> {
+    source
+    lastSuccessAt
+    isWarning
+  }
+  class Configuration <<entity>> {
+    key
+    value
+  }
+}
+
+' ---------- Associations ----------
+Account "1" -- "0..*" Session : holds >
+Account "1" -- "0..5" SavedLocation : watches >
+Account "1" -- "0..*" Report : submits >
+Account "1" -- "0..*" Corroboration : confirms >
+Account "1" -- "0..*" WorkOrder : assigned >
+Account "1" -- "0..*" AuditRecord : acts in >
+
+SavedLocation "1" -- "0..1" AlertSubscription : configured by >
+SavedLocation "1" -- "0..*" Alert : triggers >
+SavedLocation "0..*" -- "0..1" Cluster : exposed to >
+
+Cluster "1" *-- "1..*" ClusterSnapshot : history
+Cluster "1" -- "0..*" PriorityScore : scored as >
+Cluster "1" -- "0..1" ClusterRainfall : rainfall state >
+Cluster "1" -- "0..*" Report : contains >
+Cluster "1" -- "0..*" WorkOrder : targeted by >
+Cluster "1" -- "0..*" TreatmentRecord : treated by >
+Cluster "0..*" -- "0..1" RegionForecast : forecast by >
+note right of RegionForecast
+  Cluster.forecastRegion holds the enum value; this
+  association carries the forecast text and validity
+  period the flag was derived from (1.3.4, 1.3.5).
+end note
+
+ClusterRainfall "1" -- "3" RainfallStation : nearest >
+RainfallStation "1" -- "0..*" RainfallReading : reports >
+
+PriorityScore "1" *-- "1..7" DriverContribution : breakdown
+
+Report "1" *-- "0..3" ReportPhoto : evidence
+Report "1" -- "0..*" Corroboration : corroborated by >
+Report "0..*" -- "0..1" WorkOrder : actioned by >
+WorkOrder "0..*" -- "0..1" Report : raised from >
+
+WorkOrder "1" -- "0..1" CompletionEvidence : closed by >
+WorkOrder "1" -- "0..1" TreatmentRecord : produces >
+
+note bottom of TreatmentRecord
+  Written only when a work order is Verified (8.3.12).
+  Feeds the DaysSinceLastTreatment driver, so the next
+  score must be lower (4.1.17). This closes the loop.
+end note
+
+note bottom of Account
+  One role per account (2.2.1). The real NEA / town-council
+  split of task types is a recorded simplification, not an
+  omission: one Operations Manager, one Cleaning Crew.
+end note
+
+@enduml

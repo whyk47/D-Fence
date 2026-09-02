@@ -1,0 +1,51 @@
+@startuml D-Fence-Resident
+' Role view 1 of 3 — Resident. Subset of use-case-diagram.puml, same IDs.
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam shadowing false
+
+actor "Registered User" as RU
+actor "Resident" as RES
+actor "OneMap" as ONEMAP
+actor "Telegram Service" as TG
+actor "Scheduler" as SCH
+
+RES --|> RU
+
+rectangle "D-Fence — Resident" {
+  usecase "1.1 Register Account" as UC11
+  usecase "1.2 Sign In" as UC12
+  usecase "1.3 Reset Password" as UC13
+  usecase "2.1 Add Saved Location" as UC21
+  usecase "2.2 Remove Saved Location" as UC22
+  usecase "2.3 View Exposure Status" as UC23
+  usecase "3.1 Submit Breeding-Site Report" as UC31
+  usecase "3.2 Confirm Existing Report" as UC32
+  usecase "3.3 Track Own Reports" as UC33
+  usecase "4.1 Link Telegram Chat" as UC41
+  usecase "4.2 Configure Location Alerts" as UC42
+  usecase "4.3 Notify Resident" as UC43
+  usecase "8.1 Geocode Address" as UC81
+}
+
+RU  -- UC12
+RU  -- UC13
+RES -- UC11
+RES -- UC21
+RES -- UC22
+RES -- UC23
+RES -- UC31
+RES -- UC32
+RES -- UC33
+RES -- UC41
+RES -- UC42
+SCH -- UC43
+UC43 -- RES
+UC43 -- TG
+UC81 -- ONEMAP
+
+UC21 ..> UC81 : <<include>>
+UC31 ..> UC81 : <<include>>
+UC32 ..> UC31 : <<extend>>\n(duplicate detected)
+@enduml

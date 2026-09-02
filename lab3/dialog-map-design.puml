@@ -1,0 +1,155 @@
+@startuml D-Fence-DialogMapDesign
+' D-Fence — Refined dialog map (Lab 3 deliverable 2, part 2)
+' Lab 2's map showed screens and events. This one adds the design detail Lab 3 §3.1.4 asks for:
+' the client route each state occupies, and the control operation each transition invokes.
+' Screens are still the 27 of REQUIREMENTS.md 11.2; transitions are still only those of 11.3.
+
+skinparam shadowing false
+skinparam state {
+  BackgroundColor #FDFDF7
+  BorderColor #6B7280
+  FontSize 11
+}
+
+[*] --> Landing
+
+state "Landing\n/  (11.2.1)" as Landing
+state "Register\n/register  (11.2.2)" as Register
+state "Sign In\n/signin  (11.2.3)" as SignIn
+state "Password Reset Request\n/reset  (11.2.4)" as ResetRequest
+state "Password Reset\n/reset/:token  (11.2.4)" as ResetForm
+
+Landing --> Register : selectRegister
+Landing --> SignIn : selectSignIn
+Register --> SignIn : registered /\nAuthenticationController.register()
+Register --> Landing : cancel
+SignIn --> ResetRequest : forgotPassword
+ResetRequest --> ResetForm : openResetLink /\nrequestReset()
+ResetRequest --> SignIn : cancel
+ResetForm --> SignIn : passwordChanged / cancel /\ncompleteReset()
+SignIn --> ResidentMap : signInAsResident /\nsignIn() -> Principal{Resident}
+SignIn --> OpsDashboard : signInAsManager /\nsignIn() -> Principal{OperationsManager}
+SignIn --> MyJobs : signInAsCrew /\nsignIn() -> Principal{CleaningCrew}
+
+state "Resident  (RouteGuard: role = Resident)" as ResidentRegion {
+  state "Resident Map\n/map  (11.2.5)" as ResidentMap
+  state "My Locations\n/locations  (11.2.6)" as MyLocations
+  state "Add Location\n/locations/new  (11.2.7)" as AddLocation
+  state "Report a Site\n/report  (11.2.8)" as ReportSite
+  state "Duplicate Detected" as DuplicateModal <<modal>>
+  state "My Reports\n/reports  (11.2.9)" as MyReports
+  state "Report Detail\n/reports/:id  (11.2.10)" as ReportDetail
+  state "Alert Settings\n/alerts  (11.2.11)" as AlertSettings
+
+  ResidentMap --> MyLocations : openLocations /\nSavedLocationController.list()
+  ResidentMap --> ReportSite : reportHere
+  ResidentMap --> MyReports : openReports /\nReportController.listOwnReports()
+  ResidentMap --> AlertSettings : openAlerts
+  MyLocations --> AddLocation : addLocation
+  MyLocations --> ResidentMap : back
+  AddLocation --> MyLocations : saved /\nGeocodingController.geocode() then addLocation()
+  AddLocation --> MyLocations : cancelled
+  ReportSite --> DuplicateModal : duplicateDetected /\nReportController.detectDuplicate()
+  DuplicateModal --> MyReports : confirmExisting /\nconfirmExisting()
+  DuplicateModal --> ReportSite : dismiss
+  ReportSite --> MyReports : submitted /\nsubmitReport()
+  ReportSite --> ResidentMap : cancel
+  MyReports --> ReportDetail : selectReport
+  ReportDetail --> MyReports : back
+  MyReports --> ResidentMap : back
+  AlertSettings --> ResidentMap : back /\nAlertSubscriptionController.setLocationAlerts()
+}
+
+state "Operations Manager  (RouteGuard: role = OperationsManager)" as OpsRegion {
+  state "Operations Dashboard\n/ops  (11.2.12)" as OpsDashboard
+  state "Cluster Detail\n/ops/clusters/:id  (11.2.13)" as ClusterDetail
+  state "Moderation Queue\n/ops/moderation  (11.2.14)" as ModQueue
+  state "Report Review\n/ops/moderation/:id  (11.2.15)" as ReportReview
+  state "Dispatch Proposal\n/ops/dispatch  (11.2.16)" as DispatchProposal
+  state "Work Order Create\n/ops/work-orders/new  (11.2.17)" as WOCreate
+  state "Work Order List\n/ops/work-orders  (11.2.25)" as WOList
+  state "Work Order Detail\n/ops/work-orders/:id  (11.2.18)" as WODetail
+  state "Staff Accounts\n/ops/staff  (11.2.22)" as StaffAccounts
+  state "Data Sources\n/ops/sources  (11.2.23)" as DataSources
+
+  OpsDashboard --> ClusterDetail : selectCluster /\nDashboardController.buildPriorityTable()
+  OpsDashboard --> ModQueue : openModeration /\nModerationController.listQueue()
+  OpsDashboard --> DispatchProposal : openDispatch /\nDispatchController.proposeDailyList()
+  OpsDashboard --> WOList : openWorkOrders
+  WOList --> WODetail : selectWorkOrder
+  WOList --> WOCreate : newWorkOrder
+  WOList --> OpsDashboard : back
+  OpsDashboard --> StaffAccounts : openStaff
+  OpsDashboard --> DataSources : openSources /\nIngestionController.reportSourceHealth()
+  ClusterDetail --> WOCreate : createWorkOrder
+  ClusterDetail --> OpsDashboard : back
+  ModQueue --> ReportReview : selectReport
+  ReportReview --> ModQueue : verified / rejected /\nModerationController.verify() | reject()
+  ReportReview --> ModQueue : back
+  DispatchProposal --> WOCreate : editItem
+  DispatchProposal --> OpsDashboard : accepted / back
+  WOCreate --> WOList : created /\nDispatchController.createWorkOrder()
+  WOCreate --> ClusterDetail : cancel
+  WODetail --> WOList : back
+  WODetail --> WODetail : assign / reassign / cancel /\nDispatchController -> WorkOrderLifecycleController
+  WODetail --> WODetail : verify / rejectCompletion /\nWorkOrderLifecycleController
+  WODetail --> ClusterDetail : viewCluster
+  StaffAccounts --> OpsDashboard : back /\nStaffAccountController
+  DataSources --> OpsDashboard : back
+}
+
+state "Cleaning Crew  (RouteGuard: role = CleaningCrew)" as CrewRegion {
+  state "My Jobs\n/crew  (11.2.19)" as MyJobs
+  state "Job Detail\n/crew/jobs/:id  (11.2.20)" as JobDetail
+  state "Job Completion\n/crew/jobs/:id/complete  (11.2.21)" as JobCompletion
+
+  MyJobs --> JobDetail : selectJob
+  JobDetail --> MyJobs : back
+  JobDetail --> JobDetail : accept / start / raiseIssue /\nWorkOrderLifecycleController
+  JobDetail --> JobCompletion : completeJob
+  JobCompletion --> JobDetail : cancel / rejectedNoPhoto
+  JobCompletion --> MyJobs : submitted /\nWorkOrderLifecycleController.complete()
+}
+
+state "Not Authorised\nany route, 403  (11.2.24)" as NotAuthorised
+state "Not Found\nany route, 404  (11.2.24)" as NotFound
+
+ResidentRegion --> NotAuthorised : forbiddenResource /\nAccessControlService.denyAndLog()
+OpsRegion --> NotAuthorised : forbiddenResource
+CrewRegion --> NotAuthorised : forbiddenResource
+ResidentRegion --> NotFound : unknownRoute
+OpsRegion --> NotFound : unknownRoute
+CrewRegion --> NotFound : unknownRoute
+Landing --> NotFound : unknownRoute
+NotAuthorised --> Landing : back
+NotFound --> Landing : back
+
+ResidentRegion --> Landing : signOut /\nAuthenticationController.signOut()
+OpsRegion --> Landing : signOut
+CrewRegion --> Landing : signOut
+
+note right of DuplicateModal
+  Modal, permitted by 11.3.4 as a single confirmation.
+  Unsaved form input survives it (11.3.5): the form state
+  lives in the ReportSite component, not in the modal.
+end note
+
+note as N_self
+  **Self-transitions are new in this version.** A work-order
+  or job action changes entity state without changing screen,
+  so it is drawn as a transition from a state to itself rather
+  than omitted. Every one names the controller that performs
+  it, and every status change reaches
+  WorkOrderLifecycleController — including the three
+  DispatchController initiates.
+end note
+
+note as N11_4
+  **The four §11.4 sub-states — loading, empty, error, stale —
+  apply to every state above** and are held as one LoadState
+  value per screen component. Entering one is not a navigation
+  transition and does not change the route, so 11.3.2 still
+  holds: no undrawn navigation exists.
+end note
+
+@enduml
