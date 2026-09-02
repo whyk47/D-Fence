@@ -31,7 +31,7 @@ control.
 src/
   boundary/    http/ (RouteHandler + 8 route classes), gateways/ (5 adapters + HttpClient)
   control/     15 control classes, 3 coordinators, ingestion/ (Template Method), normalisation/ (Strategy)
-  ports/       ExternalGateway family, Repository, the DTOs that cross the boundary
+  ports/       ExternalGateway family, AuthProvider, ObjectStorage, Repository, the DTOs
   entity/      23 entity classes, 15 enumerations, 4 value types
   persistence/ 10 repositories, Database, migrations/
   config/      AppConfigurator, ServiceContainer, ConfigSet
@@ -92,6 +92,11 @@ The team decision this needs is only *who runs it and in which tool*. Everything
 5. **Lab 1 mockups B3–B12** remain outstanding.
 
 ## Standing notes
+
+**Authentication is Supabase Auth, decided 2026-09-03.** The first version of this skeleton
+hand-rolled it, which contradicted the Lab 2 stack decision without anyone deciding to. What stayed
+ours: the 2.1.2 and 2.1.3 password rules, the 2.1.10 lock-out, and the role and every §2.3 rule.
+`DESIGN-MODEL.md` §3.3 has the ownership table.
 
 **Renamed to D-Fence on 2026-09-03.** Every living document uses the new name. The verbatim AI-exercise
 records in `lab1/submission/AI-CRITIQUE.md` and `lab2/AI-TECH-STACK.md` keep the old one, with a note

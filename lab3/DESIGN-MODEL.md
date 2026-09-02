@@ -89,7 +89,8 @@ rule can enforce it, and it is now true of the code, verified by grepping every 
 
 ### 3.1 Persistent data storage
 
-**Decision: a relational store, PostgreSQL 15 with PostGIS, reached only through repositories.**
+**Decision: a relational store, PostgreSQL 15 with PostGIS on Supabase, reached only through
+repositories.**
 
 Bruegge's three candidates are flat files, a relational database, and an object-oriented database.
 Flat files fail immediately: 10.1.5 requires 50 concurrent users and the report and work-order flows
@@ -144,31 +145,46 @@ server is where the answer lives.
 user, the resource and the timestamp; `denyAndLog()` is the only path to a refusal, so the log cannot
 be skipped by forgetting to call it.
 
-### 3.3 One design issue is genuinely open: the authentication provider
+### 3.3 Authentication provider
 
-**Recorded here rather than settled, because it is a team decision with a real cost either way.**
+**Decision, 2026-09-03: Supabase Auth.** This restores the choice `lab2/AI-TECH-STACK.md` §5 and
+`BACKLOG.md` F2 had already made. The first Lab 3 skeleton had drifted away from it — hand-rolling
+registration, sign-in and a stored password hash — not by decision but because the design was written
+straight from the requirements. An adversarial review caught the divergence and the team settled it.
 
-`lab2/AI-TECH-STACK.md` §5 selected **Supabase** for authentication and photo storage, and
-`BACKLOG.md` F2 assumed the same. The Lab 3 skeleton does not use it: `AuthenticationController`
-hand-rolls registration and sign-in over an `Account` carrying a salted `passwordHash`, and
-`AccessControlService` enforces the §2.3 rules in application code. That divergence was not a
-decision — it emerged from writing the design against the requirements — and it is stated here
-rather than left for a grader to find.
+**Why.** The graded engineering in this project is the scoring engine and the work-order lifecycle,
+not password hashing, and the schedule is the binding constraint: 10.3.1 salted hashes, 2.1.5
+verification email, 2.1.11 single-use 30-minute reset links and 2.1.8/2.1.9 session issuance and
+expiry are roughly a week of undifferentiated work that a provider gives us on day one. The module
+constraint on hand-coded implementation is satisfied elsewhere and by a wide margin; authentication
+is peripheral infrastructure, which is exactly the category where a managed service is defensible.
 
-| | Supabase Auth | Hand-rolled (what the skeleton has) |
+**What the provider owns, and what stayed ours.** This is the part worth defending in a viva, because
+the split is not clean:
+
+| Requirement | Owner | Why |
 |---|---|---|
-| 10.3.1 salted hashes | Satisfied by the provider | We implement it, and must get it right |
-| §2.3 access rules | Row-level security maps closely | `AccessPolicy` matrix, already written |
-| Cost | Saves roughly a week of undifferentiated work | A week we do not obviously have |
-| Module constraint | Auth is peripheral infrastructure, so a managed provider is defensible | More hand-coded implementation, which the module rewards |
-| Demo risk | One more external dependency on the day | One fewer |
+| 10.3.1 salted hash, 2.1.7 authenticate against it | Supabase | Stored in the `auth` schema of the *same* PostgreSQL database. The hash still exists and is still ours to point at — what changed is which schema owns it and who wrote the hashing code |
+| 2.1.5 verification email, 2.1.11 reset link | Supabase | Deliverability and single-use token handling, neither of which we should be writing |
+| 2.1.8, 2.1.9 session issue and 24-hour expiry | Supabase | Configured, and the configured value is recorded in `ConfigSet` so it is checkable rather than assumed |
+| **2.1.2, 2.1.3 password rules** | **Ours** | Checked before the provider is called, so the error can name the rule that failed (10.5.3) |
+| **2.1.10 lock-out** | **Ours** | Specified precisely — five consecutive failures within fifteen minutes, locking for fifteen — and no provider setting expresses exactly that. `failedAttempts` and `lockedUntil` stay on `Account` |
+| **2.2.1 role, and all of §2.3** | **Ours** | Supabase answers *who is this*; `AccessControlService` answers *may they*. §2.3 is written per role, and the role is ours |
 
-**Recommendation: use Supabase Auth**, keeping `AuthenticationController` as the boundary the rest of
-the system talks to, so the provider stays swappable and the class diagram does not change. The
-graded engineering in this project is the scoring engine and the work-order lifecycle, not password
-hashing, and the schedule is the binding constraint. **This is the team's call and it is not made
-yet** — until it is, the skeleton keeps the hand-rolled path, because that is the one that compiles
-without an account.
+**What changed in the model.** `Account` loses `passwordHash` and gains `authUserId`: the row is now a
+profile joined to the provider identity, not a credential store. `AuthenticationController` keeps its
+signatures unchanged and delegates through a new `AuthProvider` port, so the class diagram did not
+have to move. Photographs go to Supabase Storage behind an `ObjectStorage` port, private buckets
+only, read through expiring signed URLs (10.3.5).
+
+**Why a port at all, when the provider is chosen.** Not for provider-independence in the abstract —
+that argument is usually a fiction. Two concrete reasons: a control class must be unit-testable with
+no network (10.6.3), and the ownership split in the table above needs somewhere to be visible.
+`AuthProvider` is where the boundary between their responsibility and ours is written down.
+
+**One operational rule that follows.** Supabase issues two keys. The service-role key bypasses
+row-level security and is server-side only; the browser gets the anon key. Both stay out of the
+repository (10.3.4). A service key in the client bundle would silently undo every §2.3 rule.
 
 ---
 
@@ -278,7 +294,7 @@ claim was verified against source before it was accepted. What changed:
 | `enums.ts` claimed 13 enumerations and defined 15 | **Fixed.** The two design-level additions are marked as such |
 | "15 control classes" undercounted `src/control/`, which holds 30 files | **Fixed.** The heuristic table now accounts for the pattern hierarchies |
 | `REQUIREMENTS.md` headers said Version 0.3 while carrying v0.4 additions | **Fixed** in the root and Lab 1 copies |
-| `BACKLOG.md` still assumed two roles and Supabase Auth, with no supersession note | **Fixed.** Note added; the auth question is now §3.3 above |
+| `BACKLOG.md` still assumed two roles and Supabase Auth, with no supersession note | **Fixed.** Note added — and the auth divergence it exposed was then settled in favour of Supabase (§3.3) |
 | `AI-TECH-STACK.md` claimed `REQUIREMENTS.md` names Supabase — it does not | **Fixed**, with the correction dated in place |
 | Zero implemented behaviour, against §3.4.1's "start implementing behaviour" | **Partly fixed.** The pure core is implemented: haversine distance, all five normalisation strategies, tier assignment, weighted scoring with degradation, ranking, the access matrix, weight validation, and the overdue and terminal predicates |
 

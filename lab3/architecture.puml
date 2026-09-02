@@ -34,7 +34,10 @@ database "PostgreSQL 15 + PostGIS\n(Supabase)" as DB {
   component "Row-Level Security\ndefence in depth" as RLS
 }
 
-cloud "Object Storage\nSupabase Storage\nreport + evidence photos" as Storage
+cloud "Supabase managed services" as SupaCloud {
+  component "Supabase Auth\ncredentials, verification,\nreset links, sessions" as SupaAuth
+  component "Supabase Storage\nreport + evidence photos\nprivate buckets only" as Storage
+}
 
 cloud "External data sources" as External {
   component "NEA dengue clusters\nGeoJSON" as NEA
@@ -59,6 +62,8 @@ Persistence --> Tables
 Persistence --> RLS
 Services --> Gateways
 Services --> Storage : signed, non-enumerable URLs (10.3.5)
+Services --> SupaAuth : register, sign in, reset (2.1.x)
+Routes --> SupaAuth : verify bearer token
 
 Jobs --> Services : IngestionController, PriorityScoringEngine,\nAlertTriggerEvaluator
 Gateways --> NEA
@@ -83,6 +88,9 @@ note bottom of AC
   enforcement; RLS in the database is the second
   layer, not the first, because the requirement is
   about the server, not the store.
+  Supabase Auth authenticates — it answers "who is
+  this". Authorisation, "may they", stays here: §2.3
+  is written per role, and the role is ours.
 end note
 
 note bottom of Persistence

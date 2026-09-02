@@ -53,7 +53,8 @@ not entered, and the computing requirement is cited.
 |---|---|---|---|
 | account_id | PK | System-generated | — |
 | email | text(254) | Unique across accounts; valid email form | 2.1.1, 2.1.4 |
-| password_hash | text | Hash only; plaintext is never stored | 2.1.7, 10.3.1 |
+| auth_user_id | text | Supabase Auth identity; unique | 2.1.1, 2.1.7 |
+| ~~password_hash~~ | — | **Superseded 2026-09-03.** Supabase Auth owns the credential and stores the salted hash in the `auth` schema of the same database. 2.1.7 and 10.3.1 are still satisfied; this table no longer holds the column. See `lab3/DESIGN-MODEL.md` §3.3 | 2.1.7, 10.3.1 |
 | email_verified | boolean | False until the verification link is used | 2.1.5, 2.1.6 |
 | role | enum | {Resident, Operations Manager, Cleaning Crew} — exactly one | 2.2.1 |
 | is_active | boolean | False blocks authentication | 2.2.4, 2.2.5 |

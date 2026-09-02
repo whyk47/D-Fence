@@ -13,7 +13,7 @@ package "Entity — domain model" #F7F7F7 {
   class Account <<entity>> {
     + id : Uuid
     + email : string
-    - passwordHash : string
+    + authUserId : AuthUserId
     + emailVerified : boolean
     + role : Role
     + isActive : boolean
@@ -150,6 +150,17 @@ package "Entity — domain model" #F7F7F7 {
     + targetId : Uuid
     + occurredAt : Date
   }
+
+  note bottom of Account
+    Supabase Auth owns the credential: there is no
+    passwordHash here. 2.1.7 and 10.3.1 are still met —
+    the hash lives in the auth schema of the same
+    database — but this row is a profile, joined to the
+    provider identity by authUserId.
+    failedAttempts and lockedUntil stay ours, because
+    2.1.10 is specified more precisely than any provider
+    setting expresses.
+  end note
 
   note bottom of WorkOrder
     status is private with no public setter.

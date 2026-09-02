@@ -60,6 +60,22 @@ package "Ports — external service interfaces (src/ports)" #F2F7F2 {
   interface NotificationChannel <<interface>> {
     + send(chatId : string, text : string) : Promise<DeliveryOutcome>
   }
+  interface AuthProvider <<interface>> {
+    + register(credentials) : Promise<AuthUserId>
+    + signIn(credentials) : Promise<AuthSession>
+    + signOut(token) : Promise<void>
+    + requestPasswordReset(email) : Promise<void>
+    + completePasswordReset(token, password) : Promise<void>
+    + verifyToken(token) : Promise<AuthUserId>
+    + createUser(credentials) : Promise<AuthUserId>
+    + disableUser(id) : Promise<void>
+    + deleteUser(id) : Promise<void>
+  }
+  interface ObjectStorage <<interface>> {
+    + upload(bucket, data, contentType) : Promise<StoredObject>
+    + signedUrl(bucket, key, ttlSeconds) : Promise<string>
+    + remove(bucket, key) : Promise<void>
+  }
 
 }
 
@@ -74,6 +90,14 @@ package "Boundary — external gateway adapters (src/boundary/gateways)" #F7FAFD
     - ensureToken() : Promise<void>
   }
   class TelegramGateway <<boundary>>
+  class SupabaseAuthGateway <<boundary>> {
+    - serviceKey : string
+  }
+  class SupabaseStorageGateway <<boundary>> {
+    - serviceKey : string
+  }
+  AuthProvider <|.. SupabaseAuthGateway
+  ObjectStorage <|.. SupabaseStorageGateway
 
   ExternalGateway <|-- ClusterSource
   ExternalGateway <|-- RainfallSource
@@ -141,6 +165,16 @@ note top of ExternalGateway
   against a fake port, which 10.6.3 requires; and the two
   sources still unverified — the NEA feed's update frequency
   and OneMap Search — are each isolated behind one adapter.
+end note
+
+note bottom of SupabaseAuthGateway
+  Decided 2026-09-03: Supabase Auth rather than
+  hand-rolled credentials. The port exists anyway,
+  because the split is not clean — 2.1.2, 2.1.3, the
+  2.1.10 lock-out and the 2.2.1 role stay in
+  AuthenticationController. See DESIGN-MODEL.md §3.3.
+  The service key bypasses row-level security and is
+  server-side only; the browser gets the anon key.
 end note
 
 note bottom of RouteHandler

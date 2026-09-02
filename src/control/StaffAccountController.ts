@@ -15,7 +15,7 @@ type DashboardOverview = unknown; type AttentionItem = unknown;
 export class StaffAccountController {
   // TODO: repositories and collaborators are injected by AppConfigurator.
 
-  /** Manager only. */
+  /** 2.2.3. Manager only. Creates the provider identity and the Account row together. */
   createStaffAccount(email: string, role: Role, by: Principal): Promise<Account> {
     throw new Error('not implemented');
   }
