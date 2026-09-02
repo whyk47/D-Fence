@@ -38,26 +38,36 @@ const HAS_EVIDENCE: Guard = (_wo) => {
 /** Cancellation carries a reason (8.3.18). */
 const HAS_CANCELLATION_REASON: Guard = (wo) => wo.cancellationReason !== null;
 
+/**
+ * A rejected completion carries a reason (8.3.10). The reason lives on the CompletionEvidence, not
+ * on the WorkOrder — a work order can be rejected, resumed and re-completed, so the reason belongs
+ * to the attempt it refers to.
+ */
+const HAS_REJECTION_REASON: Guard = (_wo) => {
+  // TODO(F8): read the CompletionEvidence attached to this work order and require rejectionReason.
+  throw new Error('not implemented');
+};
+
 export class WorkOrderTransitionTable {
   private readonly permitted: TransitionRule[] = [
     // Creation is not a transition — 8.3.15 sets the initial status. It is not in this table.
-    { from: WorkOrderStatus.Created, to: WorkOrderStatus.Assigned, actor: Role.OperationsManager, guard: ALWAYS, requirement: '8.2.x', assigneeOnly: false },
+    { from: WorkOrderStatus.Created, to: WorkOrderStatus.Assigned, actor: Role.OperationsManager, guard: ALWAYS, requirement: '8.2.1', assigneeOnly: false },
     { from: WorkOrderStatus.Created, to: WorkOrderStatus.Cancelled, actor: Role.OperationsManager, guard: HAS_CANCELLATION_REASON, requirement: '8.3.13, 8.3.18', assigneeOnly: false },
 
     { from: WorkOrderStatus.Assigned, to: WorkOrderStatus.Accepted, actor: Role.CleaningCrew, guard: ALWAYS, requirement: '8.3.4', assigneeOnly: true },
-    { from: WorkOrderStatus.Assigned, to: WorkOrderStatus.Assigned, actor: Role.OperationsManager, guard: ALWAYS, requirement: '8.2.x (reassignment)', assigneeOnly: false },
+    { from: WorkOrderStatus.Assigned, to: WorkOrderStatus.Assigned, actor: Role.OperationsManager, guard: ALWAYS, requirement: '8.2.5', assigneeOnly: false },
     { from: WorkOrderStatus.Assigned, to: WorkOrderStatus.Cancelled, actor: Role.OperationsManager, guard: HAS_CANCELLATION_REASON, requirement: '8.3.13, 8.3.18', assigneeOnly: false },
 
     { from: WorkOrderStatus.Accepted, to: WorkOrderStatus.InProgress, actor: Role.CleaningCrew, guard: ALWAYS, requirement: '8.3.5, 8.3.17', assigneeOnly: true },
-    { from: WorkOrderStatus.Accepted, to: WorkOrderStatus.Assigned, actor: Role.OperationsManager, guard: ALWAYS, requirement: '8.2.x (reassignment)', assigneeOnly: false },
+    { from: WorkOrderStatus.Accepted, to: WorkOrderStatus.Assigned, actor: Role.OperationsManager, guard: ALWAYS, requirement: '8.2.5', assigneeOnly: false },
     { from: WorkOrderStatus.Accepted, to: WorkOrderStatus.Cancelled, actor: Role.OperationsManager, guard: HAS_CANCELLATION_REASON, requirement: '8.3.13, 8.3.18', assigneeOnly: false },
 
     { from: WorkOrderStatus.InProgress, to: WorkOrderStatus.Completed, actor: Role.CleaningCrew, guard: HAS_EVIDENCE, requirement: '8.3.6, 8.3.7', assigneeOnly: true },
-    { from: WorkOrderStatus.InProgress, to: WorkOrderStatus.Assigned, actor: Role.OperationsManager, guard: ALWAYS, requirement: '8.2.x (reassignment)', assigneeOnly: false },
+    { from: WorkOrderStatus.InProgress, to: WorkOrderStatus.Assigned, actor: Role.OperationsManager, guard: ALWAYS, requirement: '8.2.5', assigneeOnly: false },
     { from: WorkOrderStatus.InProgress, to: WorkOrderStatus.Cancelled, actor: Role.OperationsManager, guard: HAS_CANCELLATION_REASON, requirement: '8.3.13, 8.3.18', assigneeOnly: false },
 
     { from: WorkOrderStatus.Completed, to: WorkOrderStatus.Verified, actor: Role.OperationsManager, guard: ALWAYS, requirement: '8.3.9, 8.3.12', assigneeOnly: false },
-    { from: WorkOrderStatus.Completed, to: WorkOrderStatus.Rejected, actor: Role.OperationsManager, guard: ALWAYS, requirement: '8.3.9, 8.3.10', assigneeOnly: false },
+    { from: WorkOrderStatus.Completed, to: WorkOrderStatus.Rejected, actor: Role.OperationsManager, guard: HAS_REJECTION_REASON, requirement: '8.3.9, 8.3.10', assigneeOnly: false },
 
     { from: WorkOrderStatus.Rejected, to: WorkOrderStatus.InProgress, actor: Role.CleaningCrew, guard: ALWAYS, requirement: '8.3.19, 8.3.20', assigneeOnly: true },
 

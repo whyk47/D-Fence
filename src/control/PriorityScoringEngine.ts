@@ -63,21 +63,50 @@ export class PriorityScoringEngine implements DomainEventSubscriber {
     throw new Error('not implemented');
   }
 
-  private applyWeights(_contributions: DriverContribution[]): number {
-    // TODO(F5): weights from ConfigSet; 4.1.6 requires them to sum to 1.0 — assert it here rather
-    // than trusting configuration, because a mis-set weight is silent otherwise.
-    throw new Error('not implemented');
+  /**
+   * Weighted sum of the contributions, expressed on 0-100.
+   * 4.1.6 requires the weights to sum to 1.0. That is asserted at configuration load
+   * (ConfigSet.validate), so by here the sum of the *present* weights is the share of the score
+   * that was computable: a degraded score is renormalised over the drivers that survived rather
+   * than quietly scoring low because a feed was down.
+   */
+  private applyWeights(contributions: DriverContribution[]): number {
+    if (contributions.length === 0) {
+      return 0;
+    }
+    const weightPresent = contributions.reduce((sum, c) => sum + c.weight, 0);
+    if (weightPresent <= 0) {
+      return 0;
+    }
+    const weighted = contributions.reduce((sum, c) => sum + c.normalisedValue * c.weight, 0);
+    return (weighted / weightPresent) * 100;
   }
 
   /**
    * Maps a score to a tier. The two thresholds are the Lab 4 boundary-value cases: a score exactly
    * on a threshold must land on one side deterministically, and this method is where that is decided.
    */
-  assignTier(_score: number): PriorityTier {
-    throw new Error('not implemented');
+  assignTier(score: number): PriorityTier {
+    // A score exactly on a threshold takes the HIGHER tier. Stated here because it is a decision,
+    // not an accident of comparison operators: 70.0 is High and 40.0 is Medium, and the Lab 4
+    // boundary-value cases are 39.9 / 40.0 / 40.1 and 69.9 / 70.0 / 70.1.
+    if (score >= this.config.tierThresholds.high) {
+      return PriorityTier.High;
+    }
+    if (score >= this.config.tierThresholds.medium) {
+      return PriorityTier.Medium;
+    }
+    return PriorityTier.Low;
   }
 
-  private degradeForMissingDrivers(_drivers: Driver[]): Driver[] {
-    throw new Error('not implemented');
+  /**
+   * @param available the drivers whose inputs were retrievable this cycle
+   * @returns the drivers that were excluded, which PriorityScore records so the dashboard can say so
+   *
+   * A missing driver is excluded and the score marked degraded — never treated as zero. A rainfall
+   * feed that is down must not read as a dry cluster (10.2.1, 10.2.2).
+   */
+  private degradeForMissingDrivers(available: Driver[]): Driver[] {
+    return Object.values(Driver).filter((d) => !available.includes(d));
   }
 }

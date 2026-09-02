@@ -1,5 +1,6 @@
 /**
- * D-Fence — the 13 enumerations of the entity model
+ * D-Fence — the entity model's enumerations: the 13 from the data dictionary, plus
+ * SourceKind and DeliveryOutcome, which are design-level and marked as such below
  * Stereotype: <<entity>>. Traces: lab1/submission/DATA-DICTIONARY.md §5
  */
 
@@ -113,7 +114,7 @@ export enum SourceKind {
   Geocoding = 'Geocoding',
 }
 
-/** Outcome of an outbound notification (4.3, 4.4). */
+/** Outcome of an outbound notification (6.1.11). Design-level, not in the data dictionary. */
 export enum DeliveryOutcome {
   Sent = 'Sent',
   Failed = 'Failed',

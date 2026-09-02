@@ -2,11 +2,11 @@
  * D-Fence — NEAFeedGateway (Adapter).
  * Stereotype: <<boundary>>. Traces: 1.1.x
  */
-import { ClusterSource } from './ExternalGateway';
+import { ClusterSource } from '../../ports/ExternalGateway';
 import { HttpClient } from './HttpClient';
 import { SourceKind } from '../../entity/enums';
 import { GeoPoint } from '../../entity/valueTypes';
-import { RawPayload } from './types';
+import { RawPayload } from '../../ports/types';
 
 export class NEAFeedGateway implements ClusterSource {
   constructor(private readonly http: HttpClient, private readonly baseUrl: string) {}

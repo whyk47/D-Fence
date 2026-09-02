@@ -2,11 +2,11 @@
  * D-Fence — ForecastGateway (Adapter).
  * Stereotype: <<boundary>>. Traces: 1.3.x
  */
-import { ForecastSource } from './ExternalGateway';
+import { ForecastSource } from '../../ports/ExternalGateway';
 import { HttpClient } from './HttpClient';
 import { SourceKind } from '../../entity/enums';
 import { GeoPoint } from '../../entity/valueTypes';
-import { RawPayload } from './types';
+import { RawPayload } from '../../ports/types';
 
 export class ForecastGateway implements ForecastSource {
   constructor(private readonly http: HttpClient, private readonly baseUrl: string) {}

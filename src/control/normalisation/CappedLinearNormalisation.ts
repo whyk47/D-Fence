@@ -4,15 +4,17 @@
  * Traces: 4.1.4.
  */
 import { Driver } from '../../entity/enums';
-import { NormalisationContext, NormalisationStrategy } from './NormalisationStrategy';
+import { NormalisationContext, NormalisationStrategy, clamp01 } from './NormalisationStrategy';
 
 export class CappedLinearNormalisation implements NormalisationStrategy {
   driver(): Driver {
     return Driver.Rainfall24h;
   }
 
-  normalise(_raw: number, _ctx: NormalisationContext): number {
-    // TODO(F5)
-    throw new Error('not implemented');
+  /** Above the cap, more rain does not mean more breeding risk — the driver saturates. */
+  private static readonly CAP_MM = 50;
+
+  normalise(raw: number, _ctx: NormalisationContext): number {
+    return clamp01(Math.max(0, raw) / CappedLinearNormalisation.CAP_MM);
   }
 }

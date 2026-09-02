@@ -2,11 +2,11 @@
  * D-Fence — OneMapGateway (Adapter).
  * Stereotype: <<boundary>>. Traces: 3.1.x, 8.1.x
  */
-import { GeocodingSource } from './ExternalGateway';
+import { GeocodingSource } from '../../ports/ExternalGateway';
 import { HttpClient } from './HttpClient';
 import { SourceKind } from '../../entity/enums';
 import { GeoPoint } from '../../entity/valueTypes';
-import { RawPayload } from './types';
+import { RawPayload } from '../../ports/types';
 
 export class OneMapGateway implements GeocodingSource {
   constructor(private readonly http: HttpClient, private readonly baseUrl: string) {}

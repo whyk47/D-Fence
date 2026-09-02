@@ -2,10 +2,9 @@
  * D-Fence — TreatmentRecordRepository.
  * Stereotype: <<persistence>>. Traces: 8.3.12
  */
-import { Repository } from './Repository';
+import { Repository } from '../ports/Repository';
 import { Database } from './Database';
 import { TreatmentRecord, Uuid, GeoPoint, SourceKind, WorkOrderStatus, ClusterSnapshot, SourceHealth } from '../entity';
-import { ParsedBatch } from '../boundary/gateways/types';
 
 export class TreatmentRecordRepository implements Repository<TreatmentRecord> {
   constructor(private readonly db: Database) {}
@@ -22,7 +21,7 @@ export class TreatmentRecordRepository implements Repository<TreatmentRecord> {
     throw new Error('not implemented');
   }
 
-  /** Feeds the DaysSinceLastTreatment driver (4.1.17). */
+  /** Feeds the DaysSinceLastTreatment driver (4.1.15, defaulting to 90 days under 4.1.16). */
   findLatestForCluster(clusterId: Uuid): Promise<TreatmentRecord | null> {
     // TODO
     throw new Error('not implemented');

@@ -9,8 +9,8 @@
 import { SourceKind } from '../../entity/enums';
 import { IngestionRun } from '../../entity/IngestionRun';
 import { IngestionRunRepository } from '../../persistence/IngestionRunRepository';
-import { ExternalGateway } from '../../boundary/gateways/ExternalGateway';
-import { ParsedBatch, RawPayload } from '../../boundary/gateways/types';
+import { ExternalGateway } from '../../ports/ExternalGateway';
+import { ParsedBatch, RawPayload } from '../../ports/types';
 
 export abstract class AbstractIngestionJob {
   constructor(

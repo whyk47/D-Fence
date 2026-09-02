@@ -15,10 +15,20 @@ export type IsoDate = string;
 export class GeoPoint {
   constructor(readonly latitude: number, readonly longitude: number) {}
 
-  /** Great-circle distance in metres. Used by 1.2.5 (nearest three rainfall stations). */
-  distanceTo(_other: GeoPoint): number {
-    // TODO(F4): haversine. Kept in application code deliberately — this one is not a query.
-    throw new Error('not implemented');
+  /**
+   * Great-circle distance in metres (haversine). Used by 1.2.5, nearest three rainfall stations.
+   * Kept in application code deliberately: unlike containment, this one runs over 97 stations held
+   * in memory, so a database round trip would cost more than the arithmetic saves.
+   */
+  distanceTo(other: GeoPoint): number {
+    const R = 6_371_000; // mean Earth radius, metres
+    const toRad = (d: number): number => (d * Math.PI) / 180;
+    const dLat = toRad(other.latitude - this.latitude);
+    const dLon = toRad(other.longitude - this.longitude);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(this.latitude)) * Math.cos(toRad(other.latitude)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
   }
 }
 

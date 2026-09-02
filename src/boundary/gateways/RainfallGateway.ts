@@ -2,11 +2,11 @@
  * D-Fence — RainfallGateway (Adapter).
  * Stereotype: <<boundary>>. Traces: 1.2.x
  */
-import { RainfallSource } from './ExternalGateway';
+import { RainfallSource } from '../../ports/ExternalGateway';
 import { HttpClient } from './HttpClient';
 import { SourceKind } from '../../entity/enums';
 import { GeoPoint } from '../../entity/valueTypes';
-import { RawPayload } from './types';
+import { RawPayload } from '../../ports/types';
 
 export class RainfallGateway implements RainfallSource {
   constructor(private readonly http: HttpClient, private readonly baseUrl: string) {}

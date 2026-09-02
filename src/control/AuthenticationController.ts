@@ -35,7 +35,7 @@ export class AuthenticationController {
     throw new Error('not implemented');
   }
 
-  /** 11.3.3 returns the user to Sign In. */
+  /** On success the user continues to Sign In — see the dialog map, ResetForm -> SignIn. */
   completeReset(token: string, password: string): Promise<void> {
     throw new Error('not implemented');
   }

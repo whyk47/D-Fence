@@ -2,10 +2,9 @@
  * D-Fence — AuditRecordRepository.
  * Stereotype: <<persistence>>. Traces: 2.3.8, 2.4.x
  */
-import { Repository } from './Repository';
+import { Repository } from '../ports/Repository';
 import { Database } from './Database';
 import { AuditRecord, Uuid, GeoPoint, SourceKind, WorkOrderStatus, ClusterSnapshot, SourceHealth } from '../entity';
-import { ParsedBatch } from '../boundary/gateways/types';
 
 export class AuditRecordRepository implements Repository<AuditRecord> {
   constructor(private readonly db: Database) {}

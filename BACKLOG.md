@@ -1,5 +1,14 @@
 # Dengue Prioritiser — Feature Backlog
 
+
+> **Partly superseded, 2026-09-03.** This backlog was written on 2026-09-01, before the requirements
+> decomposition and the Lab 2/3 models. Three things in it are out of date and the later documents win:
+> the application is now named **D-Fence**; the role model is **three roles** (Resident, Operations
+> Manager, Cleaning Crew), not `resident | planner`; and the **authentication provider is an open
+> decision** — this file assumes Supabase Auth, the Lab 3 skeleton currently hand-rolls it, and
+> `lab3/DESIGN-MODEL.md` §3.3 states the choice and its cost. The feature analysis, effort estimates
+> and build order below remain current.
+
 Written 2026-09-01. Shareable: https://claude.ai/code/artifact/9c6e5fdb-5865-465a-bfbf-d0187e191244
 
 ## Prioritisation basis: the marker is a TA

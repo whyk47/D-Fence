@@ -2,10 +2,9 @@
  * D-Fence — ReportRepository.
  * Stereotype: <<persistence>>. Traces: 5.1.x, 5.3.x, 8.3.21
  */
-import { Repository } from './Repository';
+import { Repository } from '../ports/Repository';
 import { Database } from './Database';
 import { Report, Uuid, GeoPoint, SourceKind, WorkOrderStatus, ClusterSnapshot, SourceHealth } from '../entity';
-import { ParsedBatch } from '../boundary/gateways/types';
 
 export class ReportRepository implements Repository<Report> {
   constructor(private readonly db: Database) {}

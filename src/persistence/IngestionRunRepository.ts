@@ -2,10 +2,9 @@
  * D-Fence — IngestionRunRepository.
  * Stereotype: <<persistence>>. Traces: 1.4.x
  */
-import { Repository } from './Repository';
+import { Repository } from '../ports/Repository';
 import { Database } from './Database';
 import { IngestionRun, Uuid, GeoPoint, SourceKind, WorkOrderStatus, ClusterSnapshot, SourceHealth } from '../entity';
-import { ParsedBatch } from '../boundary/gateways/types';
 
 export class IngestionRunRepository implements Repository<IngestionRun> {
   constructor(private readonly db: Database) {}

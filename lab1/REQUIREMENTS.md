@@ -1,6 +1,6 @@
 # D-Fence — Atomised Software Requirements
 
-Version 0.3 · drafted 2026-09-02 · status: DRAFT for team review
+Version 0.4 · drafted 2026-09-02, revised 2026-09-03 · status: DRAFT for team review
 Revised after adversarial review; findings and dispositions are recorded in §14.
 Project: NTU SC2006/CZ2006 team project (dengue sanitisation prioritiser)
 Working product name is a placeholder.

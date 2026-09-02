@@ -2,7 +2,7 @@
  * D-Fence — Telegram Bot API adapter.
  * Stereotype: <<boundary>>. Traces: 6.x, 8.2.4, 10.3.4 (token outside the repository).
  */
-import { NotificationChannel } from './ExternalGateway';
+import { NotificationChannel } from '../../ports/ExternalGateway';
 import { HttpClient } from './HttpClient';
 import { DeliveryOutcome } from '../../entity/enums';
 

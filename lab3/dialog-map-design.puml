@@ -83,13 +83,16 @@ state "Operations Manager  (RouteGuard: role = OperationsManager)" as OpsRegion 
   OpsDashboard --> DataSources : openSources /\nIngestionController.reportSourceHealth()
   ClusterDetail --> WOCreate : createWorkOrder
   ClusterDetail --> OpsDashboard : back
+  ModQueue --> OpsDashboard : back
   ModQueue --> ReportReview : selectReport
   ReportReview --> ModQueue : verified / rejected /\nModerationController.verify() | reject()
   ReportReview --> ModQueue : back
   DispatchProposal --> WOCreate : editItem
   DispatchProposal --> OpsDashboard : accepted / back
   WOCreate --> WOList : created /\nDispatchController.createWorkOrder()
-  WOCreate --> ClusterDetail : cancel
+  WOCreate --> WOList : cancel (entered from the list)
+  WOCreate --> ClusterDetail : cancel (entered from a cluster)
+  WOCreate --> DispatchProposal : cancel (entered from the proposal)
   WODetail --> WOList : back
   WODetail --> WODetail : assign / reassign / cancel /\nDispatchController -> WorkOrderLifecycleController
   WODetail --> WODetail : verify / rejectCompletion /\nWorkOrderLifecycleController
@@ -106,13 +109,14 @@ state "Cleaning Crew  (RouteGuard: role = CleaningCrew)" as CrewRegion {
   MyJobs --> JobDetail : selectJob
   JobDetail --> MyJobs : back
   JobDetail --> JobDetail : accept / start / raiseIssue /\nWorkOrderLifecycleController
+  JobDetail --> JobDetail : resume (Rejected to In Progress) /\nWorkOrderLifecycleController (8.3.20)
   JobDetail --> JobCompletion : completeJob
   JobCompletion --> JobDetail : cancel / rejectedNoPhoto
   JobCompletion --> MyJobs : submitted /\nWorkOrderLifecycleController.complete()
 }
 
-state "Not Authorised\nany route, 403  (11.2.24)" as NotAuthorised
-state "Not Found\nany route, 404  (11.2.24)" as NotFound
+state "Not Authorised\n/403  (11.2.24)" as NotAuthorised
+state "Not Found\n/404  (11.2.24)" as NotFound
 
 ResidentRegion --> NotAuthorised : forbiddenResource /\nAccessControlService.denyAndLog()
 OpsRegion --> NotAuthorised : forbiddenResource
@@ -150,6 +154,16 @@ note as N11_4
   value per screen component. Entering one is not a navigation
   transition and does not change the route, so 11.3.2 still
   holds: no undrawn navigation exists.
+end note
+
+note as N_return
+  **11.3.3 and 11.3.8 audit, 2026-09-03.** Every screen except Sign In
+  now has a return path; Moderation Queue gained the one it never had,
+  and Work Order Create returns to whichever of its three entry screens
+  it was opened from rather than always to Cluster Detail. Not Authorised
+  and Not Found now carry distinct URLs. All four defects were inherited
+  from the Lab 2 map and survived the first refinement pass; an
+  adversarial review found them.
 end note
 
 @enduml

@@ -2,10 +2,9 @@
  * D-Fence — AlertRepository.
  * Stereotype: <<persistence>>. Traces: 6.x
  */
-import { Repository } from './Repository';
+import { Repository } from '../ports/Repository';
 import { Database } from './Database';
 import { Alert, Uuid, GeoPoint, SourceKind, WorkOrderStatus, ClusterSnapshot, SourceHealth } from '../entity';
-import { ParsedBatch } from '../boundary/gateways/types';
 
 export class AlertRepository implements Repository<Alert> {
   constructor(private readonly db: Database) {}

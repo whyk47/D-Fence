@@ -103,6 +103,15 @@ export class WorkOrderLifecycleController {
     throw new Error('not implemented');
   }
 
+  /**
+   * 8.3.19, 8.3.20. Rejected → In Progress: the assigned crew member resumes work on a completion
+   * their manager rejected. Rejected is a resting state a screen can display, not a status the
+   * system passes through, so this is a real user action and it is drawn on the dialog map.
+   */
+  resume(_id: Uuid, _by: Principal): Promise<WorkOrder> {
+    throw new Error('not implemented');
+  }
+
   /** 8.3.10, 8.3.11. Completed → Rejected with a reason, and notifies the assigned crew member. */
   rejectCompletion(_id: Uuid, _reason: string, _by: Principal): Promise<WorkOrder> {
     throw new Error('not implemented');

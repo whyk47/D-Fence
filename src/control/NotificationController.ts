@@ -24,7 +24,7 @@ export class NotificationController {
     throw new Error('not implemented');
   }
 
-  /** A failed send must not lose the alert (10.2.4). */
+  /** 6.1.11: retry twice at five-minute intervals before recording the outcome as FAILED. */
   retryDelivery(alertId: Uuid): Promise<DeliveryOutcome> {
     throw new Error('not implemented');
   }

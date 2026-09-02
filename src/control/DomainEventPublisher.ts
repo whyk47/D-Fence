@@ -31,8 +31,9 @@ export class DomainEventPublisher {
   }
 
   /**
-   * A subscriber that throws must not fail the publisher: 10.2.1 keeps the system available
-   * when one part is broken, and a failed rescore must not roll back a successful ingestion.
+   * A subscriber that throws must not fail the publisher — a failed rescore must not roll back a
+   * successful ingestion. This is a design choice in the spirit of 10.2.1 rather than a direct
+   * implementation of it: 10.2.1 is about external sources, and this is about in-process fan-out.
    */
   publish(_event: DomainEvent): Promise<void> {
     throw new Error('not implemented');

@@ -5,7 +5,7 @@
        import { SourceKind, ChangeClass } from '../../entity/enums';
        import { ClusterSnapshot } from '../../entity/ClusterSnapshot';
        import { AbstractIngestionJob } from './AbstractIngestionJob';
-       import { ParsedBatch, RawPayload } from '../../boundary/gateways/types';
+       import { ParsedBatch, RawPayload } from '../../ports/types';
 
        export class ClusterIngestionJob extends AbstractIngestionJob {
          protected sourceKind(): SourceKind {

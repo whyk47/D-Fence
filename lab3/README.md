@@ -10,7 +10,7 @@
 | 2 | Design model — class diagram | `class-diagram-design-entity.puml`, `-control.puml`, `-boundary.puml` | **Done.** Explained in `DESIGN-MODEL.md` |
 | 2 | Design model — dialog map | `dialog-map-design.puml` | **Done.** Routes, operations and self-transitions added |
 | 2 | Design model — system architecture | `architecture.puml` + `DESIGN-MODEL.md` §2 | **Done.** Three tiers plus a separate scheduler process |
-| 3 | Application skeleton code | `../src/`, `../client/src/` | **Done.** 124 files, typechecks clean under `tsc --strict` |
+| 3 | Application skeleton code | `../src/`, `../client/src/` | **Done.** 128 files, typechecks clean under `tsc --strict`; the pure core is implemented, not only stubbed |
 | 4 | AI project-initialisation PDF + zip | — | **Not started.** See below — it needs the team, not just the model |
 
 ## The design model in one paragraph
@@ -29,22 +29,29 @@ control.
 
 ```
 src/
-  boundary/   http/ (RouteHandler + 8 route classes), gateways/ (5 adapters + HttpClient)
-  control/    15 control classes, 3 coordinators, ingestion/ (Template Method), normalisation/ (Strategy)
-  entity/     23 entity classes, 13 enumerations, 4 value types
+  boundary/    http/ (RouteHandler + 8 route classes), gateways/ (5 adapters + HttpClient)
+  control/     15 control classes, 3 coordinators, ingestion/ (Template Method), normalisation/ (Strategy)
+  ports/       ExternalGateway family, Repository, the DTOs that cross the boundary
+  entity/      23 entity classes, 15 enumerations, 4 value types
   persistence/ 10 repositories, Database, migrations/
-  config/     AppConfigurator, ServiceContainer, ConfigSet
+  config/      AppConfigurator, ServiceContainer, ConfigSet
 client/src/
-  screens/    27 screen components, grouped by role
-  lib/        LoadState (the four §11.4 sub-states as one value), ApiClient
-  app/        AppShell, RouteGuard
+  screens/     27 screen components, grouped by role
+  lib/         LoadState (the four §11.4 sub-states as one value), ApiClient
+  app/         AppShell, RouteGuard
 ```
 
 Packaged by stereotype, as lab §3.4.2 requires. The dependency rule is one-directional — **boundary →
-control → entity, and control → persistence** — and nothing violates it today.
+control → persistence, everything may import `ports/` and `entity/`, nothing imports `boundary/`** —
+and it is now true of the code. It was not in the first version: the gateway interfaces sat in
+`boundary/`, so control imported boundary while `DESIGN-MODEL.md` claimed it did not. The `ports/`
+layer is that fix. See `DESIGN-MODEL.md` §8.
 
 Every public class and method carries a docstring naming the requirement it serves, per lab §3.4.3.
-Bodies throw `not implemented`: this is the skeleton, and §3.4.1 puts behaviour next.
+**The pure, dependency-free logic is implemented** — haversine distance, all five normalisation
+strategies, tier assignment, the weighted sum with driver degradation, ranking, the access-control
+matrix, weight validation, and the overdue and terminal predicates. Everything that needs a database,
+an HTTP call or a clock still throws `not implemented`, which is where §3.4.1 continues.
 
 ```
 npm install

@@ -22,8 +22,22 @@ export class ConfigSet {
     throw new Error('not implemented');
   }
 
-  /** 4.1.6: weights must sum to 1.0. Checked here, at load, not at scoring time. */
+  /**
+   * 4.1.6: the weights must sum to 1.0. Checked at load rather than at scoring time, because a
+   * mis-set weight that is only noticed during a scoring cycle has already produced wrong output.
+   * The tolerance is for floating-point addition, not for sloppy configuration.
+   */
   validate(): void {
-    throw new Error('not implemented');
+    const weights = [...this.driverWeights.values()];
+    if (weights.length === 0) {
+      throw new Error('no driver weights configured (4.1.5)');
+    }
+    const sum = weights.reduce((a, b) => a + b, 0);
+    if (Math.abs(sum - 1) > 1e-9) {
+      throw new Error(`driver weights sum to ${sum}, must sum to 1.0 (4.1.6)`);
+    }
+    if (this.tierThresholds.medium >= this.tierThresholds.high) {
+      throw new Error('tier thresholds must satisfy medium < high');
+    }
   }
 }

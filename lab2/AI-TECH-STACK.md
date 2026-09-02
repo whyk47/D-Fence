@@ -22,9 +22,11 @@ Lab 2 deliverable 6 (procedure §3.4). Version 0.1, 2026-09-02.
 | **Prompt (verbatim, as specified in lab §3.4.2)** | *"Based on the uploaded design materials, recommend a technology stack appropriate for an entry-level software engineering team."* |
 
 **A disclosure that belongs at the top of this report.** The team is not choosing a stack from
-nothing. `REQUIREMENTS.md` already names Supabase for authentication and storage, the Telegram Bot
-API for alerts, and OneMap for geocoding and map tiles, because those choices were made during
-requirements work and constrain the requirements themselves. This report therefore does two things:
+nothing. `REQUIREMENTS.md` already names the Telegram Bot API for alerts and OneMap for geocoding and
+map tiles, because those choices were made during requirements work and constrain the requirements
+themselves. Supabase was chosen earlier still, in `BACKLOG.md` (F2), and is *not* named in
+`REQUIREMENTS.md` — an earlier version of this sentence said it was, which was wrong and is corrected
+here (2026-09-03). This report therefore does two things:
 it records the AI's recommendation as the lab asks, and it evaluates that recommendation against
 decisions the team had already taken. Where the AI agrees, that is corroboration; where it differs,
 §3 says which we are following and why.

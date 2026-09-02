@@ -4,15 +4,20 @@
  * Traces: 4.1.4.
  */
 import { Driver } from '../../entity/enums';
-import { NormalisationContext, NormalisationStrategy } from './NormalisationStrategy';
+import { NormalisationContext, NormalisationStrategy, clamp01 } from './NormalisationStrategy';
 
 export class MinMaxNormalisation implements NormalisationStrategy {
   driver(): Driver {
     return Driver.CaseSize;
   }
 
-  normalise(_raw: number, _ctx: NormalisationContext): number {
-    // TODO(F5)
-    throw new Error('not implemented');
+  normalise(raw: number, ctx: NormalisationContext): number {
+    const span = ctx.observedMax - ctx.observedMin;
+    if (span <= 0) {
+      // Every cluster shares one value, so this driver separates nothing today. Returning 0
+      // rather than 0.5 keeps a flat driver from contributing a constant to every score.
+      return 0;
+    }
+    return clamp01((raw - ctx.observedMin) / span);
   }
 }

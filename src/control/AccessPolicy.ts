@@ -12,13 +12,55 @@ export type Action = string;
 export type Permission = string;
 export type ResourceRef = { kind: string; id?: string; ownerId?: string };
 
-export class AccessPolicy {
-  private readonly matrix = new Map<Role, Set<Permission>>();
+/**
+ * Actions whose answer is not "may this role" but "may this principal, for this object".
+ * 2.3.1 and 2.3.2 are ownership questions; keeping the list here keeps the matrix small.
+ */
+const OWNERSHIP_SCOPED: ReadonlySet<Action> = new Set([
+  'savedLocation:read',
+  'savedLocation:write',
+  'report:readIdentified',
+  'workOrder:readAssigned',
+]);
 
-  permissionsFor(_role: Role): Set<Permission> {
-    // TODO(F2): 2.3.3 (Resident denied ops dashboard and all work orders),
-    // 2.3.4 (Manager reads all), 2.3.5 (Crew reads only their assigned work orders).
-    throw new Error('not implemented');
+export class AccessPolicy {
+  private readonly matrix = new Map<Role, Set<Permission>>([
+    // 2.3.1, 2.3.2: own saved locations and own reports. 2.3.3: no dashboard, no work orders.
+    [
+      Role.Resident,
+      new Set<Permission>([
+        'cluster:read',
+        'savedLocation:read',
+        'savedLocation:write',
+        'report:create',
+        'report:readIdentified',
+        'alert:configure',
+      ]),
+    ],
+    // 2.3.4: all reports, scores, work orders and crew records.
+    [
+      Role.OperationsManager,
+      new Set<Permission>([
+        'cluster:read',
+        'report:readAll',
+        'report:moderate',
+        'priorityScore:read',
+        'workOrder:readAll',
+        'workOrder:write',
+        'staff:manage',
+        'dashboard:read',
+        'sourceHealth:read',
+      ]),
+    ],
+    // 2.3.5: only work orders assigned to that member — hence workOrder:readAssigned, not readAll.
+    [
+      Role.CleaningCrew,
+      new Set<Permission>(['cluster:read', 'workOrder:readAssigned', 'workOrder:progress']),
+    ],
+  ]);
+
+  permissionsFor(role: Role): Set<Permission> {
+    return this.matrix.get(role) ?? new Set<Permission>();
   }
 
   /**
@@ -27,7 +69,7 @@ export class AccessPolicy {
    * Modelling ownership as a property of the action keeps the matrix small and the check in
    * one place.
    */
-  isOwnershipScoped(_action: Action): boolean {
-    throw new Error('not implemented');
+  isOwnershipScoped(action: Action): boolean {
+    return OWNERSHIP_SCOPED.has(action);
   }
 }

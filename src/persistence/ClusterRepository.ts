@@ -2,10 +2,10 @@
  * D-Fence — ClusterRepository.
  * Stereotype: <<persistence>>. Traces: 1.1.x, 1.2.5, 3.1.8, 5.1.7
  */
-import { Repository } from './Repository';
+import { Repository } from '../ports/Repository';
 import { Database } from './Database';
 import { Cluster, Uuid, GeoPoint, SourceKind, WorkOrderStatus, ClusterSnapshot, SourceHealth } from '../entity';
-import { ParsedBatch } from '../boundary/gateways/types';
+import { ParsedBatch } from '../ports/types';
 
 export class ClusterRepository implements Repository<Cluster> {
   constructor(private readonly db: Database) {}

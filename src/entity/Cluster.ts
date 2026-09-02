@@ -40,7 +40,7 @@ export class Cluster {
     throw new Error('not implemented');
   }
 
-  /** Feeds the DaysSinceLastTreatment driver (4.1.17). */
+  /** Days since the most recent verified treatment record (4.1.15); 90 when there is none (4.1.16). */
   daysSinceLastTreatment(now: Date): number {
     // TODO
     throw new Error('not implemented');

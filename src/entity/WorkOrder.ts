@@ -44,13 +44,24 @@ applyStatus(next: WorkOrderStatus): void {
   this.status = next;
 }
 
-/** 8.3.x: past its scheduled date and not in a terminal state. */
-isOverdue(_now: Date): boolean {
-  throw new Error('not implemented');
+/**
+ * 8.3.14: the scheduled date has passed and the status is not Completed, Verified or Cancelled.
+ * Note that Rejected IS overdue-able — a rejected completion is work still outstanding (8.3.19).
+ */
+isOverdue(now: Date): boolean {
+  const settled: WorkOrderStatus[] = [
+    WorkOrderStatus.Completed,
+    WorkOrderStatus.Verified,
+    WorkOrderStatus.Cancelled,
+  ];
+  if (settled.includes(this.status)) {
+    return false;
+  }
+  return this.scheduledDate < now.toISOString().slice(0, 10);
 }
 
-/** Verified, Rejected or Cancelled — no transition leaves these. */
+/** Verified and Cancelled — the state table gives them no outgoing transition. */
 isTerminal(): boolean {
-  throw new Error('not implemented');
+  return this.status === WorkOrderStatus.Verified || this.status === WorkOrderStatus.Cancelled;
 }
 }

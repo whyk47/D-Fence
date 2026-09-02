@@ -27,7 +27,7 @@ deliberately, and each is checkable against the diagrams.
 | 1 | Change actors to interface classes | The three human actors became `RouteGuard`-protected screen components; the two system actors (NEA feed, Scheduler) became gateway interfaces and a scheduler process | `class-diagram-design-boundary.puml`, `architecture.puml` |
 | 2 | Add actor domain classes | `Account` already existed for all three human actors; `SourceHealth` and `IngestionRun` are the domain record of the system actors | entity diagram |
 | 3 | Add a startup class | `AppConfigurator` — builds the container, registers repositories, gateways and controllers, loads configuration, restores persistent state, resumes ingestion | control diagram |
-| 4 | Convert or add controllers and coordinators | The 15 analysis control classes carried over; **three coordinators added** — `DomainEventPublisher`, `WorkOrderTransitionTable`, `ServiceContainer` | control diagram |
+| 4 | Convert or add controllers and coordinators | The 15 analysis control classes carried over; **three coordinators added** — `DomainEventPublisher`, `WorkOrderTransitionTable`, `ServiceContainer`. The patterns below add ten more classes (4 ingestion jobs, 6 normalisation strategies), so `src/control/` holds 30 files against the analysis model's 15 control classes | control diagram |
 | 5 | Add classes for data types | Four value types promoted from attributes: `GeoPoint`, `Polygon`, `PremisesMix`, `TierThresholds`. The 13 enumerations were already first-class in Lab 2 | entity diagram |
 | 6 | Convert or add container classes | `ClusterRanking` (the ordered priority list, with `rank()` and `byTier()`), and the ten repositories, which are containers over persistent collections | entity diagram |
 | 7 | Convert or add engineering relationships | Realization throughout: `NormalisationStrategy`, `ExternalGateway` and its four sub-interfaces, `Repository`, `DomainEventSubscriber`. Generalization for `AbstractIngestionJob` and `RouteHandler` | all three |
@@ -59,18 +59,29 @@ and 10.1.5 constrain response time under 50 concurrent users, which a 60-second 
 
 ```
 src/
-  boundary/   route handlers, DTO validation, and the five external gateways
-  control/    the 15 control classes plus the three coordinators
-  entity/     the 23 domain classes, 13 enumerations, 4 value types
-  persistence/ repositories, the Database wrapper, SQL migrations
-  config/     AppConfigurator, ServiceContainer, ConfigSet
+  boundary/    route handlers, DTO validation, and the five external gateway adapters
+  control/     the 15 control classes, 3 coordinators, 4 ingestion jobs, 6 normalisation strategies
+  ports/       interfaces and the data that crosses them: ExternalGateway, Repository, RawPayload
+  entity/      the 23 domain classes, 15 enumerations, 4 value types
+  persistence/ repository implementations, the Database wrapper, SQL migrations
+  config/      AppConfigurator, ServiceContainer, ConfigSet
 ```
 
 The dependency rule is one-directional and is the architecture's only hard constraint: **boundary →
-control → entity, and control → persistence.** Nothing in `entity/` imports from `control/`; nothing
-in `control/` imports from `boundary/`. This is 10.6.1 made structural rather than aspirational, and
-it is mechanically checkable — a lint rule can enforce it, and the Lab 4 test suite depends on it,
-because a control class that reached into a route handler could not be unit-tested.
+control → persistence, with every layer permitted to import `ports/` and `entity/`, and nothing at
+all importing `boundary/`.** Nothing in `entity/` imports from `control/`; nothing in `control/`,
+`persistence/` or `ports/` imports from `boundary/`.
+
+**The `ports/` layer exists because the first version of this rule was false.** The ingestion jobs
+and the repositories imported their gateway interfaces from `boundary/gateways/`, so control did
+import boundary — while this document asserted it did not. An adversarial review caught it. Moving
+the *interfaces* to `ports/` and leaving the *adapters* in `boundary/` fixes the direction rather
+than the sentence: the control layer depends on an abstraction of the outside world, and the concrete
+gateway depends on that same abstraction. That is dependency inversion, and it is what makes 10.6.3
+achievable — a control class can be tested against a fake port with no HTTP anywhere.
+
+This is 10.6.1 made structural rather than aspirational, and it is mechanically checkable: a lint
+rule can enforce it, and it is now true of the code, verified by grepping every import in `src/`.
 
 ---
 
@@ -132,6 +143,32 @@ server is where the answer lives.
 **Refusals are logged.** 2.3.8 requires every authorisation error to be recorded with the requesting
 user, the resource and the timestamp; `denyAndLog()` is the only path to a refusal, so the log cannot
 be skipped by forgetting to call it.
+
+### 3.3 One design issue is genuinely open: the authentication provider
+
+**Recorded here rather than settled, because it is a team decision with a real cost either way.**
+
+`lab2/AI-TECH-STACK.md` §5 selected **Supabase** for authentication and photo storage, and
+`BACKLOG.md` F2 assumed the same. The Lab 3 skeleton does not use it: `AuthenticationController`
+hand-rolls registration and sign-in over an `Account` carrying a salted `passwordHash`, and
+`AccessControlService` enforces the §2.3 rules in application code. That divergence was not a
+decision — it emerged from writing the design against the requirements — and it is stated here
+rather than left for a grader to find.
+
+| | Supabase Auth | Hand-rolled (what the skeleton has) |
+|---|---|---|
+| 10.3.1 salted hashes | Satisfied by the provider | We implement it, and must get it right |
+| §2.3 access rules | Row-level security maps closely | `AccessPolicy` matrix, already written |
+| Cost | Saves roughly a week of undifferentiated work | A week we do not obviously have |
+| Module constraint | Auth is peripheral infrastructure, so a managed provider is defensible | More hand-coded implementation, which the module rewards |
+| Demo risk | One more external dependency on the day | One fewer |
+
+**Recommendation: use Supabase Auth**, keeping `AuthenticationController` as the boundary the rest of
+the system talks to, so the provider stays swappable and the class diagram does not change. The
+graded engineering in this project is the scoring engine and the work-order lifecycle, not password
+hashing, and the schedule is the binding constraint. **This is the team's call and it is not made
+yet** — until it is, the skeleton keeps the hand-rolled path, because that is the one that compiles
+without an account.
 
 ---
 
@@ -218,3 +255,40 @@ so the Lab 4 basis-path tests can be named after requirements rather than after 
 3. **OneMap Search — still not test-pulled.**
 4. **The AI project-initialisation exercise (§3.3) is not done** — see `lab3/README.md` for why it
    has to be run in a fresh session and what it needs from the team.
+
+---
+
+## 8. Adversarial review, 2026-09-03
+
+Two critics on disjoint axes — internal modelling correctness, and lab compliance and risk. Every
+claim was verified against source before it was accepted. What changed:
+
+| Finding | Disposition |
+|---|---|
+| The stated dependency rule was false: `control/` and `persistence/` imported gateway interfaces from `boundary/` | **Fixed structurally.** New `ports/` layer; the rule is now true of the code, not only of this document |
+| `AlertTriggerEvaluator` was drawn as an Observer subscriber and implemented none of the interface | **Fixed.** `handles()` and `on()` added |
+| Four transition rules cited `8.2.x`, which is not a requirement number, contradicting this document's claim that every rule carries one | **Fixed.** 8.2.1 for assignment, 8.2.5 for reassignment |
+| The Completed to Rejected rule had no guard, so 8.3.10's required reason was unenforced | **Fixed.** `HAS_REJECTION_REASON` added |
+| `Cluster.daysSinceLastTreatment` cited 4.1.17 (the score must fall) instead of 4.1.15 and 4.1.16 (how the value is computed) | **Fixed** in both places it appeared |
+| `NotificationController.retryDelivery` cited 10.2.4; the requirement that actually governs retry is 6.1.11, which was cited nowhere | **Fixed** |
+| The dialog map had no Rejected to In Progress transition, though 8.3.20 and the transition table both have it — an 11.3.1 violation | **Fixed** on the map, and `resume()` added to the controller |
+| Moderation Queue had no return path to the dashboard (11.3.3) — inherited from Lab 2 and missed by the first refinement pass | **Fixed** |
+| Work Order Create returned to Cluster Detail from all three of its entry points (11.3.3) | **Fixed.** It now returns to whichever screen opened it |
+| Not Authorised and Not Found were annotated "any route" against 11.3.8's distinct-URL rule | **Fixed.** `/403` and `/404` |
+| `enums.ts` claimed 13 enumerations and defined 15 | **Fixed.** The two design-level additions are marked as such |
+| "15 control classes" undercounted `src/control/`, which holds 30 files | **Fixed.** The heuristic table now accounts for the pattern hierarchies |
+| `REQUIREMENTS.md` headers said Version 0.3 while carrying v0.4 additions | **Fixed** in the root and Lab 1 copies |
+| `BACKLOG.md` still assumed two roles and Supabase Auth, with no supersession note | **Fixed.** Note added; the auth question is now §3.3 above |
+| `AI-TECH-STACK.md` claimed `REQUIREMENTS.md` names Supabase — it does not | **Fixed**, with the correction dated in place |
+| Zero implemented behaviour, against §3.4.1's "start implementing behaviour" | **Partly fixed.** The pure core is implemented: haversine distance, all five normalisation strategies, tier assignment, weighted scoring with degradation, ranking, the access matrix, weight validation, and the overdue and terminal predicates |
+
+**Not accepted.** The reviewer objected that `architecture.puml` draws control to gateways. It does,
+and that is correct at the architectural level: the control layer does call out to external services.
+The finding was really about *where the interfaces live in the source tree*, which the `ports/` layer
+now settles. The architecture diagram is unchanged because the runtime relationship it depicts was
+never in doubt.
+
+**One finding could not be fixed here, and is passed to the team.** The repository has a single
+commit by a single author. The module's individual mark is team mark times peer-review weight, and a
+supervisor reads commit history as evidence of who did what. Nothing in this document repairs that;
+only the team committing their own work under their own names will.

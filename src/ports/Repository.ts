@@ -1,6 +1,7 @@
 /**
  * D-Fence — repository contract (Fox pp. 341-345, heuristics 6 and 7).
- * One repository per aggregate root; nothing outside this package writes SQL.
+ * One repository per aggregate root; nothing outside the persistence package writes SQL.
+ * Layer: ports — the interface. The implementations stay in persistence/.
  */
 import { Uuid } from '../entity/valueTypes';
 

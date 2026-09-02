@@ -2,10 +2,9 @@
  * D-Fence — SavedLocationRepository.
  * Stereotype: <<persistence>>. Traces: 3.1.x
  */
-import { Repository } from './Repository';
+import { Repository } from '../ports/Repository';
 import { Database } from './Database';
 import { SavedLocation, Uuid, GeoPoint, SourceKind, WorkOrderStatus, ClusterSnapshot, SourceHealth } from '../entity';
-import { ParsedBatch } from '../boundary/gateways/types';
 
 export class SavedLocationRepository implements Repository<SavedLocation> {
   constructor(private readonly db: Database) {}

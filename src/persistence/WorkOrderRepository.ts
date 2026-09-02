@@ -2,10 +2,9 @@
  * D-Fence — WorkOrderRepository.
  * Stereotype: <<persistence>>. Traces: 8.1.x, 8.3.x, 7.5.5
  */
-import { Repository } from './Repository';
+import { Repository } from '../ports/Repository';
 import { Database } from './Database';
 import { WorkOrder, Uuid, GeoPoint, SourceKind, WorkOrderStatus, ClusterSnapshot, SourceHealth } from '../entity';
-import { ParsedBatch } from '../boundary/gateways/types';
 
 export class WorkOrderRepository implements Repository<WorkOrder> {
   constructor(private readonly db: Database) {}
