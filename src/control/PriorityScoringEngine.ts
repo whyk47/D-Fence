@@ -1,6 +1,6 @@
 /**
  * D-Fence — the priority scoring engine.
- * Stereotype: <<control>>. Traces: 4.1.x, 7.2.x, 10.1.3, 10.6.2.
+ * Stereotype: <<control>>. Traces: 4.1.1-4.1.21, 7.2.x, 10.1.3, 10.6.2.
  *
  * The computational core, and the class the module's "data processing" criterion is judged on.
  * Designated Lab 4 subject for equivalence-class and boundary-value testing: the tier thresholds
@@ -50,8 +50,9 @@ export class PriorityScoringEngine implements DomainEventSubscriber {
 
   /**
    * One cluster's score: build the seven contributions, weight them, sum, assign a tier.
-   * A driver whose input is unavailable is excluded and the score marked degraded (4.1.x) rather
-   * than silently treated as zero — a missing rainfall feed must not read as a dry cluster.
+   * A driver whose source is stale is excluded (4.1.12), the score is marked DEGRADED (4.1.13) and
+   * every excluded driver is named alongside it (4.1.20) — never silently treated as zero, because a
+   * missing rainfall feed must not read as a dry cluster.
    */
   scoreOne(_cluster: Cluster): PriorityScore {
     throw new Error('not implemented');
@@ -64,11 +65,18 @@ export class PriorityScoringEngine implements DomainEventSubscriber {
   }
 
   /**
-   * Weighted sum of the contributions, expressed on 0-100.
-   * 4.1.6 requires the weights to sum to 1.0. That is asserted at configuration load
-   * (ConfigSet.validate), so by here the sum of the *present* weights is the share of the score
-   * that was computable: a degraded score is renormalised over the drivers that survived rather
-   * than quietly scoring low because a feed was down.
+   * 4.1.7: the weighted sum of the normalised drivers, on a 0-100 scale to one decimal place.
+   *
+   * 4.1.6 requires the configured weights to sum to 1.0, asserted at load in ConfigSet.validate().
+   * So the sum of the *present* weights here is the share of the score that was computable, and
+   * dividing by it is 4.1.19 — renormalising the remaining weights to 1.0 after a driver is
+   * excluded under 4.1.12. Without that division a stale rainfall feed would not merely remove a
+   * driver, it would push every cluster's score down and reorder the whole dashboard.
+   *
+   * The rounding is part of the requirement, not presentation: 4.1.7 says one decimal place, and
+   * rounding here rather than in the UI means the stored score and the displayed score are the
+   * same number — which matters because 4.1.11 keeps the score as history and 4.1.17 compares
+   * scores across cycles.
    */
   private applyWeights(contributions: DriverContribution[]): number {
     if (contributions.length === 0) {
@@ -79,12 +87,15 @@ export class PriorityScoringEngine implements DomainEventSubscriber {
       return 0;
     }
     const weighted = contributions.reduce((sum, c) => sum + c.normalisedValue * c.weight, 0);
-    return (weighted / weightPresent) * 100;
+    return Math.round((weighted / weightPresent) * 1000) / 10;
   }
 
   /**
-   * Maps a score to a tier. The two thresholds are the Lab 4 boundary-value cases: a score exactly
-   * on a threshold must land on one side deterministically, and this method is where that is decided.
+   * 4.1.8: High at 70.0 or above, Medium from 40.0 to 69.9, Low below 40.0. The thresholds
+   * themselves come from configuration (4.1.9), not from constants here.
+   *
+   * 4.1.8 is written in a way that leaves no ambiguity at the boundary — "70.0 or above" — and this
+   * method is where that reading is committed to. It is the Lab 4 boundary-value subject.
    */
   assignTier(score: number): PriorityTier {
     // A score exactly on a threshold takes the HIGHER tier. Stated here because it is a decision,
