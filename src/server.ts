@@ -24,6 +24,10 @@ import {
   InMemoryPriorityScoreStore,
   InMemoryRainfallStore,
 } from './persistence/memory/InMemoryStores';
+import { InMemoryTreatmentRecordStore, InMemoryWorkOrderStore, RecordingNotifier } from './persistence/memory/InMemoryWorkOrderStores';
+import { WorkOrderTransitionTable } from './control/WorkOrderTransitionTable';
+import { WorkOrderLifecycleController } from './control/WorkOrderLifecycleController';
+import { DispatchController } from './control/DispatchController';
 import { AccessControlService } from './control/AccessControlService';
 import { AccessPolicy } from './control/AccessPolicy';
 import { DashboardController, principalFor } from './control/DashboardController';
@@ -44,6 +48,9 @@ async function main(): Promise<void> {
   const runs = new InMemoryIngestionRunStore();
   const scores = new InMemoryPriorityScoreStore();
   const audit = new InMemoryAuditStore();
+  const workOrders = new InMemoryWorkOrderStore();
+  const treatments = new InMemoryTreatmentRecordStore();
+  const notifier = new RecordingNotifier();
 
   const clusterJob = new ClusterIngestionJob(
     new NEAFeedGateway(
@@ -87,7 +94,9 @@ async function main(): Promise<void> {
       inputs.set(cluster.id, {
         rainfall24h: rain?.accum24hMm,
         rainfall72h: rain?.accum72hMm,
-        daysSinceLastTreatment: 90,
+        // 4.1.15/4.1.16 — measured from the last verified treatment now that work orders exist,
+        // defaulting to 90 days when a cluster has never been treated.
+        daysSinceLastTreatment: await treatments.daysSinceLastTreatment(cluster.id, now),
       });
     }
     await engine.computeScores(active, inputs, now);
@@ -106,7 +115,17 @@ async function main(): Promise<void> {
   setInterval(() => void cycle().catch((e: unknown) => console.error('cycle failed:', e)), Math.min(clusterInterval, rainInterval));
 
   const ac = new AccessControlService(new AccessPolicy(), audit);
-  const dashboard = new DashboardController(ac, clusters, scores, runs);
+  const dashboard = new DashboardController(ac, clusters, scores, runs, workOrders);
+  const lifecycle = new WorkOrderLifecycleController(
+    new WorkOrderTransitionTable(),
+    workOrders,
+    treatments,
+    notifier,
+    // 8.5.3 — a verified work order is reflected in the next cycle; here, immediately.
+    { rescoreCluster: async () => cycle('MANUAL') },
+  );
+  const dispatch = new DispatchController(ac, lifecycle, workOrders, clusters, scores, notifier);
+  void dispatch;
 
   const app = new ExpressApp();
   app.mount(new DashboardRoutes(ac, dashboard));

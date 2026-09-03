@@ -6,9 +6,10 @@
  *
  * 1. **It reads stored scores; it never rescores for display** (7.2.1). A dashboard that recomputed
  *    would show numbers that never existed in the history 4.1.11 keeps, and the two would drift.
- * 2. **A count that cannot be computed yet is `null`, not 0.** Reports and work orders are not
- *    implemented, and a zero would read as "none outstanding" — a false all-clear on the panel whose
- *    whole job is to raise attention. Every such field is typed `number | null`.
+ * 2. **A count that cannot be computed yet is `null`, not 0.** Reports do not exist yet, and a zero
+ *    would read as "none outstanding" — a false all-clear on the panel whose whole job is to raise
+ *    attention. Every such field is typed `number | null`. Work-order counts became real on
+ *    2026-09-03; the report count has not.
  * 3. **Authorisation happens here, not only at the route** (2.3.4). The route calls it too; putting
  *    it in the control class means a second caller — a scheduled export, a test — cannot bypass it.
  */
@@ -16,7 +17,8 @@ import { PriorityTier, Driver, SourceKind, Role } from '../entity/enums';
 import { Uuid } from '../entity/valueTypes';
 import { Cluster } from '../entity/Cluster';
 import { PriorityScore } from '../entity/PriorityScore';
-import { ClusterStore, IngestionRunStore, PriorityScoreStore } from '../ports/Stores';
+import { ClusterStore, IngestionRunStore, PriorityScoreStore, WorkOrderStore } from '../ports/Stores';
+import { WorkOrder } from '../entity/WorkOrder';
 import { AccessControlService } from './AccessControlService';
 import { Principal } from './Principal';
 
@@ -81,6 +83,8 @@ export class DashboardController {
     private readonly clusters: ClusterStore,
     private readonly scores: PriorityScoreStore,
     private readonly runs: IngestionRunStore,
+    /** Optional so the dashboard predates work orders rather than being blocked by them. */
+    private readonly workOrders: WorkOrderStore | null = null,
   ) {}
 
   /** 7.1.x. */
@@ -88,6 +92,7 @@ export class DashboardController {
     await this.ac.authorise(by, 'dashboard:read', { kind: 'dashboard' });
     const active = await this.clusters.findActive();
     const latest = await this.scores.latest();
+    const open = this.workOrders === null ? null : await this.workOrders.findAllOpen();
 
     const tierDistribution: Record<PriorityTier, number> = {
       [PriorityTier.High]: 0,
@@ -102,10 +107,10 @@ export class DashboardController {
       activeClusters: active.length,
       totalActiveCases: active.reduce((sum, c) => sum + c.caseSize, 0),
       highTierClusters: tierDistribution[PriorityTier.High],
-      // Not implemented yet — null rather than 0, so the panel cannot show a false all-clear.
+      // Reports still do not exist: null rather than 0, so the panel cannot show a false all-clear.
       openVerifiedReports: null,
-      openWorkOrders: null,
-      overdueWorkOrders: null,
+      openWorkOrders: open === null ? null : open.length,
+      overdueWorkOrders: open === null ? null : open.filter((w) => w.isOverdue(new Date())).length,
       tierDistribution,
       dataAsOf: latest.length === 0 ? null : (latest[0] as PriorityScore).computedAt,
       weekOverWeek: await this.weekOverWeek(active),
@@ -123,9 +128,21 @@ export class DashboardController {
     const latest = await this.scores.latest();
     const byId = new Map((await this.clusters.findActive()).map((c) => [c.id, c]));
 
+    // 7.2.2's work-order status column: the open order for that cluster, or null when there is none.
+    const openByCluster = new Map<Uuid, WorkOrder>();
+    for (const workOrder of this.workOrders === null ? [] : await this.workOrders.findAllOpen()) {
+      openByCluster.set(workOrder.clusterId, workOrder);
+    }
+
     let rows = latest
       .filter((score) => byId.has(score.clusterId))
-      .map((score) => DashboardController.toRow(score, byId.get(score.clusterId) as Cluster));
+      .map((score) =>
+        DashboardController.toRow(
+          score,
+          byId.get(score.clusterId) as Cluster,
+          openByCluster.get(score.clusterId)?.currentStatus() ?? null,
+        ),
+      );
 
     if (query.tier !== undefined) {
       rows = rows.filter((r) => r.tier === query.tier);
@@ -137,10 +154,10 @@ export class DashboardController {
   }
 
   /**
-   * 7.5.x. Today it carries source health only (7.5.1); overdue work orders (7.5.2), reports
-   * awaiting moderation (7.5.3) and issue-flagged work orders (7.5.5) are listed here as the three
-   * things still to add, rather than silently absent, so the gap is visible in the code as well as
-   * in the handover.
+   * 7.5.x. Source health (7.5.1), overdue work orders (7.5.2) and issue-flagged work orders (7.5.5)
+   * are all carried. Reports awaiting moderation (7.5.3) is the one item still missing, and it is
+   * marked in the code rather than silently absent, so the gap is visible here as well as in the
+   * handover.
    */
   async buildAttentionPanel(by: Principal): Promise<AttentionItem[]> {
     await this.ac.authorise(by, 'dashboard:read', { kind: 'dashboard' });
@@ -154,7 +171,25 @@ export class DashboardController {
         });
       }
     }
-    // TODO(E5, E8): 7.5.2 overdue work orders, 7.5.3 reports awaiting moderation, 7.5.5 issue flags.
+    for (const workOrder of this.workOrders === null ? [] : await this.workOrders.findAllOpen()) {
+      if (workOrder.isOverdue(new Date())) {
+        // 7.5.2
+        items.push({
+          kind: 'overdueWorkOrder',
+          detail: `Work order ${workOrder.id} (${workOrder.taskType}) was due ${workOrder.scheduledDate}`,
+          link: `/ops/work-orders/${workOrder.id}`,
+        });
+      }
+      if (workOrder.issueFlag) {
+        // 7.5.5 — added in v0.4 because an issue could be raised and never seen.
+        items.push({
+          kind: 'workOrderIssue',
+          detail: `Issue on work order ${workOrder.id}: ${workOrder.issueReason ?? 'no reason given'}`,
+          link: `/ops/work-orders/${workOrder.id}`,
+        });
+      }
+    }
+    // TODO(E5): 7.5.3 reports awaiting moderation. Reports do not exist yet.
     return items;
   }
 
@@ -196,7 +231,7 @@ export class DashboardController {
     return [header.map(cell).join(','), ...lines].join('\n');
   }
 
-  private static toRow(score: PriorityScore, cluster: Cluster): PriorityRow {
+  private static toRow(score: PriorityScore, cluster: Cluster, workOrderStatus: string | null): PriorityRow {
     const of = (driver: Driver): number | null =>
       score.contributions.find((c) => c.driver === driver)?.rawValue ?? null;
     return {
@@ -210,7 +245,7 @@ export class DashboardController {
       daysSinceLastTreatment: of(Driver.DaysSinceLastTreatment),
       score: score.score,
       tier: score.tier,
-      workOrderStatus: null,
+      workOrderStatus,
       isDegraded: score.isDegraded,
       excludedDrivers: score.excludedDrivers,
       breakdown: score.breakdown().map((c) => ({

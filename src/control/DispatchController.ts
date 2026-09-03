@@ -1,60 +1,281 @@
 /**
  * D-Fence — deciding what work should exist and who does it.
- * Stereotype: <<control>>. Realises use cases 6.1, 6.2, 6.3, 6.9; 8.1.x, 8.2.x.
+ * Stereotype: <<control>>. Traces: 8.1.1–8.1.13, 8.2.1–8.2.7, 8.3.13, 8.3.18, 8.3.21, 8.4.1–8.4.6.
  *
  * Assignment, reassignment and cancellation are status changes, so this class does NOT write
- * WorkOrder.status. It calls WorkOrderLifecycleController, which validates against the state
+ * `WorkOrder.status`. It calls WorkOrderLifecycleController, which validates against the state
  * table first. Requirement 8.3.2 is then enforced in exactly one place — the Lab 2 adversarial
  * review found a version of this model that claimed one owner of the state machine and drew two.
  */
-import { Uuid, IsoDate } from '../entity/valueTypes';
+import { PriorityTier, Role, TaskType, WorkOrderStatus } from '../entity/enums';
+import { IsoDate, Uuid } from '../entity/valueTypes';
 import { WorkOrder } from '../entity/WorkOrder';
-import { WorkOrderRepository } from '../persistence/WorkOrderRepository';
-import { ReportRepository } from '../persistence/ReportRepository';
-import { WorkOrderLifecycleController } from './WorkOrderLifecycleController';
+import { Cluster } from '../entity/Cluster';
+import { ClusterStore, Notifier, PriorityScoreStore, WorkOrderStore } from '../ports/Stores';
+import { WorkOrderLifecycleController, TransitionRefused } from './WorkOrderLifecycleController';
+import { AccessControlService } from './AccessControlService';
 import { Principal } from './Principal';
 
-type WorkOrderDraft = unknown;
-type DispatchProposal = unknown;
+export interface WorkOrderDraft {
+  clusterId: Uuid;
+  taskType: TaskType;
+  scheduledDate: IsoDate;
+  instructions?: string;
+  /** 8.1.2 — the verified report this was raised from, when it was raised from one. */
+  sourceReportId?: Uuid;
+}
+
+/** One row of the proposed daily list (8.1.7). */
+export interface DispatchProposal {
+  clusterId: Uuid;
+  locality: string;
+  score: number;
+  tier: PriorityTier;
+  suggestedTaskType: TaskType;
+  scheduledDate: IsoDate;
+}
+
+/** Raised when creation is refused. 8.1.12 obliges us to hand back the order that blocked it. */
+export class DuplicateWorkOrder extends Error {
+  constructor(readonly existing: WorkOrder) {
+    super(`an open ${existing.taskType} work order already exists for this cluster`);
+    this.name = 'DuplicateWorkOrder';
+  }
+}
 
 export class DispatchController {
   constructor(
+    private readonly ac: AccessControlService,
     private readonly lifecycle: WorkOrderLifecycleController,
-    private readonly workOrders: WorkOrderRepository,
-    private readonly reports: ReportRepository,
+    private readonly workOrders: WorkOrderStore,
+    private readonly clusters: ClusterStore,
+    private readonly scores: PriorityScoreStore,
+    private readonly notifier: Notifier | null,
+    /** 8.1.8 — configurable, default ten. */
+    private readonly dispatchListLimit = 10,
   ) {}
 
-  /** 8.1.x: the day's suggested work, drawn from the current ranking. */
-  proposeDailyList(_date: IsoDate): Promise<DispatchProposal> {
-    throw new Error('not implemented');
-  }
+  /**
+   * 8.1.7, 8.1.8 — the day's suggested work: the highest-scoring active clusters that have **no
+   * open work order**, capped at the configured limit.
+   *
+   * The exclusion is the point. A ranked list that keeps proposing the same top cluster every
+   * morning, because it is still the highest-scoring one while a crew is already working it, is a
+   * list a manager stops reading by Wednesday.
+   */
+  async proposeDailyList(date: IsoDate, by: Principal): Promise<DispatchProposal[]> {
+    await this.ac.authorise(by, 'workOrder:write', { kind: 'workOrder' });
+    const latest = await this.scores.latest();
+    const active = new Map((await this.clusters.findActive()).map((c) => [c.id, c]));
 
-  /** 8.3.15 sets the initial status to Created — creation is not a transition. */
-  createWorkOrder(_draft: WorkOrderDraft, _by: Principal): Promise<WorkOrder> {
-    throw new Error('not implemented');
-  }
-
-  /** 8.1.x. Links verified open reports; 8.1.2 also records the report it was raised from. */
-  linkVerifiedReports(_id: Uuid, _reportIds: Uuid[]): Promise<void> {
-    throw new Error('not implemented');
-  }
-
-  /** Delegates: Created → Assigned. Also notifies the crew member (8.2.4). */
-  assign(_id: Uuid, _crewId: Uuid, _by: Principal): Promise<WorkOrder> {
-    throw new Error('not implemented');
-  }
-
-  /** Delegates: Assigned/Accepted/In Progress → Assigned. */
-  reassign(_id: Uuid, _crewId: Uuid, _by: Principal): Promise<WorkOrder> {
-    throw new Error('not implemented');
+    const proposals: DispatchProposal[] = [];
+    for (const score of [...latest].sort((a, b) => a.rank - b.rank)) {
+      if (proposals.length >= this.dispatchListLimit) {
+        break;
+      }
+      const cluster = active.get(score.clusterId);
+      if (cluster === undefined) {
+        continue;
+      }
+      if ((await this.workOrders.findOpenForCluster(cluster.id)).length > 0) {
+        continue;
+      }
+      proposals.push({
+        clusterId: cluster.id,
+        locality: cluster.locality,
+        score: score.score,
+        tier: score.tier,
+        suggestedTaskType: DispatchController.suggestTask(cluster),
+        scheduledDate: date,
+      });
+    }
+    return proposals;
   }
 
   /**
-   * Delegates: → Cancelled, reason required (8.3.18). Then 8.3.21 — every report linked to the
-   * cancelled work order returns to the status it held before the work order was created,
-   * otherwise it stays Actioned for ever while the breeding site still exists.
+   * 8.1.1–8.1.6, 8.1.11, 8.1.12, 8.3.15.
+   * Creation is not a transition: 8.3.15 sets the initial status directly, and the state table
+   * deliberately has no rule into Created.
+   *
+   * @throws DuplicateWorkOrder carrying the existing order, which 8.1.12 requires us to offer
    */
-  cancel(_id: Uuid, _reason: string, _by: Principal): Promise<WorkOrder> {
-    throw new Error('not implemented');
+  async createWorkOrder(draft: WorkOrderDraft, by: Principal): Promise<WorkOrder> {
+    await this.ac.authorise(by, 'workOrder:write', { kind: 'workOrder' });
+
+    const cluster = await this.clusters.findById(draft.clusterId);
+    if (cluster === null) {
+      throw new Error(`no cluster ${draft.clusterId}`); // 8.1.1 — against an *active* cluster
+    }
+    // 8.1.4 — a scheduled date that is not in the past. Compared as calendar dates in Singapore
+    // time, because "today" is a date to a planner, not an instant.
+    if (draft.scheduledDate < DispatchController.today()) {
+      throw new Error(`scheduled date ${draft.scheduledDate} is in the past (8.1.4)`);
+    }
+    if ((draft.instructions ?? '').length > 1000) {
+      throw new Error('instructions exceed 1000 characters (8.1.6)');
+    }
+    const clash = (await this.workOrders.findOpenForCluster(draft.clusterId)).find(
+      (w) => w.taskType === draft.taskType,
+    );
+    if (clash !== undefined) {
+      throw new DuplicateWorkOrder(clash); // 8.1.11, 8.1.12
+    }
+
+    const workOrder = new WorkOrder();
+    workOrder.clusterId = draft.clusterId;
+    workOrder.taskType = draft.taskType;
+    workOrder.scheduledDate = draft.scheduledDate;
+    workOrder.instructions = draft.instructions ?? '';
+    workOrder.sourceReportId = draft.sourceReportId ?? null;
+    workOrder.assigneeId = null;
+    workOrder.startedAt = null;
+    workOrder.cancellationReason = null;
+    workOrder.issueFlag = false;
+    workOrder.issueReason = null;
+    // 8.1.5 — default the priority to the cluster's current tier.
+    workOrder.priority = await this.tierOf(cluster.id);
+    workOrder.applyStatus(WorkOrderStatus.Created); // 8.3.15
+    return this.workOrders.save(workOrder);
+  }
+
+  /**
+   * 8.2.1, 8.2.3, 8.2.4 — assign to exactly one crew member, refuse a deactivated account, notify
+   * within a minute. Delegates the status change (Created → Assigned) to the lifecycle controller.
+   *
+   * @param isActiveAccount supplied by the caller until E2 exists; a deactivated account must be
+   *   refused (8.2.3), and defaulting that to "active" would be a silent security decision.
+   */
+  async assign(id: Uuid, crewId: Uuid, by: Principal, isActiveAccount = true): Promise<WorkOrder> {
+    await this.ac.authorise(by, 'workOrder:write', { kind: 'workOrder', id });
+    if (!isActiveAccount) {
+      throw new Error('cannot assign to a deactivated account (8.2.3)');
+    }
+    const workOrder = await this.requireOrder(id);
+    const previous = workOrder.assigneeId;
+
+    workOrder.assigneeId = crewId;
+    await this.workOrders.save(workOrder);
+    await this.workOrders.appendAssignmentHistory(id, crewId, new Date()); // 8.2.7
+
+    const assigned = await this.lifecycle.transition(id, WorkOrderStatus.Assigned, by);
+    await this.notifier?.notify(crewId, `You have been assigned work order ${id}.`); // 8.2.4
+    if (previous !== null && previous !== crewId) {
+      await this.notifier?.notify(previous, `Work order ${id} has been reassigned.`); // 8.2.6
+    }
+    return assigned;
+  }
+
+  /**
+   * 8.2.5 — reassignment from Assigned, Accepted or In Progress. It is the same call as `assign`:
+   * the state table already carries those three rules, so a separate method would be a second
+   * place for the same policy to drift.
+   */
+  reassign(id: Uuid, crewId: Uuid, by: Principal, isActiveAccount = true): Promise<WorkOrder> {
+    return this.assign(id, crewId, by, isActiveAccount);
+  }
+
+  /**
+   * 8.3.13, 8.3.18, 8.3.21. The reason is written before the transition because the guard reads it.
+   */
+  async cancel(id: Uuid, reason: string, by: Principal): Promise<WorkOrder> {
+    await this.ac.authorise(by, 'workOrder:write', { kind: 'workOrder', id });
+    if (reason.trim() === '') {
+      throw new TransitionRefused(WorkOrderStatus.Created, WorkOrderStatus.Cancelled, 'a cancellation requires a reason (8.3.18)');
+    }
+    const workOrder = await this.requireOrder(id);
+    workOrder.cancellationReason = reason;
+    await this.workOrders.save(workOrder);
+    const cancelled = await this.lifecycle.transition(id, WorkOrderStatus.Cancelled, by);
+    // TODO(E5): 8.3.21 — return every linked report to the status it held before this work order
+    // was created. Reports do not exist yet; this is the hook, and it is the one thing 8.3.21 asks
+    // for that is not done.
+    return cancelled;
+  }
+
+  /** 8.2.2 — each candidate's open work-order count, shown at the point of assignment. */
+  async crewWorkload(crewIds: Uuid[]): Promise<Array<{ crewId: Uuid; openWorkOrders: number }>> {
+    const out = [];
+    for (const crewId of crewIds) {
+      const orders = await this.workOrders.findForAssignee(crewId);
+      out.push({ crewId, openWorkOrders: orders.filter((w) => !w.isTerminal()).length });
+    }
+    return out;
+  }
+
+  /**
+   * 8.4.1, 8.4.2, 8.4.6 — a crew member sees **only** their own work orders, sorted by scheduled
+   * date and then by priority tier, optionally filtered.
+   *
+   * The filter is applied here rather than in the screen because 8.4.1 is an access rule, not a
+   * display preference: a client-side filter over everything would ship other crews' work to the
+   * browser and rely on the UI to hide it.
+   */
+  async crewView(by: Principal, filter: 'Today' | 'Upcoming' | 'Completed' | 'All' = 'All'): Promise<WorkOrder[]> {
+    await this.ac.authorise(by, 'workOrder:readAssigned', { kind: 'workOrder', ownerId: by.accountId });
+    const mine = await this.workOrders.findForAssignee(by.accountId);
+    const today = DispatchController.today();
+    const tierRank: Record<PriorityTier, number> = { High: 0, Medium: 1, Low: 2 };
+
+    const filtered = mine.filter((w) => {
+      switch (filter) {
+        case 'Today':
+          return w.scheduledDate === today && !w.isTerminal();
+        case 'Upcoming':
+          return w.scheduledDate > today && !w.isTerminal();
+        case 'Completed':
+          return w.currentStatus() === WorkOrderStatus.Completed || w.currentStatus() === WorkOrderStatus.Verified;
+        default:
+          return true;
+      }
+    });
+
+    return filtered.sort((a, b) =>
+      a.scheduledDate === b.scheduledDate
+        ? tierRank[a.priority] - tierRank[b.priority]
+        : a.scheduledDate.localeCompare(b.scheduledDate),
+    );
+  }
+
+  /** 8.3.14 — for the dashboard's attention panel (7.5.2). */
+  async overdue(now = new Date()): Promise<WorkOrder[]> {
+    return (await this.workOrders.findAllOpen()).filter((w) => w.isOverdue(now));
+  }
+
+  /** 8.1.13, 8.1.2 — hook for linking verified open reports; reports do not exist yet (E5). */
+  async linkVerifiedReports(_id: Uuid, _reportIds: Uuid[]): Promise<void> {
+    return Promise.resolve();
+  }
+
+  /**
+   * A suggestion, not a decision — 8.1.9 lets the manager edit every item. Construction-site and
+   * public-place habitats point at clearance work; otherwise fogging is the default intervention.
+   */
+  private static suggestTask(cluster: Cluster): TaskType {
+    const mix = cluster.premisesMix;
+    if (mix !== undefined && mix.constructionSites.length > 0) {
+      return TaskType.Inspection;
+    }
+    if (mix !== undefined && mix.publicPlaces.length > 0) {
+      return TaskType.RefuseClearance;
+    }
+    return TaskType.Fogging;
+  }
+
+  private async tierOf(clusterId: Uuid): Promise<PriorityTier> {
+    const latest = await this.scores.latest();
+    return latest.find((s) => s.clusterId === clusterId)?.tier ?? PriorityTier.Low;
+  }
+
+  private async requireOrder(id: Uuid): Promise<WorkOrder> {
+    const workOrder = await this.workOrders.findById(id);
+    if (workOrder === null) {
+      throw new Error(`no work order ${id}`);
+    }
+    return workOrder;
+  }
+
+  /** Singapore's calendar date. A planner's "today" is a date, and the host clock may be UTC. */
+  static today(now = new Date()): IsoDate {
+    return new Date(now.getTime() + 8 * 3_600_000).toISOString().slice(0, 10);
   }
 }

@@ -12,8 +12,14 @@
  */
 import { Role, WorkOrderStatus } from '../entity/enums';
 import { WorkOrder } from '../entity/WorkOrder';
+import { CompletionEvidence } from '../entity/CompletionEvidence';
 
-export type Guard = (wo: WorkOrder) => boolean;
+/**
+ * A guard answers "does this work order's own state permit the move", given the evidence attached
+ * to the current completion attempt. Evidence is passed in rather than fetched, so the table stays
+ * a pure function of state — the property that makes it path-testable (Lab 4 §3.1).
+ */
+export type Guard = (wo: WorkOrder, evidence: CompletionEvidence | null) => boolean;
 
 export interface TransitionRule {
   readonly from: WorkOrderStatus;
@@ -29,24 +35,27 @@ export interface TransitionRule {
 
 const ALWAYS: Guard = () => true;
 
-/** Has a completion timestamp, a task-performed confirmation, ≥1 photograph and notes (8.3.6, 8.3.7). */
-const HAS_EVIDENCE: Guard = (_wo) => {
-  // TODO(F11): read the CompletionEvidence attached to this work order.
-  throw new Error('not implemented');
-};
+/**
+ * 8.3.6, 8.3.7 — a completion timestamp, a task-performed confirmation, at least one photograph and
+ * notes. 8.3.7 singles out the photograph, so the missing-photo case is the one a test names.
+ */
+const HAS_EVIDENCE: Guard = (_wo, evidence) =>
+  evidence !== null &&
+  evidence.photoKeys.length > 0 &&
+  evidence.notes.trim().length > 0 &&
+  evidence.taskPerformed !== undefined &&
+  evidence.completedAt instanceof Date;
 
 /** Cancellation carries a reason (8.3.18). */
-const HAS_CANCELLATION_REASON: Guard = (wo) => wo.cancellationReason !== null;
+const HAS_CANCELLATION_REASON: Guard = (wo) => wo.cancellationReason !== null && wo.cancellationReason !== '';
 
 /**
  * A rejected completion carries a reason (8.3.10). The reason lives on the CompletionEvidence, not
  * on the WorkOrder — a work order can be rejected, resumed and re-completed, so the reason belongs
  * to the attempt it refers to.
  */
-const HAS_REJECTION_REASON: Guard = (_wo) => {
-  // TODO(F8): read the CompletionEvidence attached to this work order and require rejectionReason.
-  throw new Error('not implemented');
-};
+const HAS_REJECTION_REASON: Guard = (_wo, evidence) =>
+  evidence !== null && evidence.rejectionReason !== null && evidence.rejectionReason.trim().length > 0;
 
 export class WorkOrderTransitionTable {
   private readonly permitted: TransitionRule[] = [

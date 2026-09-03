@@ -14,6 +14,9 @@ import { Cluster } from '../entity/Cluster';
 import { ClusterSnapshot } from '../entity/ClusterSnapshot';
 import { IngestionRun } from '../entity/IngestionRun';
 import { PriorityScore } from '../entity/PriorityScore';
+import { WorkOrder } from '../entity/WorkOrder';
+import { CompletionEvidence } from '../entity/CompletionEvidence';
+import { TreatmentRecord } from '../entity/TreatmentRecord';
 import { ParsedBatch } from './types';
 import { ParsedReading, ParsedStation } from '../control/ingestion/RainfallFeedParser';
 
@@ -50,6 +53,43 @@ export interface RainfallStore {
   readingsSince(since: Date): Promise<ParsedReading[]>;
   /** 1.2.10 — the newest reading held, or null when nothing has ever been stored. */
   newestReadingAt(): Promise<Date | null>;
+}
+
+export interface WorkOrderStore {
+  findById(id: Uuid): Promise<WorkOrder | null>;
+  save(workOrder: WorkOrder): Promise<WorkOrder>;
+  /** 8.1.11 — an open work order of the same task type on the same cluster blocks a second one. */
+  findOpenForCluster(clusterId: Uuid): Promise<WorkOrder[]>;
+  /** 8.4.1 — a crew member sees only what is assigned to them. */
+  findForAssignee(assigneeId: Uuid): Promise<WorkOrder[]>;
+  findAllOpen(): Promise<WorkOrder[]>;
+  /** 8.2.7 — every previous assignee is retained. */
+  appendAssignmentHistory(workOrderId: Uuid, assigneeId: Uuid | null, at: Date): Promise<void>;
+  assignmentHistory(workOrderId: Uuid): Promise<Array<{ assigneeId: Uuid | null; at: Date }>>;
+  /** The evidence attached to the current completion attempt (8.3.6, 8.3.10). */
+  saveEvidence(evidence: CompletionEvidence): Promise<void>;
+  latestEvidence(workOrderId: Uuid): Promise<CompletionEvidence | null>;
+}
+
+export interface TreatmentRecordStore {
+  /** 8.3.12 — written when a work order is Verified; it is what moves 4.1.15's driver. */
+  save(record: TreatmentRecord): Promise<TreatmentRecord>;
+  latestForCluster(clusterId: Uuid): Promise<TreatmentRecord | null>;
+  allForCluster(clusterId: Uuid): Promise<TreatmentRecord[]>;
+}
+
+/**
+ * 8.2.4, 8.3.11, 8.5.2. A port rather than the Telegram gateway directly, so the lifecycle can be
+ * tested for "was the assignee notified" without a bot token, and so a second channel (email, in-app)
+ * is an implementation rather than a change to the controller.
+ */
+export interface Notifier {
+  notify(accountId: Uuid, message: string): Promise<void>;
+}
+
+/** 8.5.3 — a verified work order must be reflected in the next scoring cycle. */
+export interface Rescorer {
+  rescoreCluster(clusterId: Uuid): Promise<void>;
 }
 
 export interface AuditStore {
