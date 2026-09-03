@@ -3,7 +3,7 @@
  * Stereotype: <<entity>>. Traces: 8.1.x, 8.3.x
  */
 
-import { Uuid, IsoDate, GeoPoint, Polygon, PremisesMix } from './valueTypes';
+import { Uuid, IsoDate, GeoPoint, Polygon, PremisesMix, singaporeDate } from './valueTypes';
 import {
   Role, LocationLabel, ExposureStatus, AlertTrigger, ChangeClass,
   ForecastRegion, Trajectory, PriorityTier, Driver, ReportType, ReportStatus,
@@ -65,7 +65,10 @@ isOverdue(now: Date): boolean {
   if (settled.includes(this.status)) {
     return false;
   }
-  return this.scheduledDate < now.toISOString().slice(0, 10);
+  // Singapore's calendar, not UTC's: `scheduledDate` was set from a Singapore date, and
+  // comparing it against a UTC one makes this answer false for the eight hours after
+  // midnight SGT — exactly the hours in which an overnight backlog is being reviewed.
+  return this.scheduledDate < singaporeDate(now);
 }
 
 /** Verified and Cancelled — the state table gives them no outgoing transition. */

@@ -8,7 +8,7 @@
  * review found a version of this model that claimed one owner of the state machine and drew two.
  */
 import { PriorityTier, Role, TaskType, WorkOrderStatus } from '../entity/enums';
-import { IsoDate, Uuid } from '../entity/valueTypes';
+import { IsoDate, Uuid, singaporeDate } from '../entity/valueTypes';
 import { WorkOrder } from '../entity/WorkOrder';
 import { Cluster } from '../entity/Cluster';
 import { AuditStore, ClusterStore, Notifier, PriorityScoreStore, ReportLinkage, ReportStore, WorkOrderStore } from '../ports/Stores';
@@ -313,6 +313,6 @@ export class DispatchController {
 
   /** Singapore's calendar date. A planner's "today" is a date, and the host clock may be UTC. */
   static today(now = new Date()): IsoDate {
-    return new Date(now.getTime() + 8 * 3_600_000).toISOString().slice(0, 10);
+    return singaporeDate(now);
   }
 }

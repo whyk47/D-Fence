@@ -11,7 +11,7 @@
  * `isTransitionPermitted()` is the designated Lab 4 basis-path subject and is deliberately pure.
  */
 import { Role, WorkOrderStatus } from '../entity/enums';
-import { Uuid } from '../entity/valueTypes';
+import { Uuid, singaporeDate } from '../entity/valueTypes';
 import { WorkOrder } from '../entity/WorkOrder';
 import { CompletionEvidence } from '../entity/CompletionEvidence';
 import { TreatmentRecord } from '../entity/TreatmentRecord';
@@ -174,7 +174,9 @@ export class WorkOrderLifecycleController {
     record.taskType = workOrder.taskType;
     // 8.3.12 names the *completion* date, not the verification date: the treatment happened when
     // the crew did the work, and the recency driver in 4.1.15 measures from that.
-    record.completionDate = (evidence?.completedAt ?? new Date()).toISOString().slice(0, 10);
+    // In Singapore's calendar: the crew's day, not UTC's. A job completed at 1 am was being
+    // stamped with the previous date and read as a day old the moment it was written.
+    record.completionDate = singaporeDate(evidence?.completedAt ?? new Date());
     return this.treatments.save(record);
   }
 

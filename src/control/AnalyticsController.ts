@@ -19,7 +19,7 @@
  * network for a number that is four bytes wide.
  */
 import { PriorityTier } from '../entity/enums';
-import { IsoDate, Uuid } from '../entity/valueTypes';
+import { IsoDate, Uuid, singaporeDate } from '../entity/valueTypes';
 import { ClusterStore, PriorityScoreStore, ReportStore, WorkOrderStore } from '../ports/Stores';
 import { AccessControlService } from './AccessControlService';
 import { Principal } from './Principal';
@@ -249,7 +249,7 @@ export class AnalyticsController {
 
   /** The Singapore calendar date of an instant. A UTC date is wrong for eight hours in every day. */
   private static dayOf(instant: Date): IsoDate {
-    return new Date(instant.getTime() + 8 * 3_600_000).toISOString().slice(0, 10);
+    return singaporeDate(instant);
   }
 
   private static windowStart(now: Date): Date {
