@@ -58,6 +58,13 @@ export interface AuthProvider {
   /** Used by account deactivation; the Account row is retained so audit records still resolve. */
   disableUser(authUserId: AuthUserId): Promise<void>;
 
+  /**
+   * 2.2.4. The mirror of `disableUser`, and it must exist: deactivation is reversible by
+   * requirement, and a provider identity that can only be disabled makes reactivating an account
+   * restore its profile row while leaving it unable to sign in. A test caught exactly that.
+   */
+  enableUser(authUserId: AuthUserId): Promise<void>;
+
   /** 10.4.3. Deletes the provider-side identity on an account deletion request. */
   deleteUser(authUserId: AuthUserId): Promise<void>;
 }

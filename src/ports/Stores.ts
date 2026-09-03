@@ -9,7 +9,7 @@
  * database, which is what lets `npm run ingest` pull live NEA data before Supabase exists.
  */
 import { Uuid, GeoPoint } from '../entity/valueTypes';
-import { ReportStatus, ReportType, SourceKind } from '../entity/enums';
+import { ReportStatus, ReportType, Role, SourceKind } from '../entity/enums';
 import { Cluster } from '../entity/Cluster';
 import { ClusterSnapshot } from '../entity/ClusterSnapshot';
 import { IngestionRun } from '../entity/IngestionRun';
@@ -19,6 +19,8 @@ import { CompletionEvidence } from '../entity/CompletionEvidence';
 import { Report } from '../entity/Report';
 import { ReportPhoto } from '../entity/ReportPhoto';
 import { Corroboration } from '../entity/Corroboration';
+import { Account } from '../entity/Account';
+import { Session } from '../entity/Session';
 import { TreatmentRecord } from '../entity/TreatmentRecord';
 import { ParsedBatch } from './types';
 import { ParsedReading, ParsedStation } from '../control/ingestion/RainfallFeedParser';
@@ -169,9 +171,36 @@ export interface ReportLinkage {
   onWorkOrderCancelled(workOrderId: Uuid): Promise<void>;
 }
 
+export interface AccountStore {
+  findById(id: Uuid): Promise<Account | null>;
+  /** 2.1.4 - the duplicate-registration check, and the lookup sign-in starts from. */
+  findByEmail(email: string): Promise<Account | null>;
+  findByAuthUserId(authUserId: string): Promise<Account | null>;
+  save(account: Account): Promise<Account>;
+  /** 2.2.3, 2.2.4 - the staff list a manager provisions from. */
+  findByRole(role: Role): Promise<Account[]>;
+}
+
+/**
+ * 2.1.8, 2.1.9, 2.1.12. Ours rather than the provider's, because 2.1.9 is an inactivity timeout
+ * measured against **our** requests - see the note on the `Session` entity.
+ */
+export interface SessionStore {
+  findByToken(token: string): Promise<Session | null>;
+  save(session: Session): Promise<Session>;
+  /** 2.2.4 - deactivating an account must not leave a live session behind it. */
+  terminateAllFor(accountId: Uuid, at: Date): Promise<number>;
+}
+
 export interface AuditStore {
   /** 2.3.8 — every refusal is logged, and the log is the only path a refusal can take. */
   appendDenial(accountId: Uuid, action: string, targetEntity: string, targetId: Uuid | null): Promise<void>;
+  /**
+   * 2.4.1 — every operation that changes stored state, with actor, action, target and time.
+   * Distinct from `appendDenial`: a refusal changed nothing, and the two must be tellable apart
+   * when the log is read.
+   */
+  appendAction(accountId: Uuid, action: string, targetEntity: string, targetId: Uuid | null): Promise<void>;
   /** 2.4.x — the audit trail, newest first. */
   recent(limit: number): Promise<Array<{ accountId: Uuid; action: string; targetEntity: string; occurredAt: Date }>>;
 }

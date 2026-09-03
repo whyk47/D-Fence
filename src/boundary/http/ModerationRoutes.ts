@@ -35,9 +35,9 @@ export class ModerationRoutes extends RouteHandler {
   }
 
   async handle(req: Request, res: Response): Promise<void> {
-    const principal = this.principalOf(req);
     const id = req.params.id ?? '';
     try {
+      const principal = await this.resolvePrincipal(req);
       switch (req.params.route) {
         case '/api/ops/moderation': {
           const type = Object.values(ReportType).find((t) => t === req.params.type);

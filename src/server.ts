@@ -19,6 +19,8 @@ import { ExpressApp } from './boundary/http/ExpressApp';
 import { DashboardRoutes } from './boundary/http/DashboardRoutes';
 import { ReportRoutes } from './boundary/http/ReportRoutes';
 import { ModerationRoutes } from './boundary/http/ModerationRoutes';
+import { AuthRoutes } from './boundary/http/AuthRoutes';
+import { AdminRoutes } from './boundary/http/AdminRoutes';
 import {
   InMemoryAuditStore,
   InMemoryClusterStore,
@@ -32,6 +34,13 @@ import { ReportTransitionTable } from './control/ReportTransitionTable';
 import { ReportLifecycleController } from './control/ReportLifecycleController';
 import { ReportController } from './control/ReportController';
 import { ModerationController } from './control/ModerationController';
+import { AuthenticationController } from './control/AuthenticationController';
+import { StaffAccountController } from './control/StaffAccountController';
+import {
+  InMemoryAccountStore,
+  InMemorySessionStore,
+  LocalAuthProvider,
+} from './persistence/memory/InMemoryAccountStores';
 import { WorkOrderTransitionTable } from './control/WorkOrderTransitionTable';
 import { WorkOrderLifecycleController } from './control/WorkOrderLifecycleController';
 import { DispatchController } from './control/DispatchController';
@@ -50,7 +59,15 @@ async function main(): Promise<void> {
   const config = ConfigLoader.load();
   const http = new HttpClient();
 
-  const ac0 = new AccessControlService(new AccessPolicy(), new InMemoryAuditStore());
+  const auditStore = new InMemoryAuditStore();
+  const ac0 = new AccessControlService(new AccessPolicy(), auditStore);
+  const accounts = new InMemoryAccountStore();
+  const sessions = new InMemorySessionStore();
+  // Supabase Auth is the decision; the project does not exist yet, so §2 runs on the local
+  // provider (real salted scrypt hashes, no email). Swapping is one line — see AuthProvider.
+  const authProvider = new LocalAuthProvider();
+  const authentication = new AuthenticationController(authProvider, accounts, sessions, auditStore);
+  const staff = new StaffAccountController(ac0, authProvider, accounts, sessions, auditStore);
   const clusters = new InMemoryClusterStore();
   const rainfall = new InMemoryRainfallStore();
   const runs = new InMemoryIngestionRunStore();
@@ -133,6 +150,24 @@ async function main(): Promise<void> {
 
   const ac = ac0;
   void audit;
+
+  /**
+   * 2.2.3 says only an Operations Manager may create a manager or crew account, and 2.2.2 makes
+   * self-registration produce a Resident. A fresh deployment therefore has no way to reach the
+   * operational roles at all — so the first manager is seeded here, from the environment, and the
+   * fact is printed rather than hidden. A real deployment does this once, from a migration.
+   */
+  const seedEmail = process.env.DFENCE_SEED_MANAGER_EMAIL ?? 'manager@d-fence.local';
+  const seedPassword = process.env.DFENCE_SEED_MANAGER_PASSWORD ?? 'dfence2026';
+  const seeded = await staff.createStaffAccount(
+    seedEmail,
+    Role.OperationsManager,
+    seedPassword,
+    // The seed has no manager to authorise it, so it is performed as the system. This is the only
+    // call in the codebase that constructs a principal rather than resolving one.
+    principalFor(Role.OperationsManager, 'system-seed'),
+  );
+  const seededManagerId = seeded.id;
   const dashboard = new DashboardController(ac, clusters, scores, runs, workOrders, reports);
   const lifecycle = new WorkOrderLifecycleController(
     new WorkOrderTransitionTable(),
@@ -146,12 +181,18 @@ async function main(): Promise<void> {
   const dispatch = new DispatchController(ac, lifecycle, workOrders, clusters, scores, notifier, reportLifecycle);
   void dispatch;
 
-  const app = new ExpressApp();
+  // 2.3.6 — the resolver is the only way a request acquires a role, and every handler gets it.
+  const app = new ExpressApp(authentication);
   app.mount(new DashboardRoutes(ac, dashboard));
   app.mount(new ReportRoutes(ac, residentReports));
   app.mount(new ModerationRoutes(ac, moderation));
+  app.mount(new AuthRoutes(ac, authentication));
+  app.mount(new AdminRoutes(ac, staff));
+  // The stand-in dashboard page renders for the seeded manager. It is a **development page**, not
+  // the graded screen (E10), and it is the one place left that does not resolve a session — an
+  // HTML page cannot carry a bearer token. Every JSON route above does resolve one.
   app.page('/ops', async () => {
-    const manager = principalFor(Role.OperationsManager);
+    const manager = principalFor(Role.OperationsManager, seededManagerId);
     return renderOpsDashboard(
       await dashboard.buildOverview(manager),
       await dashboard.buildPriorityTable(manager),
@@ -161,6 +202,7 @@ async function main(): Promise<void> {
   app.page('/', async () => Promise.resolve('<meta http-equiv="refresh" content="0; url=/ops">'));
 
   app.listen(Number(process.env.PORT ?? 3000));
+  console.log(`  sign in as ${seedEmail} / ${seedPassword} (development seed)`);
 }
 
 void main().catch((error: unknown) => {

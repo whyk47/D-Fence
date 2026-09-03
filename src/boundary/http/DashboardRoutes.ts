@@ -30,8 +30,11 @@ export class DashboardRoutes extends RouteHandler {
   }
 
   async handle(req: Request, res: Response): Promise<void> {
-    const principal = this.principalOf(req);
     try {
+      // Inside the try, not before it: an unresolved session throws NotAuthorised, and
+      // outside the try that rejection escapes the handler and the caller gets no response at
+      // all instead of 2.3.7's refusal.
+      const principal = await this.resolvePrincipal(req);
       switch (req.params.route) {
         case '/api/ops/dashboard':
           res.json({

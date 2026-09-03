@@ -46,8 +46,8 @@ export class ReportRoutes extends RouteHandler {
   }
 
   async handle(req: Request, res: Response): Promise<void> {
-    const principal = this.principalOf(req);
     try {
+      const principal = await this.resolvePrincipal(req);
       switch (req.params.route) {
         case '/api/reports': {
           const report = await this.reports.submitReport(ReportRoutes.draftOf(req), principal);

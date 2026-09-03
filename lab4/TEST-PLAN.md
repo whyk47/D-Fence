@@ -22,6 +22,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | §3.2 (extension) The rainfall path — parsing, station assignment, accumulation, staleness | **Done 2026-09-03.** 18 cases — `tests/rainfall.test.ts`, designed in §2.7 |
 | §3.2 (extension) The work-order lifecycle driven end to end | **Done 2026-09-03.** 27 cases — `tests/work-order.test.ts`, designed in §2.8 |
 | §3.2 (extension) Community reporting, its boundaries and its join to §8 | **Done 2026-09-03.** 42 cases — `tests/report.test.ts`, designed in §2.9 |
+| §3.2 (extension) Accounts, sessions, lock-out and staff provisioning | **Done 2026-09-03.** 38 cases — `tests/account.test.ts`, designed in §2.10 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -324,6 +325,65 @@ have been faked: 8.3.21 says a cancelled work order returns its reports to their
 and the implementation reads that from the append-only history rather than assuming Verified,
 because a report can be actioned, restored and actioned again.
 
+### 2.10 Sixth subject - accounts, sessions and lock-out (`tests/account.test.ts`)
+
+Added 2026-09-03 with the implementation. §2.1 states four numbers — eight characters, five
+attempts, fifteen minutes, twenty-four hours — and every one of them is tested at its edge. The
+other half of the suite is about **what a refusal says**, because 2.3.7 (a refusal carries no
+detail) and 10.5.3 (an error states cause and remedy) pull in opposite directions at a sign-in form.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| R1 | A self-registered account is a Resident, unverified, active | 2.2.2, 2.1.6 | ✓ |
+| **R2** | Seven characters refused, eight accepted | 2.1.2 (BV) | ✓ |
+| R3 | Letters-only and digits-only passwords refused | 2.1.3 | ✓ |
+| R4–R5 | A duplicate address is refused, and case does not evade the check | 2.1.4 | ✓ |
+| R6–R7 | A verification token is issued; the password never reaches the account row | 2.1.5, 10.3.1 | ✓ |
+| A1 | An unverified account cannot sign in, and is told why | 2.1.6 | ✓ |
+| A2 | A verified account gets a session token | 2.1.7, 2.1.8 | ✓ |
+| **A3** | An unknown address and a wrong password give the **same** message | 2.3.7 | ✓ |
+| **A4** | The fifth failure locks the account; the fourth does not | 2.1.10 (BV) | ✓ |
+| **A5** | A locked account is refused **even with the right password** | 2.1.10 | ✓ |
+| **A6** | The lock expires at fifteen minutes, not before | 2.1.10 (BV) | ✓ |
+| **A7** | Failures more than fifteen minutes apart are not consecutive | 2.1.10 (BV) | ✓ |
+| A8–A9 | Success clears the run; a deactivated account cannot sign in | 2.1.10, 2.2.5 | ✓ |
+| S1–S2 | A token resolves to its account; an unknown token resolves to **null**, never a default role | 2.1.8, 2.3.6 | ✓ |
+| **S3** | Twenty-four hours of inactivity expires a session; a moment less does not | 2.1.9 (BV) | ✓ |
+| **S4** | Using a session extends it — 2.1.9 is inactivity, not age | 2.1.9 | ✓ |
+| S5 | Signing out ends the session immediately | 2.1.12 | ✓ |
+| **S6** | Deactivation invalidates a **live** session on the next request | 2.2.5 | ✓ |
+| S7–S8 | An expired session is not revived; terminated and expired are distinguishable | 2.1.9, 2.1.12 | ✓ |
+| P1 | A reset request for an unknown address succeeds silently | 2.1.11 | ✓ |
+| P2–P4 | The link is single-use, the new password obeys 2.1.2/2.1.3, and the old one stops working | 2.1.11 | ✓ |
+| T1 | A manager-created staff account is already verified and can sign in | 2.2.3 | ✓ |
+| T2–T3 | Only a manager provisions staff; a Resident cannot be created this way | 2.2.3, 2.2.2 | ✓ |
+| T4 | Deactivation ends live sessions and reports how many | 2.2.4, 2.2.5 | ✓ |
+| **T5** | A manager cannot deactivate themselves | — (added) | ✓ |
+| **T6** | Reactivation restores sign-in | 2.2.4 | ✓ |
+| T7 | The assignable crew list excludes deactivated members | 8.2.2, 8.2.3 | ✓ |
+| U1–U3 | Creation, sign-in and deactivation are audited; a refusal is distinguishable; the log is append-only from outside | 2.4.1, 2.3.8, 2.4.2 | ✓ |
+
+**A3, A5 and S6 are the three to point at.** A3 is where the two error requirements were reconciled:
+a wrong password and an unknown address must say the same thing, or the sign-in form becomes a
+directory of who has registered — while a locked, unverified or deactivated account, which the
+caller has already proved they can reach, is told exactly what is wrong. A5 is the lock-out being
+worth having: five wrong guesses that still leave the door open to a sixth right one is not a
+lock. S6 is the difference between deactivation taking effect now and taking effect tomorrow —
+sessions are terminated in the same call, so a crew member deactivated at noon cannot keep working
+from an open tab.
+
+**Two defects were found by writing these cases.**
+
+1. **`reactivateAccount` never re-enabled the provider identity** (T6). Deactivation disables the
+   account row *and* the provider user; reactivation restored only the row, so a reinstated account
+   read as active and failed every sign-in. `AuthProvider` had no `enableUser` at all — the port
+   was missing the inverse of an operation it already had, which is the kind of asymmetry that is
+   invisible until something exercises the round trip.
+2. **The first version of S3 tested the wrong thing.** Checking just inside the twenty-four-hour
+   window *extended* the session, so the check just outside it was measuring a two-second-old
+   session and passed for the wrong reason. Two separate sessions are needed to test the two edges
+   — which is the requirement (2.1.9 is inactivity, not age) demonstrating itself.
+
 ---
 
 ## 3. Basis-path design
@@ -427,7 +487,7 @@ Four rules were applied, and each one removed cases:
 |---|---|
 | Repository spatial queries (1.2.5, 3.1.8, 5.1.7) | A live PostGIS instance. The **rule** is now tested through the `ClusterLocator` port (§2.9, L1–L3); what remains untested is the PostGIS implementation of it |
 | ~~`AbstractIngestionJob.run` template~~ | **Done 2026-09-03** — §2.6, cases I1–I5 |
-| `AccessControlService.authorise` — every §2.3 rule | Implementation. `AccessPolicy` is done and tested; the ownership-scoped check is not |
+| ~~`AccessControlService.authorise` — every §2.3 rule~~ | **Done** — the ownership-scoped check is covered in §2.9 (V4) and the role rules in §2.10 (T2) and §2.8 |
 | ~~`WorkOrderLifecycleController.transition` end to end~~ | **Done 2026-09-03** — §2.8 |
 | Dialog map ↔ router agreement (11.3.2) | The client router, which is a stub. This one should be a **test**, not an inspection — every route in the code must be a state on the map |
 | One end-to-end path (Playwright) | A running stack |

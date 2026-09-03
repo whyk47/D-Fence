@@ -7,17 +7,25 @@
  * no server (10.6.3). This class is the only place that knows Express exists.
  */
 import express, { Express, Request as ExRequest, Response as ExResponse } from 'express';
-import { RouteHandler, Request, Response } from './RouteHandler';
+import { RouteHandler, Request, Response, PrincipalResolver } from './RouteHandler';
 
 export class ExpressApp {
   private readonly app: Express = express();
   private readonly handlers: RouteHandler[] = [];
 
-  constructor() {
+  /**
+   * @param resolver turns a bearer token into a principal (2.1.8, 2.3.6). Injected here, and
+   *   handed to every handler at mount time, so a new route cannot be added without one — the
+   *   alternative, each handler taking it in its constructor, is a step that can be forgotten.
+   */
+  constructor(private readonly resolver: PrincipalResolver | null = null) {
     this.app.use(express.json({ limit: '2mb' }));
   }
 
   mount(handler: RouteHandler): void {
+    if (this.resolver !== null) {
+      handler.useResolver(this.resolver);
+    }
     this.handlers.push(handler);
     for (const route of handler.routes()) {
       this.app.get(route, (req: ExRequest, res: ExResponse) => {
