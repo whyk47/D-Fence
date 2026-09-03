@@ -20,10 +20,12 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | §3.2.1 (extension) EC/BV cases for the feed parser and driver bindings | **Done 2026-09-03.** `ClusterFeedParser` and `NormalisationFactory`, 32 cases — `tests/cluster-feed.test.ts`, designed in §2.5 |
 | §3.2 (extension) Ingestion template + full scoring cycle, no network, no database | **Done 2026-09-03.** 15 cases — `tests/ingestion.test.ts`, designed in §2.6 |
 | §3.2 (extension) The rainfall path — parsing, station assignment, accumulation, staleness | **Done 2026-09-03.** 18 cases — `tests/rainfall.test.ts`, designed in §2.7 |
+| §3.2 (extension) The work-order lifecycle driven end to end | **Done 2026-09-03.** 27 cases — `tests/work-order.test.ts`, designed in §2.8 |
+| §3.2 (extension) Community reporting, its boundaries and its join to §8 | **Done 2026-09-03.** 42 cases — `tests/report.test.ts`, designed in §2.9 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
-| Integration and end-to-end tests | **Not started.** They need the persistence and HTTP layers, which are skeleton |
+| Integration and end-to-end tests | **Partly done.** The §2.6, §2.8 and §2.9 suites are integration tests in all but name — several controllers, real stores, no fakes below the gateway. A browser-level end-to-end test still needs the client |
 
 **Why these two subjects.** `PriorityScoringEngine` is the computational core — the class the
 module's "data processing" criterion is judged on — and requirement 4.1.8 states its thresholds
@@ -245,6 +247,83 @@ share a timestamp, so it returned both and the dashboard would have shown every 
 store now keeps scores **by cycle**. The note matters beyond the fake: the Postgres implementation
 must key on a cycle id for the same reason, not on `MAX(computed_at)`.
 
+### 2.8 Fourth subject - the work-order lifecycle (`tests/work-order.test.ts`)
+
+Added 2026-09-03 with the implementation. The basis-path suite (§3) already paths over
+`isTransitionPermitted` as a pure predicate; these are the cases that appear only once the machine
+is **driven** — the guards, the assignee restriction, and the loop the demo is built around.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| C1 | A new work order starts Created; creation is not a transition | 8.3.15 | ✓ |
+| C2–C4 | A past scheduled date, over-long instructions and an unknown cluster are refused | 8.1.1, 8.1.4, 8.1.6 | ✓ |
+| **C5** | A second open order of the same task type is refused **and hands back the one that blocked it** | 8.1.11, 8.1.12 | ✓ |
+| C6 | A different task type on the same cluster is allowed | 8.1.11 | ✓ |
+| **D1** | The daily list excludes clusters that already have an open order | 8.1.7 | ✓ |
+| **L2** | A crew member who is not the assignee cannot complete the job — the role check passes and the move is still refused | 8.3.4, 8.3.20 | ✓ |
+| L3–L6 | Completion without evidence, rejection without a reason, cancellation without a reason, and a move out of a terminal state are each refused **before anything is written** | 8.3.6, 8.3.10, 8.3.16, 8.3.18 | ✓ |
+| **E1** | The treatment record is dated to the **completion**, not the verification | 8.3.12 | ✓ |
+| E2 | The recency driver moves off its 90-day default once a record exists | 4.1.15, 4.1.16 | ✓ |
+| **E3** | The cluster scores **lower** after treatment — US-8.8 end to end | 4.1.17 | ✓ |
+
+**L2 and E3 are the two to point at.** L2 is a rule a role matrix cannot express: `OTHER_CREW`
+holds every permission `CREW` holds, so without the `assigneeOnly` rule one crew member completes
+another's job and the audit trail says it was legitimate. E3 is the ninety seconds of the demo,
+asserted rather than described.
+
+**A design consequence recorded here because a test forced it.** A completion can be rejected,
+resumed and re-submitted, so the rejection reason belongs to the *attempt* — an append-only
+`CompletionEvidence` — not to the work order. Held on the work order, the second rejection would
+overwrite the first one's history, which is exactly the record a disputed refusal needs.
+
+### 2.9 Fifth subject - community reporting (`tests/report.test.ts`)
+
+Added 2026-09-03 with the implementation. This suite carries the two judgement numbers flagged in
+`REQUIREMENTS.md` §13 — **50 metres and 24 hours** — and the join between §5 and §8.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| S1–S2 | A valid report is Submitted, with reporter, timestamp, and an initial history entry | 5.1.10, 5.2.2 | ✓ |
+| **S3** | A 500-character description is accepted; 501 is refused | 5.1.4 (BV) | ✓ |
+| **S4** | Three photographs accepted, a fourth refused | 5.1.5 (BV) | ✓ |
+| **S5** | Exactly 5 MB accepted; 5 MB + 1 byte and a GIF refused | 5.1.6 (BV) | ✓ |
+| S6 | A type outside the five is refused, not coerced to Other | 5.1.3 | ✓ |
+| S7 | A crew member has no `report:create` and is refused | 2.3.5 | ✓ |
+| L1 | A point inside an active cluster binds to that cluster | 5.1.7 | ✓ |
+| **L2** | A point 600 m away takes the **locality** and leaves `clusterId` null | 5.1.8 | ✓ |
+| L3 | No locality within 1 km gives Unassigned, and the status is still Submitted | 5.1.9 | ✓ |
+| **D1** | 49 m is a duplicate; 51 m is not | 5.1.11 (BV) | ✓ |
+| **D2** | Exactly 50 m **is** a duplicate — the radius is inclusive | 5.1.11 (BV) | ✓ |
+| **D3** | 23 hours is a duplicate; 25 hours is not | 5.1.11 (BV) | ✓ |
+| D4–D5 | A different type, or a settled report, is not a duplicate | 5.1.11 | ✓ |
+| D6 | The refusal carries the existing report, which is what 5.1.12 offers | 5.1.12 | ✓ |
+| **D7** | Confirming increments once per resident; a second attempt is refused | 5.1.13, 5.1.14 | ✓ |
+| D8–D9 | A reporter cannot confirm their own report; a settled report cannot be confirmed | 5.1.13 | ✓ |
+| M1–M2 | The queue is oldest-first and filters by cluster and by type, server-side | 5.3.1–5.3.3 | ✓ |
+| M3 | Verifying records moderator id and timestamp | 5.3.4 | ✓ |
+| **M4** | A nine-character rejection reason is refused **and the status is untouched**; ten is accepted | 5.2.4 (BV) | ✓ |
+| M5–M6 | A Resident cannot moderate; a settled report has no outgoing move | 5.2.3, 5.2.1 | ✓ |
+| **C1–C2** | Submitted and Rejected reports do **not** reach the score; Verified does | 5.2.5 | ✓ |
+| **C3** | Every active cluster appears in the count map, with 0 rather than absent | 4.1.12 | ✓ |
+| C4 | A locality-bound report enters no cluster's count | 5.1.8 | ✓ |
+| **V1–V2** | Photographs are withheld from other residents until Verified; the reporter sees their own | 5.3.5 | ✓ |
+| V3–V4 | The public projection carries no reporter identity; a resident lists only their own | 5.2.9, 2.3.2 | ✓ |
+| N1–N2 | Every status change notifies the reporter and nobody else, with the moderator's reason | 5.2.8 | ✓ |
+| **J1–J2** | Assigning the work order moves linked reports to Actioned, and they still count | 5.2.6, 5.2.5 | ✓ |
+| **J3** | Verifying it closes them, tells the residents, and removes them from the driver | 5.2.7, 8.5.1, 8.5.2 | ✓ |
+| **J4** | Cancelling it restores each report to the status it held before | 8.3.21 | ✓ |
+| J5 | Only verified reports may be linked to a work order | 8.1.13 | ✓ |
+| B1–B2 | The dashboard raises the moderation backlog with its age, and counts verified reports | 7.5.3 | ✓ |
+
+**C1, D2 and J4 are the three to point at.** C1 is the reason moderation exists at all: the
+community driver is the only path by which a member of the public can move an operational
+decision, and the test states exactly which statuses may take it. D2 records a decision the prose
+leaves open — "within 50 metres" is read as inclusive — so the boundary is a choice on the record
+rather than an accident of a comparison operator. J4 is the requirement that could most easily
+have been faked: 8.3.21 says a cancelled work order returns its reports to their **prior** status,
+and the implementation reads that from the append-only history rather than assuming Verified,
+because a report can be actioned, restored and actioned again.
+
 ---
 
 ## 3. Basis-path design
@@ -346,10 +425,10 @@ Four rules were applied, and each one removed cases:
 
 | Area | Blocked on |
 |---|---|
-| Repository spatial queries (1.2.5, 3.1.8, 5.1.7) | A live PostGIS instance; these are integration tests, not unit tests |
+| Repository spatial queries (1.2.5, 3.1.8, 5.1.7) | A live PostGIS instance. The **rule** is now tested through the `ClusterLocator` port (§2.9, L1–L3); what remains untested is the PostGIS implementation of it |
 | ~~`AbstractIngestionJob.run` template~~ | **Done 2026-09-03** — §2.6, cases I1–I5 |
 | `AccessControlService.authorise` — every §2.3 rule | Implementation. `AccessPolicy` is done and tested; the ownership-scoped check is not |
-| `WorkOrderLifecycleController.transition` end to end | Implementation, plus fakes for four collaborators |
+| ~~`WorkOrderLifecycleController.transition` end to end~~ | **Done 2026-09-03** — §2.8 |
 | Dialog map ↔ router agreement (11.3.2) | The client router, which is a stub. This one should be a **test**, not an inspection — every route in the code must be a state on the map |
 | One end-to-end path (Playwright) | A running stack |
 | `NEAFeedGateway.fetchLastUpdatedAt` / `fetchClusters` against a fixture | Implementation. The two-hop download (poll-download → signed S3 URL) is the part worth a test, since the signed URL expires |

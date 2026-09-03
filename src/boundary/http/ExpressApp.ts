@@ -24,6 +24,11 @@ export class ExpressApp {
         void handler.handle(ExpressApp.toRequest(req, route), ExpressApp.toResponse(res));
       });
     }
+    for (const route of handler.writeRoutes()) {
+      this.app.post(route, (req: ExRequest, res: ExResponse) => {
+        void handler.handle(ExpressApp.toRequest(req, route), ExpressApp.toResponse(res));
+      });
+    }
   }
 
   /** Escape hatch for pages that are not JSON APIs — the dev dashboard, health checks. */
@@ -38,7 +43,11 @@ export class ExpressApp {
   listen(port: number): void {
     this.app.listen(port, () => {
       console.log(`D-Fence listening on http://localhost:${port}`);
-      console.log(`  routes: ${this.handlers.flatMap((h) => h.routes()).join(', ')}`);
+      console.log(`  GET:  ${this.handlers.flatMap((h) => h.routes()).join(', ')}`);
+      const writes = this.handlers.flatMap((h) => h.writeRoutes());
+      if (writes.length > 0) {
+        console.log(`  POST: ${writes.join(', ')}`);
+      }
     });
   }
 

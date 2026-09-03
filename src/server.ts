@@ -17,6 +17,8 @@ import { NEAFeedGateway } from './boundary/gateways/NEAFeedGateway';
 import { RainfallGateway } from './boundary/gateways/RainfallGateway';
 import { ExpressApp } from './boundary/http/ExpressApp';
 import { DashboardRoutes } from './boundary/http/DashboardRoutes';
+import { ReportRoutes } from './boundary/http/ReportRoutes';
+import { ModerationRoutes } from './boundary/http/ModerationRoutes';
 import {
   InMemoryAuditStore,
   InMemoryClusterStore,
@@ -25,6 +27,11 @@ import {
   InMemoryRainfallStore,
 } from './persistence/memory/InMemoryStores';
 import { InMemoryTreatmentRecordStore, InMemoryWorkOrderStore, RecordingNotifier } from './persistence/memory/InMemoryWorkOrderStores';
+import { InMemoryClusterLocator, InMemoryReportStore } from './persistence/memory/InMemoryReportStores';
+import { ReportTransitionTable } from './control/ReportTransitionTable';
+import { ReportLifecycleController } from './control/ReportLifecycleController';
+import { ReportController } from './control/ReportController';
+import { ModerationController } from './control/ModerationController';
 import { WorkOrderTransitionTable } from './control/WorkOrderTransitionTable';
 import { WorkOrderLifecycleController } from './control/WorkOrderLifecycleController';
 import { DispatchController } from './control/DispatchController';
@@ -43,6 +50,7 @@ async function main(): Promise<void> {
   const config = ConfigLoader.load();
   const http = new HttpClient();
 
+  const ac0 = new AccessControlService(new AccessPolicy(), new InMemoryAuditStore());
   const clusters = new InMemoryClusterStore();
   const rainfall = new InMemoryRainfallStore();
   const runs = new InMemoryIngestionRunStore();
@@ -51,6 +59,11 @@ async function main(): Promise<void> {
   const workOrders = new InMemoryWorkOrderStore();
   const treatments = new InMemoryTreatmentRecordStore();
   const notifier = new RecordingNotifier();
+  const reports = new InMemoryReportStore();
+  const locator = new InMemoryClusterLocator(clusters);
+  const reportLifecycle = new ReportLifecycleController(new ReportTransitionTable(), reports, notifier);
+  const moderation = new ModerationController(ac0, reports, reportLifecycle);
+  const residentReports = new ReportController(ac0, reports, locator, reportLifecycle);
 
   const clusterJob = new ClusterIngestionJob(
     new NEAFeedGateway(
@@ -76,7 +89,9 @@ async function main(): Promise<void> {
       return;
     }
 
-    const stale: Driver[] = [Driver.VerifiedOpenReportCount];
+    // 4.1.3 is no longer degraded: reports exist, and a cluster with none genuinely has zero
+    // (5.2.5). Only rainfall can still go missing, and missing is not the same as zero.
+    const stale: Driver[] = [];
     if (rainRun.outcome === 'FAILED') {
       stale.push(Driver.Rainfall24h, Driver.Rainfall72h);
     }
@@ -85,6 +100,7 @@ async function main(): Promise<void> {
     const now = new Date();
     const stations = await rainfall.stations();
     const readings = await rainfall.readingsSince(new Date(now.getTime() - 72 * 3_600_000));
+    const reportCounts = await moderation.verifiedOpenCounts(active.map((c) => c.id));
     const inputs = new Map<string, DriverInputs>();
     for (const cluster of active) {
       const rain =
@@ -94,6 +110,7 @@ async function main(): Promise<void> {
       inputs.set(cluster.id, {
         rainfall24h: rain?.accum24hMm,
         rainfall72h: rain?.accum72hMm,
+        verifiedOpenReports: reportCounts.get(cluster.id) ?? 0, // 4.1.3 via 5.2.5
         // 4.1.15/4.1.16 — measured from the last verified treatment now that work orders exist,
         // defaulting to 90 days when a cluster has never been treated.
         daysSinceLastTreatment: await treatments.daysSinceLastTreatment(cluster.id, now),
@@ -114,8 +131,9 @@ async function main(): Promise<void> {
   const rainInterval = (config.ingestionIntervals.get(SourceKind.Rainfall) ?? 300) * 1000;
   setInterval(() => void cycle().catch((e: unknown) => console.error('cycle failed:', e)), Math.min(clusterInterval, rainInterval));
 
-  const ac = new AccessControlService(new AccessPolicy(), audit);
-  const dashboard = new DashboardController(ac, clusters, scores, runs, workOrders);
+  const ac = ac0;
+  void audit;
+  const dashboard = new DashboardController(ac, clusters, scores, runs, workOrders, reports);
   const lifecycle = new WorkOrderLifecycleController(
     new WorkOrderTransitionTable(),
     workOrders,
@@ -123,12 +141,15 @@ async function main(): Promise<void> {
     notifier,
     // 8.5.3 — a verified work order is reflected in the next cycle; here, immediately.
     { rescoreCluster: async () => cycle('MANUAL') },
+    reportLifecycle, // 5.2.7, 8.5.1, 8.5.2
   );
-  const dispatch = new DispatchController(ac, lifecycle, workOrders, clusters, scores, notifier);
+  const dispatch = new DispatchController(ac, lifecycle, workOrders, clusters, scores, notifier, reportLifecycle);
   void dispatch;
 
   const app = new ExpressApp();
   app.mount(new DashboardRoutes(ac, dashboard));
+  app.mount(new ReportRoutes(ac, residentReports));
+  app.mount(new ModerationRoutes(ac, moderation));
   app.page('/ops', async () => {
     const manager = principalFor(Role.OperationsManager);
     return renderOpsDashboard(

@@ -28,7 +28,19 @@ export abstract class RouteHandler {
   constructor(protected readonly ac: AccessControlService) {}
 
   abstract handle(req: Request, res: Response): Promise<void>;
+  /** Paths this handler answers with GET. */
   abstract routes(): string[];
+
+  /**
+   * Paths this handler answers with POST. Empty for a read-only handler, which is most of them.
+   *
+   * Separate from `routes()` rather than a method/path pair per entry, because the split is the
+   * thing worth being able to read at a glance: every path listed here changes state, and 10.3.6's
+   * validation obligation applies to exactly those.
+   */
+  writeRoutes(): string[] {
+    return [];
+  }
 
   /**
    * Derived from the session, never from a client-supplied role claim.

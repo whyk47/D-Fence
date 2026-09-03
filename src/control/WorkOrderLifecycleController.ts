@@ -15,7 +15,7 @@ import { Uuid } from '../entity/valueTypes';
 import { WorkOrder } from '../entity/WorkOrder';
 import { CompletionEvidence } from '../entity/CompletionEvidence';
 import { TreatmentRecord } from '../entity/TreatmentRecord';
-import { Notifier, Rescorer, TreatmentRecordStore, WorkOrderStore } from '../ports/Stores';
+import { Notifier, ReportLinkage, Rescorer, TreatmentRecordStore, WorkOrderStore } from '../ports/Stores';
 import { WorkOrderTransitionTable } from './WorkOrderTransitionTable';
 import { Principal } from './Principal';
 
@@ -38,6 +38,8 @@ export class WorkOrderLifecycleController {
     private readonly treatments: TreatmentRecordStore,
     private readonly notifier: Notifier | null,
     private readonly rescorer: Rescorer | null,
+    /** 5.2.7, 8.5.1, 8.5.2. Optional: §8 was built before reports existed and still runs without them. */
+    private readonly reports: ReportLinkage | null = null,
   ) {}
 
   /**
@@ -185,10 +187,12 @@ export class WorkOrderLifecycleController {
       await this.notifier?.notify(workOrder.assigneeId, `Your completion was rejected for work order ${workOrder.id}.`);
     }
     if (status === WorkOrderStatus.Verified) {
+      // 8.5.1, 8.5.2, 5.2.7 — close every linked report and tell the residents who filed them.
+      // Before the rescore, not after: closing a report removes it from 5.2.5's count, and the
+      // cycle that follows must see that removal, or the score keeps a driver for work now done.
+      await this.reports?.onWorkOrderVerified(workOrder.id);
       // 8.5.3 — within one scoring cycle. Calling it here makes the demo beat immediate rather than
       // waiting for the hourly cycle, which matters because 4.1.17 is the thing being shown.
-      // TODO(E5): 8.5.1 — set every report linked to this work order to Closed, and 8.5.2 notify
-      // the reporting residents. Reports do not exist yet; this is where that hook belongs.
       await this.rescorer?.rescoreCluster(workOrder.clusterId);
     }
   }

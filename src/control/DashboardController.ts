@@ -17,7 +17,8 @@ import { PriorityTier, Driver, SourceKind, Role } from '../entity/enums';
 import { Uuid } from '../entity/valueTypes';
 import { Cluster } from '../entity/Cluster';
 import { PriorityScore } from '../entity/PriorityScore';
-import { ClusterStore, IngestionRunStore, PriorityScoreStore, WorkOrderStore } from '../ports/Stores';
+import { ClusterStore, IngestionRunStore, PriorityScoreStore, ReportStore, WorkOrderStore } from '../ports/Stores';
+import { ReportStatus } from '../entity/enums';
 import { WorkOrder } from '../entity/WorkOrder';
 import { AccessControlService } from './AccessControlService';
 import { Principal } from './Principal';
@@ -85,6 +86,8 @@ export class DashboardController {
     private readonly runs: IngestionRunStore,
     /** Optional so the dashboard predates work orders rather than being blocked by them. */
     private readonly workOrders: WorkOrderStore | null = null,
+    /** Same again for reports: null means "not wired", which is not the same as "none" (7.5.3). */
+    private readonly reports: ReportStore | null = null,
   ) {}
 
   /** 7.1.x. */
@@ -107,8 +110,10 @@ export class DashboardController {
       activeClusters: active.length,
       totalActiveCases: active.reduce((sum, c) => sum + c.caseSize, 0),
       highTierClusters: tierDistribution[PriorityTier.High],
-      // Reports still do not exist: null rather than 0, so the panel cannot show a false all-clear.
-      openVerifiedReports: null,
+      openVerifiedReports:
+        this.reports === null
+          ? null // still null when unwired: a false all-clear is worse than an empty cell (7.5.3)
+          : [...(await this.reports.verifiedOpenCountByCluster()).values()].reduce((a, b) => a + b, 0),
       openWorkOrders: open === null ? null : open.length,
       overdueWorkOrders: open === null ? null : open.filter((w) => w.isOverdue(new Date())).length,
       tierDistribution,
@@ -189,7 +194,19 @@ export class DashboardController {
         });
       }
     }
-    // TODO(E5): 7.5.3 reports awaiting moderation. Reports do not exist yet.
+    // 7.5.3 — reports waiting on a moderator. One item carrying the count, not one per report:
+    // a queue of forty would otherwise bury the source-health and overdue items underneath it.
+    const awaiting = this.reports === null ? [] : await this.reports.findByStatus(ReportStatus.Submitted);
+    if (awaiting.length > 0) {
+      const oldest = awaiting.reduce((a, b) => (a.submittedAt <= b.submittedAt ? a : b));
+      items.push({
+        kind: 'reportAwaitingModeration',
+        detail: `${awaiting.length} report(s) awaiting moderation; the oldest has waited ${Math.floor(
+          (Date.now() - oldest.submittedAt.getTime()) / 3_600_000,
+        )} hour(s)`,
+        link: '/ops/moderation',
+      });
+    }
     return items;
   }
 

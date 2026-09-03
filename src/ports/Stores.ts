@@ -8,14 +8,17 @@
  * repositories in `persistence/` implement them; `persistence/memory/` implements them without a
  * database, which is what lets `npm run ingest` pull live NEA data before Supabase exists.
  */
-import { Uuid } from '../entity/valueTypes';
-import { SourceKind } from '../entity/enums';
+import { Uuid, GeoPoint } from '../entity/valueTypes';
+import { ReportStatus, ReportType, SourceKind } from '../entity/enums';
 import { Cluster } from '../entity/Cluster';
 import { ClusterSnapshot } from '../entity/ClusterSnapshot';
 import { IngestionRun } from '../entity/IngestionRun';
 import { PriorityScore } from '../entity/PriorityScore';
 import { WorkOrder } from '../entity/WorkOrder';
 import { CompletionEvidence } from '../entity/CompletionEvidence';
+import { Report } from '../entity/Report';
+import { ReportPhoto } from '../entity/ReportPhoto';
+import { Corroboration } from '../entity/Corroboration';
 import { TreatmentRecord } from '../entity/TreatmentRecord';
 import { ParsedBatch } from './types';
 import { ParsedReading, ParsedStation } from '../control/ingestion/RainfallFeedParser';
@@ -90,6 +93,80 @@ export interface Notifier {
 /** 8.5.3 — a verified work order must be reflected in the next scoring cycle. */
 export interface Rescorer {
   rescoreCluster(clusterId: Uuid): Promise<void>;
+}
+
+/**
+ * The report aggregate: the report, its photographs, its corroborations and its status history.
+ *
+ * One port rather than four, because they are one aggregate — a photograph has no meaning without
+ * its report, and every write here is made in the same transaction by the same controller. Splitting
+ * them would give four objects that can only ever be used together, which is the cost of a fat
+ * interface without the benefit of a narrow one.
+ *
+ * Traces: 5.1.1–5.1.14, 5.2.1–5.2.9, 5.3.1–5.3.5, 4.1.3.
+ */
+export interface ReportStore {
+  findById(id: Uuid): Promise<Report | null>;
+  save(report: Report): Promise<Report>;
+  /**
+   * 5.1.11 — open reports of the same type within `radiusMetres` of the point, submitted at or
+   * after `since`. The radius test belongs to the store because PostGIS answers it with an index;
+   * the in-memory implementation walks the list, and both must give the same answer at 50 m.
+   */
+  findNearbyOpen(point: GeoPoint, type: ReportType, radiusMetres: number, since: Date): Promise<Report[]>;
+  /** 5.3.1 — the moderation queue. */
+  findByStatus(status: ReportStatus): Promise<Report[]>;
+  /** 2.3.2, 5.2.9 — a Resident's own reports. */
+  findByReporter(reporterId: Uuid): Promise<Report[]>;
+  /** 5.2.5 into 4.1.3 — the verified open report count, per cluster, in one query per cycle. */
+  verifiedOpenCountByCluster(): Promise<Map<Uuid, number>>;
+  /** 8.5.1, 8.3.21 — every report linked to a work order. */
+  findForWorkOrder(workOrderId: Uuid): Promise<Report[]>;
+  /**
+   * Append-only. 8.3.21 needs the status a report held *before* it was Actioned, and a single
+   * `previousStatus` column would be wrong the moment a report is actioned twice.
+   */
+  appendStatusChange(reportId: Uuid, from: ReportStatus | null, to: ReportStatus, at: Date): Promise<void>;
+  statusHistory(reportId: Uuid): Promise<Array<{ from: ReportStatus | null; to: ReportStatus; at: Date }>>;
+  /** 5.1.13, 5.1.14 */
+  saveCorroboration(corroboration: Corroboration): Promise<void>;
+  hasCorroborated(reportId: Uuid, accountId: Uuid): Promise<boolean>;
+  /** 5.1.5, 5.3.5 */
+  savePhoto(photo: ReportPhoto): Promise<void>;
+  photosFor(reportId: Uuid): Promise<ReportPhoto[]>;
+}
+
+/**
+ * Where a point is, spatially. 5.1.7 and 5.1.8 are PostGIS questions in production and arithmetic
+ * in a test, and this is the seam between the two.
+ *
+ * It is a port of its own, not two more methods on `ClusterStore`, because of the warning in
+ * `valueTypes.Polygon.contains`: containment must have exactly ONE implementation answering it at
+ * a time. A port with one bound implementation per deployment is precisely that guarantee, whereas
+ * a `contains()` on the value type plus a query in the store is two answers that can disagree.
+ */
+export interface ClusterLocator {
+  /** 5.1.7 — the active cluster whose boundary contains the point, or null. */
+  containing(point: GeoPoint): Promise<Cluster | null>;
+  /** 5.1.8 — the nearest locality within the radius, or null; 5.1.9 turns null into Unassigned. */
+  nearestLocalityWithin(point: GeoPoint, radiusMetres: number): Promise<string | null>;
+}
+
+/**
+ * What §8 owes §5. Work orders were built before reports existed, and three requirements
+ * (5.2.6, 5.2.7 / 8.5.1 and 8.3.21) join them.
+ *
+ * An interface rather than a direct call, so `DispatchController` and
+ * `WorkOrderLifecycleController` do not depend on the report controllers — the dependency runs one
+ * way, into this port, and the §8 tests still construct without a report store.
+ */
+export interface ReportLinkage {
+  /** 5.2.6 — the linked work order has been assigned. */
+  onWorkOrderAssigned(workOrderId: Uuid): Promise<void>;
+  /** 5.2.7, 8.5.1, 8.5.2 — the linked work order has been verified complete. */
+  onWorkOrderVerified(workOrderId: Uuid): Promise<void>;
+  /** 8.3.21 — the linked work order was cancelled; reports return to their prior status. */
+  onWorkOrderCancelled(workOrderId: Uuid): Promise<void>;
 }
 
 export interface AuditStore {

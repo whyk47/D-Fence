@@ -11,7 +11,7 @@ import { PriorityTier, Role, TaskType, WorkOrderStatus } from '../entity/enums';
 import { IsoDate, Uuid } from '../entity/valueTypes';
 import { WorkOrder } from '../entity/WorkOrder';
 import { Cluster } from '../entity/Cluster';
-import { ClusterStore, Notifier, PriorityScoreStore, WorkOrderStore } from '../ports/Stores';
+import { ClusterStore, Notifier, PriorityScoreStore, ReportLinkage, ReportStore, WorkOrderStore } from '../ports/Stores';
 import { WorkOrderLifecycleController, TransitionRefused } from './WorkOrderLifecycleController';
 import { AccessControlService } from './AccessControlService';
 import { Principal } from './Principal';
@@ -51,6 +51,8 @@ export class DispatchController {
     private readonly clusters: ClusterStore,
     private readonly scores: PriorityScoreStore,
     private readonly notifier: Notifier | null,
+    /** 5.2.6, 8.3.21. Optional for the same reason as in the lifecycle controller. */
+    private readonly reports: ReportLinkage | null = null,
     /** 8.1.8 — configurable, default ten. */
     private readonly dispatchListLimit = 10,
   ) {}
@@ -158,6 +160,7 @@ export class DispatchController {
     await this.workOrders.appendAssignmentHistory(id, crewId, new Date()); // 8.2.7
 
     const assigned = await this.lifecycle.transition(id, WorkOrderStatus.Assigned, by);
+    await this.reports?.onWorkOrderAssigned(id); // 5.2.6 — linked reports become Actioned
     await this.notifier?.notify(crewId, `You have been assigned work order ${id}.`); // 8.2.4
     if (previous !== null && previous !== crewId) {
       await this.notifier?.notify(previous, `Work order ${id} has been reassigned.`); // 8.2.6
@@ -186,9 +189,8 @@ export class DispatchController {
     workOrder.cancellationReason = reason;
     await this.workOrders.save(workOrder);
     const cancelled = await this.lifecycle.transition(id, WorkOrderStatus.Cancelled, by);
-    // TODO(E5): 8.3.21 — return every linked report to the status it held before this work order
-    // was created. Reports do not exist yet; this is the hook, and it is the one thing 8.3.21 asks
-    // for that is not done.
+    // 8.3.21 — every linked report returns to the status it held before this work order took it.
+    await this.reports?.onWorkOrderCancelled(id);
     return cancelled;
   }
 
@@ -241,9 +243,22 @@ export class DispatchController {
     return (await this.workOrders.findAllOpen()).filter((w) => w.isOverdue(now));
   }
 
-  /** 8.1.13, 8.1.2 — hook for linking verified open reports; reports do not exist yet (E5). */
-  async linkVerifiedReports(_id: Uuid, _reportIds: Uuid[]): Promise<void> {
-    return Promise.resolve();
+  /**
+   * 8.1.13, 8.1.2 — link verified open reports to a work order, which is what makes 5.2.6, 5.2.7
+   * and 8.3.21 reachable at all: the linkage hooks find reports by `workOrderId`, and nothing else
+   * ever sets it.
+   */
+  async linkVerifiedReports(id: Uuid, reportIds: Uuid[], reports: ReportStore): Promise<void> {
+    for (const reportId of reportIds) {
+      const report = await reports.findById(reportId);
+      if (report === null || !report.isVerified()) {
+        // 8.1.13 links *verified* reports. A Submitted one has not been moderated, and linking it
+        // would put an unmoderated report into the work order's evidence trail.
+        continue;
+      }
+      report.workOrderId = id;
+      await reports.save(report);
+    }
   }
 
   /**

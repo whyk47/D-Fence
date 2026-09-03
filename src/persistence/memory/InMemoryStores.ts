@@ -10,10 +10,11 @@
  *
  * They are also what the Lab 4 tests run against: a scoring cycle with no network and no database.
  *
- * **What they deliberately do not do:** no spatial queries. `findContaining` and `findWithin` are
- * PostGIS operations (3.1.8, 5.1.7) and a hand-rolled point-in-polygon here would be a second
- * implementation of a predicate that must have exactly one — the risk `valueTypes.Polygon.contains`
- * already warns about.
+ * **Spatial queries live behind their own port.** Containment (3.1.8, 5.1.7) is not a method on
+ * `ClusterStore` here: it is `ClusterLocator`, implemented for development and test by
+ * `InMemoryClusterLocator` and for production by PostGIS. Exactly one implementation is bound per
+ * process, which is what the warning on `valueTypes.Polygon.contains` actually requires — one
+ * answer to containment, not none in memory.
  */
 import { randomUUID } from 'node:crypto';
 import { AuditStore, ClusterStore, IngestionRunStore, PriorityScoreStore, RainfallStore } from '../../ports/Stores';

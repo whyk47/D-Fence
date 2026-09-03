@@ -33,6 +33,9 @@ export class AccessPolicy {
         'savedLocation:read',
         'savedLocation:write',
         'report:create',
+        // 5.1.13 — confirming is not creating, and it is deliberately NOT ownership-scoped: the
+        // whole point is that a *neighbour* corroborates a report that is not theirs.
+        'report:confirm',
         'report:readIdentified',
         'alert:configure',
       ]),
