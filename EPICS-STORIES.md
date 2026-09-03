@@ -137,6 +137,60 @@ forgotten rather than deferred.*
 - Add the attribution footer and check each source's licence terms.
 - Add rate-limit respect to every external client.
 
+*Partly delivered 2026-09-04, commit `e33a685`, merged to `dev` with `--no-ff`. **This story is not
+done** — three of its nine requirements had no implementation at all and now do, but two of the
+acceptance clauses still depend on infrastructure that does not exist yet.
+
+**Done in this pass.** 10.4.3, deletion within seven days: `src/control/PrivacyController.ts` is new,
+with `requestDeletion`, `purge`, `overdueRequests`, and an exported `PERSONAL_DATA_INVENTORY` and
+`DELETION_DEADLINE_DAYS = 7`. Seven days is a **deadline, not a delay** — a request purges
+immediately. The hard half of this requirement is not deleting; it is deciding what counts as the
+person's own. A resident's reports are not theirs alone: a verified report is evidence a cleaning crew
+was sent somewhere, it sits in the 4.1.3 driver, and 8.1.13 may link it to a work order. Deleting
+them would rewrite an operational history other people acted on, and keeping them whole would ignore
+the request — so reports are **dissociated, not deleted**: `reporterId` is severed and the report
+survives with its content intact. Saved locations, alert subscriptions, the email address and the
+Telegram chat link are destroyed outright. The email becomes a tombstone `deleted-<id>@invalid` rather
+than an empty string, because `findByEmail('')` would otherwise match every deleted account and
+2.1.4's duplicate check reads that index; the provider credential is disabled through an
+`IdentityProvider` port. Consequences carried through: `src/entity/Report.ts` has `reporterId` as
+`Uuid | null` with the reason recorded on the field; `ReportLifecycleController` makes a status change
+on an ownerless report notify nobody, since 5.2.8's obligation cannot outlive the person it was owed
+to; and `ReportController.statusHistory` passes `ownerId: report?.reporterId ?? undefined`, so an
+ownership-scoped read of a dissociated report is refused rather than becoming readable by whoever
+asks. 10.4.4, attribution: `src/config/Attribution.ts` is a new registry of four sources, each with
+text, URL, licence, a `requiresCredential` flag and the list of screen ids it must appear on, so the
+obligation travels with the source rather than with whoever remembers to build a footer.
+`src/boundary/http/PrivacyRoutes.ts` is new — `GET /api/attribution`, deliberately
+**unauthenticated**, because a licence obligation that only appears after sign-in is not discharged,
+and `POST /api/account/delete`. 10.3.2, the half that is code: `ExpressApp` gains an HTTPS redirect
+honouring `x-forwarded-proto` (TLS is usually terminated upstream, so `req.secure` alone reports false
+for every request in that arrangement), `Strict-Transport-Security` for a year, plus
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`. It is
+**off by default** and switched on by `DFENCE_REQUIRE_HTTPS=true` — localhost has no certificate, and
+a security control that is on in development is one somebody turns off to get work done and then
+forgets. The flag is explicit rather than inferred from `NODE_ENV`, because a control that switches
+itself on by guessing the environment can guess wrong. `src/server.ts` mounts the routes and reads the
+flag. `tests/privacy.test.ts` is new, 16 cases (P1-P16), documented as TEST-PLAN §2.22.
+
+**10.4.5 is not satisfied, and this is recorded rather than argued away.** The requirement says data
+comes only from public sources needing no third-party authentication; OneMap needs a registered
+account and an expiring token. It is a Singapore government service publishing open data, so it would
+be easy to call it compliant — and that would be reading the requirement to suit us.
+`Attribution.credentialedSources()` returns the exception, so it is testable, appears in the API
+response, and belongs in the demo notes.
+
+**Still gated, not forgotten.** 10.3.5's signed, non-enumerable photograph URLs need **Supabase
+Storage, which does not exist yet** — `SupabaseStorageGateway.signedUrl` remains a stub and the bucket
+policy is the real guarantee. 10.3.2's actual TLS needs **a deployment**; what exists is the redirect,
+HSTS and the header policy, which is the half we control.
+
+Verified live over HTTP, not only in tests: `GET /api/attribution?screenId=MapView` returned the two
+sources the map draws from and no OneMap credit; `GET /api/attribution` reported all four with
+`credentialedSources: ["Geocoding"]`; and a full register -> verify -> sign-in ->
+`POST /api/account/delete` run erased the account, after which the sign-in was refused. **Tests: 468
+passing across 22 files** (was 452 across 21), `npx tsc --noEmit` strict-clean.*
+
 ### US-0.5 — Prove the performance and test obligations
 **As** the team, **we need** the stated performance numbers measured rather than asserted **so that**
 §10.1 is a requirement rather than a wish.

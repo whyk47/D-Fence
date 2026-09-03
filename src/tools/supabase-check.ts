@@ -45,7 +45,40 @@ async function checkRestApi(url: string, anonKey: string): Promise<boolean> {
   }
 }
 
+/**
+ * A password with a reserved character in it produces a string that is structurally plausible and
+ * unparseable, and `new Client()` throws before any of the useful checks run. `#` is the common
+ * one — Supabase generates passwords containing it, and in a URL it starts the fragment, so
+ * everything after it is silently discarded.
+ *
+ * @returns null when the string is usable, otherwise the sentence to show instead of a stack trace
+ */
+function unusableBecause(connectionString: string): string | null {
+  if (!/^postgres(ql)?:\/\//.test(connectionString)) {
+    return 'it does not start with postgresql://';
+  }
+  try {
+    new URL(connectionString);
+    return null;
+  } catch {
+    const at = connectionString.lastIndexOf('@');
+    const password = at === -1 ? '' : connectionString.slice(connectionString.indexOf(':', 13) + 1, at);
+    // Named rather than shown. The character is the diagnosis; the password is not ours to print.
+    const offenders = ['#', '%', '?', '/', '[', ']', '@', ' '].filter((c) => password.includes(c));
+    return offenders.length === 0
+      ? 'it is not a valid URL'
+      : `the password contains ${offenders.map((c) => `'${c}'`).join(' and ')}, which must be percent-encoded ` +
+        `(${offenders.map((c) => `'${c}' becomes '%${c.charCodeAt(0).toString(16).toUpperCase()}'`).join(', ')})`;
+  }
+}
+
 async function checkDatabase(connectionString: string): Promise<void> {
+  const unusable = unusableBecause(connectionString);
+  if (unusable !== null) {
+    report(false, 'DATABASE_URL', unusable);
+    console.log('    → change it in src/.env only; the password itself is fine everywhere else.');
+    return;
+  }
   console.log(`  · connecting to           ${describe(connectionString)}`);
   // Certificate verification is left ON. If it fails, that is worth seeing rather than silently
   // disabling — a check tool that turns off TLS verification teaches the habit of turning it off.
