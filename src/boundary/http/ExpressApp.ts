@@ -18,8 +18,44 @@ export class ExpressApp {
    *   handed to every handler at mount time, so a new route cannot be added without one — the
    *   alternative, each handler taking it in its constructor, is a step that can be forgotten.
    */
-  constructor(private readonly resolver: PrincipalResolver | null = null) {
+  /**
+   * @param requireHttps 10.3.2. Off in development, because localhost has no certificate and a
+   *   redirect loop is a worse first experience than plain HTTP on a laptop. On in a deployment,
+   *   where it redirects and sets HSTS.
+   */
+  constructor(
+    private readonly resolver: PrincipalResolver | null = null,
+    private readonly requireHttps = false,
+  ) {
     this.app.use(express.json({ limit: '2mb' }));
+    this.app.use((req: ExRequest, res: ExResponse, next: () => void) => {
+      // Behind a proxy or a platform load balancer, TLS terminates upstream and the only evidence
+      // of the original scheme is this header. `req.secure` alone reports false for every request
+      // in that arrangement, which is most deployments.
+      const proto = req.headers['x-forwarded-proto'];
+      const secure = req.secure || proto === 'https';
+      if (this.requireHttps && !secure) {
+        // 10.3.2. A redirect rather than a refusal: the request already travelled in the clear, so
+        // anything sensitive in it is already exposed — what this prevents is the *next* one.
+        res.redirect(308, `https://${req.headers.host ?? ''}${req.originalUrl}`);
+        return;
+      }
+      if (this.requireHttps) {
+        // Tell the browser not to try HTTP again for a year, which is the half of 10.3.2 a
+        // redirect cannot do: a redirect only helps after the first request has already leaked.
+        res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+      }
+      // Cheap and unconditional: nothing here is meant to be framed or sniffed (10.3.x).
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('X-Frame-Options', 'DENY');
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      next();
+    });
+  }
+
+  /** 10.3.2 — exposed so a test can assert the policy without standing up a TLS listener. */
+  static redirectTargetFor(host: string, url: string): string {
+    return `https://${host}${url}`;
   }
 
   mount(handler: RouteHandler): void {

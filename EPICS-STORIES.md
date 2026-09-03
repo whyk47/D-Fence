@@ -853,6 +853,33 @@ reach the score.
 - Implement code generation, expiry and the bot-side link handler.
 - Build the Alert Settings screen with the code and instructions.
 
+*Delivered 2026-09-04, commit `dcbdf5b`, merged to `dev` with `--no-ff`. Unblocked once the bot token
+and chat id were supplied in `src/.env`. What was missing was narrower than the story reads:
+`NotificationController` could already issue a link code and already claim one, and
+`POST /api/alerts/link/claim` existed — but that route's only legitimate caller is the bot, and **the
+bot was not listening.** Nothing read the messages residents send it, so a code could be shown on a
+screen, typed into Telegram, and vanish. Same shape of gap as US-1.4's dead `heavyRainExpected`, found
+the same way: by asking what **writes** a value rather than what reads it. The bot-side link handler
+is now built and **verified live against the real bot, @DFenceBot, in both directions** — `getMe`
+confirmed the bot, `getUpdates` read a real pending message, a real 6.1.8-composed alert was delivered
+to a real phone, and the running server's poller consumed the pending message and answered it.
+`src/boundary/gateways/TelegramGateway.ts` gains `getUpdates(offset, timeoutSeconds)` (long-polling,
+never throws, per 10.2.1); `src/control/TelegramLinkController.ts` is new and accepts either a bare
+six-digit code or Telegram's `/start <code>` deep link, replying with cause **and** remedy on refusal
+(10.5.3) and with instructions for anything that is not a code — silence is the failure mode of a
+linking flow, since a person cannot tell whether they mistyped or the system is broken, so they retry
+the same thing. The offset advances past **every** update including ones it cannot handle, or one
+sticker sent to the bot stalls the poller permanently with no error anywhere; `start()` is idempotent
+and the timer is `unref`'d. `NotificationController.chatIdFor(accountId)` is new so a screen can say
+"linked" rather than offer a code to somebody who already has one. `src/tools/telegram-live.ts` is a
+new live tool; `tests/telegram-link.test.ts` is new, 10 cases (L1-L10), documented as TEST-PLAN §2.20.
+This is a **poller, not a webhook**: a webhook needs a public URL and the project has no hosting
+target yet, and the two are mutually exclusive at Telegram's end. **Still outstanding:** trace 11.2.11,
+the Alert Settings screen carrying the code and instructions, is E10 work and remains gated on mockups
+B3-B12 like every other screen. And the one path no test can close — a resident typing a freshly
+issued code into the chat — needs a human at the other end, which is exactly the point of a single-use
+code; that end-to-end run is Yen Kit's to close, with the server running.*
+
 ### US-6.2 — Choose which locations alert me
 **As** a Resident, **I want** alerts per location **so that** I am not notified about places I no
 longer care about.

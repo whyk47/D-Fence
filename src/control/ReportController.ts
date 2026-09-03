@@ -212,7 +212,11 @@ export class ReportController {
     await this.ac.authorise(by, 'report:readIdentified', {
       kind: 'report',
       id: reportId,
-      ownerId: report?.reporterId,
+      // `?? undefined`, not `?? by.accountId`: a report whose reporter deleted their account has
+      // no owner, and AccessControlService refuses an ownership-scoped action with no owner to
+      // compare against (2.3.1). Refusing is the safe direction — a dissociated report must not
+      // become readable by whoever asks for it.
+      ownerId: report?.reporterId ?? undefined,
     });
     return this.reports.statusHistory(reportId);
   }
