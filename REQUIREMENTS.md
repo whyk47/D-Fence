@@ -681,7 +681,7 @@ reader of this document alone can tell assumption from requirement.*
 
 | Observation | Value on 2026-09-03 | Consequence |
 |---|---|---|
-| Dataset `lastUpdatedAt` (metadata resource) | 2026-09-02T10:06:42+08:00 | The file is republished more often than its contents change |
+| Dataset `lastUpdatedAt` (metadata resource) | 2026-09-02T10:06:42+08:00, then 2026-09-03T10:06:44+08:00 | The file is **republished daily at about 10:06 SGT** even when its contents do not change |
 | Distinct `FMEL_UPD_D` values across all 12 features | two only — 2026-08-25 15:54 and 2026-08-28 15:51 | Cluster attributes are revised roughly **twice a week**, not hourly |
 | Active clusters | 12 | 10.1.3's 500-cluster performance bound is an order of magnitude of headroom, not a constraint |
 
@@ -690,6 +690,13 @@ poll the sub-2 KB metadata resource hourly and download the payload only when `l
 and 1.1.22 uses the publisher's own per-feature `INC_CRC` checksum for change detection. An hourly
 cycle that transfers 2 KB and records an UNCHANGED run is defensible; one that re-downloads and
 re-parses an identical 25 KB file twelve times a day is not.
+
+**Two stamps, two purposes, and both are needed.** `lastUpdatedAt` moves daily, so 1.1.20 alone
+reduces the download from roughly twenty-four times a day to about once — a real saving, but not the
+whole answer, because most of those daily republications carry identical cluster attributes.
+`INC_CRC` is what answers "did *this cluster* change", and 1.1.22 is therefore what keeps 1.1.7's
+last-updated timestamp and 1.1.9's change classification honest. A design that used only the dataset
+stamp would mark all twelve clusters as changed every morning.
 
 **What still carries the live-data criterion is rainfall** (verified 5-minute cadence), and the
 demo mitigation is unchanged: 1.1.18's manually triggered run shows the change-detection path on
