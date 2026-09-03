@@ -27,6 +27,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | §3.2 (extension) Resident alerts: triggers, the daily cap, delivery and retries | **Done 2026-09-03.** 29 cases — `tests/alert.test.ts`, designed in §2.12 |
 | §3.2 (extension) Map layers as an access surface, and the trend classification | **Done 2026-09-03.** 24 cases — `tests/map-trend.test.ts`, designed in §2.13 |
 | §3.2 (extension) Dialog-map conformance, the route guard, navigation and field rules | **Done 2026-09-03.** 31 cases — `tests/client-navigation.test.ts`, designed in §2.14 |
+| US-0.5 (§10.1) Performance obligations measured rather than asserted | **Done 2026-09-03.** 6 cases — `tests/performance.test.ts`, designed in §2.15 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -572,6 +573,46 @@ link straight into a refusal cannot ship.
 mockups (US-10.1, B3–B12), which are Yen Kit's deliverable, and building their layout first would
 be designing the interface in code and then drawing it afterwards — the order US-10.1 exists to
 prevent.
+
+### 2.15 Eleventh subject - the §10.1 performance obligations, measured (`tests/performance.test.ts`)
+
+Added 2026-09-03 for US-0.5, which exists because §10.1 states four numbers and a project can very
+easily assert them in a report without ever running anything.
+
+**What was measured**, on a development machine against the in-memory stores, seeded with 500
+synthetic clusters carrying 36-vertex boundaries (the vertex count of the live NEA feed's first
+cluster on 2026-09-03 — a synthetic square would have made the geometry look free):
+
+| Requirement | Bound | Measured | Margin |
+|---|---|---|---|
+| **10.1.3** scoring cycle, 500 clusters | 60,000 ms | **10.3 ms** | ~5,800× |
+| **10.1.2** read request, p95 over 100 requests | 1,000 ms | **1.3 ms** | ~770× |
+| 10.1.4 (server half) 300-polygon layer, 11,100 vertices | — | **0.8 ms** | assembly is not the cost |
+| 3.1.8 exposure evaluation, 50 locations × 500 boundaries | — | **26 ms** | the term that grows with both |
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| **P1** | 500 clusters scored inside the bound, **all seven drivers present** | 10.1.3 | ✓ |
+| P2 | The ranking is complete and correctly ordered: 1..500, no gaps, no duplicates | 4.1.14 | ✓ |
+| P3 | The dashboard read path, p95 over 100 requests | 10.1.2 | ✓ |
+| P4 | The map layer assembly over 300 polygons | 10.1.4 (server half) | ✓ |
+| **P5** | The obligations that are **not** measured here are recorded, with what each needs | 10.1.1, 10.1.4, 10.1.5 | ✓ |
+| P6 | Containment across 500 boundaries, the term that grows with clusters **and** residents | 3.1.8, 5.1.7 | ✓ |
+
+**These numbers are a floor, not a ceiling.** They exclude PostGIS, the network and the browser, so
+work that is already too slow here can only get slower. The margins on 10.1.3 and 10.1.2 are large
+enough that the conclusion survives that caveat comfortably; 10.1.1, 10.1.4 and 10.1.5 are *not*
+claimed — P5 records them as unmeasured along with what each would need, because a suite that
+silently omitted them would let §10.1 read as fully verified, which is the thing US-0.5 was
+written against.
+
+**P1 caught itself being wrong.** The first version misspelled two driver names in the input map
+(`rainfall24hMm` for `rainfall24h`), so the engine recognised nothing in them and the case measured
+a **degraded** five-driver cycle at 3.0 ms — a third of the real cost, and a number that would have
+gone into a report. `tsc --strict` rejected the cast that hid it. The case now asserts
+`isDegraded === false` and a seven-entry breakdown before it believes its own stopwatch, which is
+the general lesson: a performance measurement needs a correctness assertion beside it, or it will
+eventually measure something cheaper than the thing it names.
 
 ---
 
