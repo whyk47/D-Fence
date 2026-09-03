@@ -9,7 +9,7 @@
 import { AlertTrigger } from '../entity/enums';
 import { Uuid } from '../entity/valueTypes';
 import { AlertSubscription, DEFAULT_GROWTH_THRESHOLD } from '../entity/AlertSubscription';
-import { AlertSubscriptionStore, SavedLocationStore } from '../ports/Stores';
+import { AlertSubscriptionStore, AuditStore, SavedLocationStore } from '../ports/Stores';
 import { AccessControlService } from './AccessControlService';
 import { Principal } from './Principal';
 
@@ -31,6 +31,8 @@ export class AlertPreferenceController {
     private readonly ac: AccessControlService,
     private readonly subscriptions: AlertSubscriptionStore,
     private readonly locations: SavedLocationStore,
+    /** 2.4.1 — enabling or disabling an alert changes what the system will send to a person. */
+    private readonly audit: AuditStore | null = null,
   ) {}
 
   /**
@@ -78,7 +80,9 @@ export class AlertPreferenceController {
       }
       subscription.triggers = wanted;
     }
-    return this.subscriptions.save(subscription);
+    const saved = await this.subscriptions.save(subscription);
+    await this.audit?.appendAction(by.accountId, 'alertSubscription:update', 'AlertSubscription', saved.id); // 2.4.1
+    return saved;
   }
 
   /** 2.3.1 — the subscription for a location the caller owns, or null when they never enabled one. */

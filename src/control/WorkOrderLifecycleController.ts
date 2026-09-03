@@ -15,7 +15,7 @@ import { Uuid } from '../entity/valueTypes';
 import { WorkOrder } from '../entity/WorkOrder';
 import { CompletionEvidence } from '../entity/CompletionEvidence';
 import { TreatmentRecord } from '../entity/TreatmentRecord';
-import { Notifier, ReportLinkage, Rescorer, TreatmentRecordStore, WorkOrderStore } from '../ports/Stores';
+import { AuditStore, Notifier, ReportLinkage, Rescorer, TreatmentRecordStore, WorkOrderStore } from '../ports/Stores';
 import { WorkOrderTransitionTable } from './WorkOrderTransitionTable';
 import { Principal } from './Principal';
 
@@ -40,6 +40,13 @@ export class WorkOrderLifecycleController {
     private readonly rescorer: Rescorer | null,
     /** 5.2.7, 8.5.1, 8.5.2. Optional: §8 was built before reports existed and still runs without them. */
     private readonly reports: ReportLinkage | null = null,
+    /**
+     * 2.4.1, on the single write path for `WorkOrder.status`. Every accept, start, completion,
+     * verification, rejection and cancellation is one row, written in one place — including the
+     * ones DispatchController delegates here, which is why assignment does not need its own
+     * status entry.
+     */
+    private readonly audit: AuditStore | null = null,
   ) {}
 
   /**
@@ -93,6 +100,9 @@ export class WorkOrderLifecycleController {
       workOrder.startedAt = new Date(); // 8.3.17
     }
     await this.workOrders.save(workOrder);
+    // 2.4.1 — after the write and before the destination's obligations, so a failing notification
+    // cannot lose the record of a change that has already happened.
+    await this.audit?.appendAction(by.accountId, `workOrder:status:${from} -> ${to}`, 'WorkOrder', workOrder.id);
     await this.onEntering(to, workOrder);
     return workOrder;
   }
@@ -128,7 +138,11 @@ export class WorkOrderLifecycleController {
     }
     workOrder.issueFlag = true;
     workOrder.issueReason = reason;
-    return this.workOrders.save(workOrder);
+    const saved = await this.workOrders.save(workOrder);
+    // 8.3.8 is deliberately not a status transition, so it is not covered by the hook above — and
+    // it changes stored state, which is what 2.4.1 asks about.
+    await this.audit?.appendAction(by.accountId, 'workOrder:raiseIssue', 'WorkOrder', workOrder.id);
+    return saved;
   }
 
   /**

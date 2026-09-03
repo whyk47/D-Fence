@@ -11,7 +11,7 @@ import { PriorityTier, Role, TaskType, WorkOrderStatus } from '../entity/enums';
 import { IsoDate, Uuid } from '../entity/valueTypes';
 import { WorkOrder } from '../entity/WorkOrder';
 import { Cluster } from '../entity/Cluster';
-import { ClusterStore, Notifier, PriorityScoreStore, ReportLinkage, ReportStore, WorkOrderStore } from '../ports/Stores';
+import { AuditStore, ClusterStore, Notifier, PriorityScoreStore, ReportLinkage, ReportStore, WorkOrderStore } from '../ports/Stores';
 import { WorkOrderLifecycleController, TransitionRefused } from './WorkOrderLifecycleController';
 import { AccessControlService } from './AccessControlService';
 import { Principal } from './Principal';
@@ -55,6 +55,14 @@ export class DispatchController {
     private readonly reports: ReportLinkage | null = null,
     /** 8.1.8 — configurable, default ten. */
     private readonly dispatchListLimit = 10,
+    /**
+     * 2.4.1. Only the changes this class makes **itself** are recorded here — creation, the
+     * assignee field and the cancellation reason. The status moves it delegates are recorded by
+     * WorkOrderLifecycleController, so an assignment produces two rows: the assignee changed and
+     * the status changed. That is two facts, not one fact twice, and a reviewer asking "who
+     * moved this order to Assigned" and "who put Ah Meng on it" is asking two questions.
+     */
+    private readonly audit: AuditStore | null = null,
   ) {}
 
   /**
@@ -137,7 +145,11 @@ export class DispatchController {
     // 8.1.5 — default the priority to the cluster's current tier.
     workOrder.priority = await this.tierOf(cluster.id);
     workOrder.applyStatus(WorkOrderStatus.Created); // 8.3.15
-    return this.workOrders.save(workOrder);
+    const saved = await this.workOrders.save(workOrder);
+    // 2.4.1. Creation does not pass through the lifecycle controller — 8.3.15 makes Created the
+    // initial state rather than a transition into it — so this row has no counterpart there.
+    await this.audit?.appendAction(by.accountId, 'workOrder:create', 'WorkOrder', saved.id);
+    return saved;
   }
 
   /**
@@ -158,6 +170,14 @@ export class DispatchController {
     workOrder.assigneeId = crewId;
     await this.workOrders.save(workOrder);
     await this.workOrders.appendAssignmentHistory(id, crewId, new Date()); // 8.2.7
+    // 2.4.1. `previous` is carried into the action so the trail answers "reassigned from whom",
+    // which the assignment history holds but the audit log would otherwise not.
+    await this.audit?.appendAction(
+      by.accountId,
+      previous === null ? `workOrder:assign:${crewId}` : `workOrder:reassign:${previous} -> ${crewId}`,
+      'WorkOrder',
+      id,
+    );
 
     const assigned = await this.lifecycle.transition(id, WorkOrderStatus.Assigned, by);
     await this.reports?.onWorkOrderAssigned(id); // 5.2.6 — linked reports become Actioned
@@ -188,6 +208,7 @@ export class DispatchController {
     const workOrder = await this.requireOrder(id);
     workOrder.cancellationReason = reason;
     await this.workOrders.save(workOrder);
+    await this.audit?.appendAction(by.accountId, 'workOrder:cancellationReason', 'WorkOrder', id); // 2.4.1
     const cancelled = await this.lifecycle.transition(id, WorkOrderStatus.Cancelled, by);
     // 8.3.21 — every linked report returns to the status it held before this work order took it.
     await this.reports?.onWorkOrderCancelled(id);

@@ -102,7 +102,7 @@ async function main(): Promise<void> {
       : null,
   );
   const geocoding = new GeocodingController(oneMap);
-  const alertPreferences = new AlertPreferenceController(ac0, subscriptions, savedLocations);
+  const alertPreferences = new AlertPreferenceController(ac0, subscriptions, savedLocations, auditStore);
 
   const alertStore = new InMemoryAlertStore();
   // 6.1.6 needs a bot token. Without one the recording channel keeps §6 runnable and testable —
@@ -116,15 +116,16 @@ async function main(): Promise<void> {
   const forecasts = new InMemoryForecastStore();
   const runs = new InMemoryIngestionRunStore();
   const scores = new InMemoryPriorityScoreStore();
-  const audit = new InMemoryAuditStore();
   const workOrders = new InMemoryWorkOrderStore();
   const treatments = new InMemoryTreatmentRecordStore();
   const notifier = new RecordingNotifier();
   const reports = new InMemoryReportStore();
   const locator = new InMemoryClusterLocator(clusters);
-  const reportLifecycle = new ReportLifecycleController(new ReportTransitionTable(), reports, notifier);
+  // 2.4.1 — every controller that writes state gets the SAME audit store the access-control
+  // service denies into, so a refusal and the change it would have made sit in one log.
+  const reportLifecycle = new ReportLifecycleController(new ReportTransitionTable(), reports, notifier, auditStore);
   const moderation = new ModerationController(ac0, reports, reportLifecycle);
-  const residentReports = new ReportController(ac0, reports, locator, reportLifecycle);
+  const residentReports = new ReportController(ac0, reports, locator, reportLifecycle, auditStore);
   const alertTriggers = new AlertTriggerEvaluator(savedLocations, subscriptions, alertStore, locator);
   // 9.1.x — the map and the trend view read the same stores everything else writes to; nothing
   // here computes a second version of a score or a boundary.
@@ -147,7 +148,7 @@ async function main(): Promise<void> {
         ? null
         : accumulator.accumulate(point, stations, readings, at);
     },
-  });
+  }, auditStore);
 
   const clusterJob = new ClusterIngestionJob(
     new NEAFeedGateway(
@@ -269,7 +270,6 @@ async function main(): Promise<void> {
   }
 
   const ac = ac0;
-  void audit;
 
   /**
    * 2.2.3 says only an Operations Manager may create a manager or crew account, and 2.2.2 makes
@@ -301,8 +301,11 @@ async function main(): Promise<void> {
     // 8.5.3 — a verified work order is reflected in the next cycle; here, immediately.
     { rescoreCluster: async () => cycle('MANUAL') },
     reportLifecycle, // 5.2.7, 8.5.1, 8.5.2
+    auditStore, // 2.4.1 — the single write path for status is the single audit point
   );
-  const dispatch = new DispatchController(ac, lifecycle, workOrders, clusters, scores, notifier, reportLifecycle);
+  const dispatch = new DispatchController(
+    ac, lifecycle, workOrders, clusters, scores, notifier, reportLifecycle, 10, auditStore,
+  );
   void dispatch;
 
   // 2.3.6 — the resolver is the only way a request acquires a role, and every handler gets it.
