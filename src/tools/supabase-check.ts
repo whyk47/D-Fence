@@ -14,7 +14,13 @@
  * 10.3.4 keeps them out of the repository for the same reason.
  */
 import { Client } from 'pg';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ConfigLoader } from '../config/ConfigLoader';
+
+/** Supabase signs its database certificates with its own private CA; see Database.ts. */
+const CA_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'certs', 'prod-ca-2021.crt');
 
 const TICK = '✓';
 const CROSS = '✗';
@@ -80,9 +86,18 @@ async function checkDatabase(connectionString: string): Promise<void> {
     return;
   }
   console.log(`  · connecting to           ${describe(connectionString)}`);
-  // Certificate verification is left ON. If it fails, that is worth seeing rather than silently
-  // disabling — a check tool that turns off TLS verification teaches the habit of turning it off.
-  const client = new Client({ connectionString, ssl: { rejectUnauthorized: true } });
+  // Verification stays ON, anchored on Supabase's own CA. The usual advice for the error this
+  // produces is `rejectUnauthorized: false`, which replaces a certificate error with no
+  // certificate checking at all — see the note on Database.ts.
+  let ca: string;
+  try {
+    ca = readFileSync(CA_PATH, 'utf8');
+  } catch {
+    report(false, 'CA certificate', `missing — download it to src/certs/prod-ca-2021.crt`);
+    console.log('    → Supabase dashboard → Settings → Database → SSL Configuration → Download certificate');
+    return;
+  }
+  const client = new Client({ connectionString, ssl: { ca, rejectUnauthorized: true } });
   try {
     await client.connect();
   } catch (error) {
@@ -93,7 +108,7 @@ async function checkDatabase(connectionString: string): Promise<void> {
     } else if (/password|authentication/i.test(message)) {
       console.log('    → the password in the string is wrong, or [YOUR-PASSWORD] was never replaced.');
     } else if (/certificate|self.signed/i.test(message)) {
-      console.log('    → TLS verification failed. Do not disable it; check the host is the pooler.');
+      console.log('    → the CA in src/certs is not the one signing this host. Re-download it.');
     }
     return;
   }
