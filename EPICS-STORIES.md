@@ -994,6 +994,49 @@ can tell whether our response is working.
 - Build the reports-per-day chart.
 - Implement empty and insufficient-data states.
 
+*Delivered 2026-09-03, commit `e7d9ff1`, merged to `dev` with `--no-ff`. Four of the five
+visualisations did not exist. Only 7.3.2's tier distribution was computed — the one chart a dashboard
+can answer from today's scores with no history at all — so "analytics" was in effect a pie chart of
+this afternoon. The substance of the story is its **second** acceptance criterion: every chart result
+carries `sufficient` and, when false, an `insufficientReason` sentence. The failure mode of a chart is
+not a wrong number, it is a *plausible* one — a 30-day case series drawn from four hours of snapshots
+is a flat line, and a flat line asserts "cases are steady", which the data does not support. Four
+decisions inside it. **7.3.1** sums each cluster's *last* snapshot per day (the feed publishes current
+values, so the last reading of a day is that day's answer; averaging would invent a number never
+observed), includes clusters that have **since closed** (otherwise a cluster that ended last week
+retroactively subtracts itself from every day it was part of), and **omits** a day with no snapshots
+rather than drawing a zero — a missed ingestion cycle is not a day on which dengue stopped. **7.3.3**
+counts open work orders per assignee with an unassigned bucket; unwired work orders report
+*insufficient* rather than rendering an empty chart, the same argument as `DashboardOverview`
+returning `null` rather than `0`. **7.3.4** returns the median with `fastestHours` and `slowestHours`
+beside it, so a median of 5 hours over a 3-to-400 spread cannot be read as consistency — median
+rather than mean is the requirement's own choice, since one job left open over a public holiday drags
+a mean far more than a median. **7.3.5** treats a day with no reports as a **real zero**, unlike
+7.3.1: nobody filing a report on a Tuesday is a fact about the world, no snapshot being taken is a
+fact about the scheduler; it counts every report whatever its moderation outcome, because filtering to
+verified ones would turn a demand curve into a moderation curve. Exported constants:
+`ANALYTICS_WINDOW_DAYS = 30`, `MINIMUM_DAYS_FOR_A_TREND = 7` (7.1.7 already uses seven days as the
+shortest interval the system will compare over), `MINIMUM_SAMPLES_FOR_A_MEDIAN = 5`. **Two entity
+fields had to exist first:** 7.3.4 measures creation to verified completion and neither end was
+recorded — `WorkOrder.startedAt` is 8.3.17's *work* start, a third instant and neither end of this.
+`WorkOrder.createdAt` is stamped by `DispatchController.createWorkOrder`; `WorkOrder.verifiedAt` is
+stamped inside `WorkOrderLifecycleController.transition` rather than in `verify()`, so any future path
+into Verified records it. Deriving the pair from the audit trail was rejected — the trail is evidence,
+not a reporting table. New: `src/control/AnalyticsController.ts` (exports `Chart<T>`, `DailyPoint`,
+`CrewLoad`, `TurnaroundSummary`, and `buildAll(by, now)`, which authorises once per 2.3.4 and returns
+all five) and `tests/analytics.test.ts` (21 cases, C1-C21). Changed: `src/entity/WorkOrder.ts`;
+`src/ports/Stores.ts` (new `ClusterStore.allSnapshotsSince`, `ReportStore.submittedSince`,
+`WorkOrderStore.findVerifiedSince`) and the three in-memory store files; `DispatchController` and
+`WorkOrderLifecycleController`; `src/boundary/http/DashboardRoutes.ts` (new `GET /api/ops/analytics`,
+optional 3rd constructor param); `src/server.ts`; `lab4/TEST-PLAN.md` (§2.19 plus a §1 summary row).
+**435 tests passing across 19 files** (was 414 across 18), `npx tsc --noEmit` strict-clean. Verified
+live over HTTP, not only in tests: `GET /api/ops/analytics` on a fresh deployment returned all five
+charts — 7.3.1 as "1 of 7 days of cluster history — too little to read as a trend", 7.3.4 as "0 of 5
+verified work orders", and 7.3.2 sufficient with the real tier split of the 15 live clusters (High 0,
+Medium 1, Low 14). **Stated limitation:** 7.3.3 cannot show a crew member with zero open orders,
+because this class has no account store. The charts themselves are server-side; rendering them is E10
+work, gated on the mockups like every other screen.*
+
 ### US-7.4 — Keep my working context and take the data away
 **As** an Operations Manager, **I want** my filters remembered and a CSV export **so that** I can pick
 up where I left off and share the list.

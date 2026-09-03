@@ -8,7 +8,7 @@
  * viva. Everything that needs a database lives in the methods around it.
  */
 import { Trajectory } from '../entity/enums';
-import { IsoDate, Uuid } from '../entity/valueTypes';
+import { IsoDate, Uuid, singaporeDate as toSingaporeDate } from '../entity/valueTypes';
 import { ClusterStore } from '../ports/Stores';
 
 /** One point of the 9.1.9 series: a calendar date and the case size observed that day. */
@@ -92,6 +92,6 @@ export class TrendAnalyser {
 
   /** The calendar date in Singapore. A day boundary at 00:00 UTC would split a Singapore evening. */
   static singaporeDate(at: Date): IsoDate {
-    return new Date(at.getTime() + 8 * 3_600_000).toISOString().slice(0, 10);
+    return toSingaporeDate(at);
   }
 }

@@ -16,6 +16,7 @@ import { RainfallSource } from '../../ports/ExternalGateway';
 import { HttpClient } from './HttpClient';
 import { SourceKind } from '../../entity/enums';
 import { RawPayload } from '../../ports/types';
+import { singaporeDate } from '../../entity/valueTypes';
 import { RawRainfallPayload, RainfallFeedParser } from '../../control/ingestion/RainfallFeedParser';
 
 export class RainfallGateway implements RainfallSource {
@@ -94,7 +95,6 @@ export class RainfallGateway implements RainfallSource {
   /** The API's `date` is a Singapore calendar date; deriving it from a UTC clock is off by a day
    *  for eight hours out of every twenty-four. */
   static singaporeDate(instant: Date): string {
-    const sgt = new Date(instant.getTime() + 8 * 3_600_000);
-    return sgt.toISOString().slice(0, 10);
+    return singaporeDate(instant);
   }
 }

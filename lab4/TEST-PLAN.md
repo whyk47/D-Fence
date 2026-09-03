@@ -32,6 +32,8 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | US-1.5 (§1.4) Source health: the three-interval rule and the staleness marker | **Done 2026-09-03.** 17 cases — `tests/source-health.test.ts`, designed in §2.17 |
 | US-2.5 (§2.4) The audit trail across the operational write paths | **Done 2026-09-03.** 10 cases — `tests/audit.test.ts`, designed in §2.18 |
 | US-7.3 (§7.3) The five dashboard visualisations and their insufficient-data states | **Done 2026-09-03.** 21 cases — `tests/analytics.test.ts`, designed in §2.19 |
+| US-6.1 (§6.1.6, §6.1.7) Linking a Telegram chat, and real delivery | **Done 2026-09-04.** 10 cases — `tests/telegram-link.test.ts`, designed in §2.20 |
+| Regression (§8.3.14, §4.1.15) The Singapore calendar date, found by the clock | **Done 2026-09-04.** 7 cases — `tests/singapore-date.test.ts`, designed in §2.21 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -832,6 +834,91 @@ Deriving the pair from the audit trail was rejected: the trail is evidence, not 
 with honest insufficiency: 7.3.1 "1 of 7 days of cluster history", 7.3.4 "0 of 5 verified work
 orders", 7.3.2 sufficient with the real tier split of the 15 live clusters. That is the behaviour
 the acceptance criterion asks for, seen from outside the process rather than asserted inside it.
+
+### 2.20 Sixteenth subject - linking a Telegram chat (`tests/telegram-link.test.ts`)
+
+Added 2026-09-04, when the bot token arrived and US-6.1 stopped being blocked.
+
+**What was actually missing is worth being precise about.** `NotificationController` could already
+issue a code and could already claim one, and `POST /api/alerts/link/claim` existed. But that
+route's only legitimate caller is the bot, and **the bot was not listening** — nothing read the
+messages residents send to it. So the flow was complete on paper and, end to end, did nothing: a
+code could be shown on a screen, typed into Telegram, and vanish. This is the same shape of gap as
+US-1.4's dead `heavyRainExpected`, found the same way — by asking what writes the value, not what
+reads it.
+
+**A poller, not a webhook**, because a webhook needs a public URL and this project has no hosting
+target yet. The two are mutually exclusive at Telegram's end, so the coupling is stated in the
+class rather than left to be discovered.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| L1 | A six-digit code links that chat, and the reply says what happens next | 6.1.7 | ✓ |
+| L2 | Telegram's `/start <code>` deep link is accepted as well as a bare code | 6.1.7 | ✓ |
+| **L3** | The code is **single-use**: a second chat sending the same code is refused | 6.1.7 | ✓ |
+| **L4** | The boundary: good **at** fifteen minutes, dead a millisecond later | 6.1.7, BV | ✓ |
+| L5 | A wrong code is refused with the cause **and** the remedy | 10.5.3 | ✓ |
+| L6 | Anything that is not a code gets instructions, never silence | 10.5.3 | ✓ |
+| **L7** | The offset advances past **every** update, including unhandled ones | 6.1.6 | ✓ |
+| L8 | An unhandled update draws no reply and is not counted as a refusal | 6.1.6 | ✓ |
+| L9 | `start()` is idempotent — two pollers on one bot each get half the messages | 6.1.6 | ✓ |
+| L10 | The link is a field on the account, which is what 6.1.6's delivery reads | 6.1.6 | ✓ |
+
+**L3 is the case that makes the code safe to type in public.** Six digits is a small space; what
+makes it acceptable is the pair of limits, and single use is the half an implementation is most
+likely to lose — `claimLinkCode` therefore consumes the code on a **failed** attempt too, because a
+code that survives a wrong guess can be brute-forced at leisure.
+
+**L7 is the failure that would look like an outage.** If the offset only advanced on messages the
+poller understood, one sticker sent to the bot would stall it permanently and no link would ever
+work again — with no error anywhere, because nothing failed.
+
+**Verified live against @DFenceBot, in both directions.**
+`npx tsx src/tools/telegram-live.ts` read a real pending message from the bot's inbox; `--send`
+delivered a real 6.1.8-composed alert to a real phone and returned `Sent`. Then the server was
+started with the poller running: the pending message was consumed and answered with the
+instructions reply, and a subsequent read showed zero pending. Inbound and outbound, against
+api.telegram.org, not against a fake.
+
+**Not verified end to end by this session, and it should be said plainly:** a resident typing a
+freshly issued code into Telegram. That needs a human at the other end of the chat — the whole
+point of L3 is that nothing else can present that code — so the last link in the chain is Yen Kit's
+to close, with the server running.
+
+### 2.21 Seventeenth subject - the Singapore calendar date (`tests/singapore-date.test.ts`)
+
+Added 2026-09-04, and **not** because a story asked for it. The suite was green at 20:00 and had two
+failures at 01:00, on cases that had passed for days. The clock found two real defects that 445
+tests had not:
+
+- **`WorkOrder.isOverdue`** compared a Singapore `scheduledDate` against a **UTC** today. Between
+  00:00 and 08:00 SGT the UTC date is yesterday, so a work order scheduled for yesterday did not
+  read as overdue — precisely during the hours an overnight backlog is reviewed (8.3.14).
+- **`TreatmentRecord.completionDate`** was stamped in UTC and read back as `+08:00`, so a job
+  completed at 1 am was dated the previous day and read as **one day old the moment it was
+  written**, moving the 4.1.15 recency driver by a day for nothing.
+
+**The root cause is duplication, not arithmetic.** `singaporeDate` had been written out by hand in
+five places; three were right and two used the raw UTC date. It now exists once, in `valueTypes.ts`
+beside `IsoDate` itself, and the other four delegate to it.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| **S1** | After midnight SGT the Singapore date is a day ahead of the UTC date | — | ✓ |
+| S2 | During the day the two agree — which is why this went unnoticed | — | ✓ |
+| **S3** | The boundary: 07:59:59 and 08:00:00 SGT, either side of the UTC rollover | BV | ✓ |
+| S4 | Every helper that names a Singapore date shares the one definition | — | ✓ |
+| **S5** | Yesterday's work order **is** overdue at 01:00 SGT — the defect itself | 8.3.14 | ✓ |
+| S6 | Today's is not overdue, at either hour | 8.3.14 | ✓ |
+| S7 | A settled order is never overdue, whatever the hour | 8.3.14 | ✓ |
+
+**Every case pins an explicit instant.** The two defects were invisible for sixteen hours a day
+because the tests that covered them used the wall clock — `yesterday()` and `new Date()` — so they
+asked the same question the code did and got the same wrong answer back. A test that only fails
+during office hours is not a test, and that is the transferable lesson here rather than anything
+about timezones: **a case that derives its expected value the same way the code does cannot falsify
+the code.** The two work-order cases that failed were left as they were; these seven are what pin
+the behaviour down.
 
 ---
 

@@ -9,6 +9,24 @@ export type Uuid = string;
 export type IsoDate = string;
 
 /**
+ * The **Singapore** calendar date of an instant.
+ *
+ * Every `IsoDate` in this system is a Singapore calendar date: a scheduled date is a date to a
+ * planner in Singapore, a completion date is the day the crew did the work, and a chart's day is
+ * the day a resident lived through. `Date.toISOString()` gives the UTC date, which between midnight
+ * and 08:00 SGT is **yesterday** — so for eight hours in every twenty-four the two disagree.
+ *
+ * This lives here, next to `IsoDate`, because it had been written out by hand in five places and
+ * two of them used raw UTC. Both were real defects, and both were invisible for sixteen hours a
+ * day: a work order scheduled for yesterday did not read as overdue at 1 am (8.3.14), and a job
+ * completed at 1 am was stamped with the previous day and immediately read as one day old, which
+ * moves the 4.1.15 recency driver. A duplicated definition is a defect waiting for a clock.
+ */
+export function singaporeDate(instant: Date): IsoDate {
+  return new Date(instant.getTime() + 8 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/**
  * A WGS-84 point. Exists as a type because latitude and longitude travelled together through
  * nine classes as loose numbers, which is where argument-order bugs come from.
  */

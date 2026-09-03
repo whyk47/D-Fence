@@ -54,6 +54,7 @@ import { TelegramGateway } from './boundary/gateways/TelegramGateway';
 import { AlertTriggerEvaluator } from './control/AlertTriggerEvaluator';
 import { AlertPreferenceController } from './control/AlertPreferenceController';
 import { NotificationController } from './control/NotificationController';
+import { TelegramLinkController } from './control/TelegramLinkController';
 import { TrendAnalyser } from './control/TrendAnalyser';
 import { MapViewController } from './control/MapViewController';
 import {
@@ -110,8 +111,12 @@ async function main(): Promise<void> {
   // and, unlike a silent no-op, it keeps a record of what *would* have been sent, so the alert
   // path can be demonstrated before the token arrives.
   const telegramToken = config.get('TELEGRAM_BOT_TOKEN');
-  const channel = telegramToken ? new TelegramGateway(http, telegramToken) : new RecordingChannel();
+  const telegram = telegramToken ? new TelegramGateway(http, telegramToken) : null;
+  const channel = telegram ?? new RecordingChannel();
   const notifications = new NotificationController(channel, accounts, alertStore);
+  // 6.1.7's inbound half. Without it a code can be issued and typed into Telegram and nothing
+  // happens — the claim route exists, but the bot is the only caller and it was not listening.
+  const telegramLink = telegram === null ? null : new TelegramLinkController(telegram, notifications);
   const clusters = new InMemoryClusterStore();
   const rainfall = new InMemoryRainfallStore();
   const forecasts = new InMemoryForecastStore();
@@ -250,6 +255,13 @@ async function main(): Promise<void> {
       console.log(`  forecast: ${forecastJob.outsideEveryRegion.length} cluster(s) took the nearest-region fallback`);
     }
     return `${run.outcome} (${run.featureCount} cluster(s) flagged)`;
+  }
+
+  if (telegramLink !== null) {
+    telegramLink.start();
+    console.log('Telegram: bot online, polling for link codes (6.1.7).');
+  } else {
+    console.log('Telegram: no TELEGRAM_BOT_TOKEN — alerts will be recorded rather than sent (6.1.6).');
   }
 
   console.log('Priming the first cycle…');

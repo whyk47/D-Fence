@@ -148,6 +148,17 @@ export class NotificationController implements Notifier {
     return account.id;
   }
 
+  /**
+   * 6.1.6, 11.2.11 — the chat this account's alerts go to, or null when it has never been linked.
+   *
+   * The Alert Settings screen needs it to say "linked" rather than offering a code to somebody who
+   * already has one, and the value is the resident's own, so 2.3.1 is satisfied by the caller
+   * asking about themselves.
+   */
+  async chatIdFor(accountId: Uuid): Promise<string | null> {
+    return (await this.accounts.findById(accountId))?.telegramChatId ?? null;
+  }
+
   /** 6.1.10 — the delivery log, newest first. */
   async recentDeliveries(limit = 50): Promise<Alert[]> {
     return this.alerts.recent(limit);
