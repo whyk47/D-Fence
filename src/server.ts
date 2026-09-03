@@ -67,6 +67,7 @@ import { DispatchController } from './control/DispatchController';
 import { AccessControlService } from './control/AccessControlService';
 import { AccessPolicy } from './control/AccessPolicy';
 import { DashboardController, principalFor } from './control/DashboardController';
+import { SourceHealthController } from './control/SourceHealthController';
 import { ClusterIngestionJob } from './control/ingestion/ClusterIngestionJob';
 import { RainfallIngestionJob } from './control/ingestion/RainfallIngestionJob';
 import { ForecastIngestionJob } from './control/ingestion/ForecastIngestionJob';
@@ -287,7 +288,10 @@ async function main(): Promise<void> {
     principalFor(Role.OperationsManager, 'system-seed'),
   );
   const seededManagerId = seeded.id;
-  const dashboard = new DashboardController(ac, clusters, scores, runs, workOrders, reports);
+  // 1.4.1-1.4.4 — all four sources, with the intervals 1.4.3 counts taken from configuration
+  // (10.6.2) rather than from constants, and the geocoder reporting for itself (3.1.16).
+  const sourceHealth = new SourceHealthController(runs, config.ingestionIntervals, geocoding);
+  const dashboard = new DashboardController(ac, clusters, scores, runs, workOrders, reports, sourceHealth);
   const lifecycle = new WorkOrderLifecycleController(
     new WorkOrderTransitionTable(),
     workOrders,
