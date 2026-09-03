@@ -26,6 +26,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | §3.2 (extension) Saved locations, geocoding failure modes and the exposure band | **Done 2026-09-03.** 27 cases — `tests/location.test.ts`, designed in §2.11 |
 | §3.2 (extension) Resident alerts: triggers, the daily cap, delivery and retries | **Done 2026-09-03.** 29 cases — `tests/alert.test.ts`, designed in §2.12 |
 | §3.2 (extension) Map layers as an access surface, and the trend classification | **Done 2026-09-03.** 24 cases — `tests/map-trend.test.ts`, designed in §2.13 |
+| §3.2 (extension) Dialog-map conformance, the route guard, navigation and field rules | **Done 2026-09-03.** 31 cases — `tests/client-navigation.test.ts`, designed in §2.14 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -523,6 +524,55 @@ operations dashboard is reachable by tapping a boundary on the public map.
 first with a 36-point ring), each tier-coloured and tier-labelled, and a detail panel for the
 top-ranked cluster carrying a score of 45.6, tier Medium and all seven driver contributions.
 
+### 2.14 Tenth subject - the dialog map, the router and the field rules (`tests/client-navigation.test.ts`)
+
+Added 2026-09-03. **This is the suite §5 of this plan said to protect.**
+
+11.3.2 claims no transition exists that is not on the dialog map. That is a claim about a PlantUML
+file and a TypeScript route table agreeing with each other, edited by different people on different
+days, and this plan's own note said it would be false within a fortnight if left to eyeballing. So
+`client/src/lib/DialogMap.ts` parses the diagram and the route table is checked against it, in both
+directions.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| D1 | The map parses into states and transitions (27 routed states, 74 transitions) | 11.3.1 | ✓ |
+| **D2** | Every served route is on the map, **and** every routed state is served | 11.3.1, 11.3.2 | ✓ |
+| D3 | Every screen has a distinct URL | 11.3.8 | ✓ |
+| **D4** | Every screen except Sign In has a return path | 11.3.3 | ✓ |
+| D5 | Every route carries the 11.2.x requirement it realises | 11.2.x | ✓ |
+| D6 | The map permits the demo path and refuses an undrawn one | 11.3.2 | ✓ |
+| **D7** | A manager reaches work-order creation in ≤ 3 interactions, measured over the map | 11.1.8 | ✓ |
+| **R1** | `/ops/work-orders/new` is not swallowed by `/ops/work-orders/:id` | 11.3.8 | ✓ |
+| R2–R3 | Parameters extract by name; an unknown path matches nothing | 11.3.8 | ✓ |
+| G1 | An unauthenticated visitor reaches exactly the four public screens | 11.1.9 | ✓ |
+| G2–G3 | A Resident is refused the dashboard; a crew member reaches only their jobs | 2.3.3, 2.3.5 | ✓ |
+| **G4** | An unknown URL is Not Found **before** the role is considered | 2.3.7 | ✓ |
+| G5–G6 | A signed-out visitor is sent to sign in and returns to where they were going | 11.1.10 | ✓ |
+| **G7** | A `returnTo` the new role may not open is **discarded**, not followed | 11.1.10 | ✓ |
+| N1 | Each role sees its own navigation set and nothing more | 11.1.1 | ✓ |
+| **N2** | No navigation item leads to a screen its own role may not open | 11.1.1, 10.5.6 | ✓ |
+| N3–N4 | Work Orders opens the list, not the create form; the current screen is indicated | 11.1.3, 11.1.4 | ✓ |
+| N5–N6 | An authenticated shell shows role and sign-out; an unauthenticated one shows neither | 11.1.6, 11.1.7, 11.1.9 | ✓ |
+| F1–F2 | A character count reports against the limit, and 501 fails where 500 passes | 11.5.2, 5.1.4 (BV) | ✓ |
+| F3 | The password rules use the server's wording | 2.1.2, 2.1.3, 10.5.3 | ✓ |
+| **F4** | Only the **first** failure is shown on a field | 11.5.1 | ✓ |
+| F5–F7 | The email rule is loose on purpose; a form is submittable when every field passes; unsaved changes are detectable | 2.1.1, 11.5.7, 11.3.6 | ✓ |
+
+**D2, G4, G7 and N2 are the four to point at.** D2 is the mechanical conformance check, and it has
+teeth: adding one route the map does not draw, or removing one it does, each produces exactly one
+reported problem. G4 is the client refusing to be the oracle the server refuses to be — answering
+"not authorised" for a path that does not exist tells an anonymous visitor which paths do. G7 is
+the bug in every hand-rolled return-to: a crew member sent to sign in from a manager's URL must
+land on their own jobs, not on Not Authorised one step after signing in successfully. N2 derives
+each role's navigation from the route table and then checks every item against the guard, so a nav
+link straight into a refusal cannot ship.
+
+**What this suite deliberately does not test:** appearance. The screens themselves await the Lab 1
+mockups (US-10.1, B3–B12), which are Yen Kit's deliverable, and building their layout first would
+be designing the interface in code and then drawing it afterwards — the order US-10.1 exists to
+prevent.
+
 ---
 
 ## 3. Basis-path design
@@ -628,7 +678,7 @@ Four rules were applied, and each one removed cases:
 | ~~`AbstractIngestionJob.run` template~~ | **Done 2026-09-03** — §2.6, cases I1–I5 |
 | ~~`AccessControlService.authorise` — every §2.3 rule~~ | **Done** — the ownership-scoped check is covered in §2.9 (V4) and the role rules in §2.10 (T2) and §2.8 |
 | ~~`WorkOrderLifecycleController.transition` end to end~~ | **Done 2026-09-03** — §2.8 |
-| Dialog map ↔ router agreement (11.3.2) | The client router, which is a stub. This one should be a **test**, not an inspection — every route in the code must be a state on the map |
+| ~~Dialog map ↔ router agreement (11.3.2)~~ | **Done 2026-09-03** — §2.14, case D2. The diagram is parsed and the route table checked against it in both directions |
 | One end-to-end path (Playwright) | A running stack |
 | `NEAFeedGateway.fetchLastUpdatedAt` / `fetchClusters` against a fixture | Implementation. The two-hop download (poll-download → signed S3 URL) is the part worth a test, since the signed URL expires |
 
