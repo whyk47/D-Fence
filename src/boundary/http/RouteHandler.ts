@@ -24,6 +24,17 @@ export type Response = {
 
 export type Schema = (value: unknown) => boolean;
 
+/**
+ * A bearer token to the caller it belongs to, or null. Implemented by `AuthenticationController`.
+ *
+ * Declared as a one-method interface rather than taking the controller directly so the boundary
+ * layer does not depend on the whole of §2.1 to answer one question, and so a handler can be
+ * unit-tested with a two-line fake (10.6.3).
+ */
+export interface PrincipalResolver {
+  resolve(token: string): Promise<Principal | null>;
+}
+
 export abstract class RouteHandler {
   constructor(protected readonly ac: AccessControlService) {}
 
@@ -43,20 +54,51 @@ export abstract class RouteHandler {
   }
 
   /**
-   * Derived from the session, never from a client-supplied role claim.
-   *
-   * **Until sessions exist (E2), this reads a development header** and refuses to do so unless
-   * `DFENCE_DEV_PRINCIPAL` is set. That is deliberate: a header-derived role is exactly the hole
-   * 2.3.6 warns about, so it fails closed outside development rather than becoming the permanent
-   * implementation by forgetting.
+   * The session resolver, injected by `ExpressApp.mount` so that every handler gets the same one
+   * and no subclass can be constructed without it by accident.
    */
-  protected principalOf(req: Request): Principal {
+  private resolver: PrincipalResolver | null = null;
+
+  useResolver(resolver: PrincipalResolver): void {
+    this.resolver = resolver;
+  }
+
+  /**
+   * Derived from the session, never from a client-supplied role claim (2.3.6).
+   *
+   * The bearer token is looked up through the resolver, which also extends the session — 2.1.9 is
+   * an inactivity timeout, so *using* a session is what keeps it alive.
+   *
+   * The development header remains **only** as a fallback when no resolver is bound, and only when
+   * `DFENCE_DEV_PRINCIPAL=true`. A header-derived role is exactly the hole 2.3.6 warns about, so it
+   * fails closed rather than becoming the permanent implementation by forgetting. With sessions
+   * wired (E2, 2026-09-03) the real path is the resolver and this branch is unreachable in the
+   * server; it is retained for handler unit tests that have no session store.
+   *
+   * @throws NotAuthorised when there is no valid session — 2.3.7, carrying no detail
+   */
+  protected async resolvePrincipal(req: Request): Promise<Principal> {
+    if (this.resolver !== null) {
+      const token = RouteHandler.bearerOf(req);
+      const principal = token === null ? null : await this.resolver.resolve(token);
+      if (principal === null) {
+        throw new NotAuthorised();
+      }
+      return principal;
+    }
     if (process.env.DFENCE_DEV_PRINCIPAL !== 'true') {
       throw new NotAuthorised();
     }
     const claimed = req.headers['x-dev-role'];
     const role = Object.values(Role).find((r) => r === claimed) ?? Role.Resident;
     return new Principal(req.headers['x-dev-account'] ?? 'dev', role, 'dev-session');
+  }
+
+  /** `Authorization: Bearer <token>`, or null. Case-insensitive on the scheme, as RFC 7235 says. */
+  static bearerOf(req: Request): string | null {
+    const header = req.headers['authorization'] ?? req.headers['Authorization'] ?? '';
+    const match = /^bearer\s+(.+)$/i.exec(header.trim());
+    return match === null ? null : (match[1] as string);
   }
 
   /** 10.3.6: validate and sanitise before anything downstream sees it. */

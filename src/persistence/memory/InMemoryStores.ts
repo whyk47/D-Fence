@@ -222,6 +222,18 @@ export class InMemoryAuditStore implements AuditStore {
     this.records.push({ accountId, action: `DENIED:${action}`, targetEntity, occurredAt: new Date() });
   }
 
+  /**
+   * 2.4.1. Prefixed so a refusal and a state change are distinguishable when the log is read —
+   * they mean opposite things, and an unprefixed list of action names cannot tell them apart.
+   *
+   * 2.4.2 says an audit record may not be modified or deleted by any role. Here that is the array
+   * being append-only and `recent()` returning a copy; in Postgres it is a table with no UPDATE or
+   * DELETE grant, which is where the real guarantee has to live.
+   */
+  async appendAction(accountId: Uuid, action: string, targetEntity: string, _targetId: Uuid | null): Promise<void> {
+    this.records.push({ accountId, action, targetEntity, occurredAt: new Date() });
+  }
+
   async recent(limit: number): Promise<Array<{ accountId: Uuid; action: string; targetEntity: string; occurredAt: Date }>> {
     return this.records.slice(-Math.max(0, limit)).reverse();
   }

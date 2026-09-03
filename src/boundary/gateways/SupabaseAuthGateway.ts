@@ -68,6 +68,11 @@ export class SupabaseAuthGateway implements AuthProvider {
     throw new Error('not implemented');
   }
 
+  /** 2.2.4. `admin.updateUserById` with `ban_duration: 'none'` — the inverse of disableUser. */
+  enableUser(_authUserId: AuthUserId): Promise<void> {
+    throw new Error('not implemented');
+  }
+
   deleteUser(_authUserId: AuthUserId): Promise<void> {
     throw new Error('not implemented');
   }
