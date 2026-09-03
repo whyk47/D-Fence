@@ -29,6 +29,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | §3.2 (extension) Dialog-map conformance, the route guard, navigation and field rules | **Done 2026-09-03.** 31 cases — `tests/client-navigation.test.ts`, designed in §2.14 |
 | US-0.5 (§10.1) Performance obligations measured rather than asserted | **Done 2026-09-03.** 6 cases — `tests/performance.test.ts`, designed in §2.15 |
 | US-1.4 (§1.3) The 24-hour forecast, region mapping and the heavy-rain flag | **Done 2026-09-03.** 26 cases — `tests/forecast.test.ts`, designed in §2.16 |
+| US-1.5 (§1.4) Source health: the three-interval rule and the staleness marker | **Done 2026-09-03.** 17 cases — `tests/source-health.test.ts`, designed in §2.17 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -672,6 +673,54 @@ NEA cluster feed and the real forecast endpoint through the same job: on 2026-09
 and Marymount central. Every flag came back `false`, which is the genuine forecast for that day
 ("Fair (Night) | Fair (Day) | Windy") and not a stub — the distinction the tests above exist to keep
 honest.
+
+### 2.17 Thirteenth subject - source health (`tests/source-health.test.ts`)
+
+Added 2026-09-03 for US-1.5. §1.4 is four short requirements, and the implementation got two of
+them wrong **in the same direction — towards looking fine**:
+
+- it warned after **one** failed run, where 1.4.3 says *three consecutive scheduled intervals*;
+- it reported **two** sources, where 1.4.1 says *every external data source* (the forecast and the
+  geocoder were absent, and a source missing from a health panel does not look unhealthy, it looks
+  fine).
+
+Neither defect was visible from the dashboard's own tests, because those asserted what the code did
+rather than what the requirement said. That is the general lesson this subject records: a test
+written from the implementation cannot find a requirement the implementation never read.
+
+**Two conditions, and both are needed.** A source warns when *either* its three most recent runs all
+failed *or* nothing has succeeded for three of its own intervals. A failure counter alone is
+structurally blind to the outage in W3 — the scheduler stopping — because a job that never runs
+writes no FAILED rows to count.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| **H1** | All four sources appear, including the two that were silently missing | 1.4.1 | ✓ |
+| H2 | Never-run is its own state: not a warning, but certainly stale | 1.4.1, 1.4.4 | ✓ |
+| H3 | Last-success is the last SUCCESS, not the last run | 1.4.1 | ✓ |
+| H4 | UNCHANGED counts as a success — a quiet publisher is a live source | 1.1.21, 1.4.1 | ✓ |
+| **W1** | The boundary: **two** failures do not warn, **three** do | 1.4.3, BV | ✓ |
+| W2 | The run must be unbroken — a success between failures resets the count | 1.4.3 | ✓ |
+| **W3** | The outage a failure counter cannot see: nothing ran at all | 1.4.3 | ✓ |
+| W4 | The interval is per source, from configuration — 20 min warns rainfall, not clusters | 1.4.3, 10.6.2 | ✓ |
+| W5 | Ran and never once succeeded warns immediately | 1.4.3 | ✓ |
+| **S1** | One missed interval marks data **stale** without raising an alarm | 1.4.4 | ✓ |
+| S2 | Data inside its own interval is neither stale nor warned on | 1.4.4, BV | ✓ |
+| S3 | `isStale` answers per source and defaults to stale for one it cannot find | 1.4.4 | ✓ |
+| G1 | An unconfigured geocoder reports as unconfigured, never as healthy | 1.4.1, 3.1.16 | ✓ |
+| **G2** | An authentication failure warns at once — a lapsed token does not clear itself | 3.1.16 | ✓ |
+| G3, G4 | Healthy inside its refresh interval is clean; seven days of silence on a 48-hour token is not | 3.1.15 | ✓ |
+| E1 | The rows map onto the `SourceHealth` entity for storage and serialisation | 1.4.2 | ✓ |
+
+**S1 and S2 are the pair that matters for 1.4.4.** The staleness marker is deliberately a *lower*
+bar than the warning: one missed cycle is worth a marker on the data and is not worth an alarm on
+the panel. Collapsing the two — which the old code did, having only one — forces a choice between
+crying wolf and showing hour-old data unmarked.
+
+**One existing case was corrected rather than kept.** `tests/dashboard.test.ts` D9 asserted that a
+single failed run raised an attention item. It was passing, and it was wrong: it encoded the
+implementation's rule instead of 1.4.3's. It now asserts both halves of the boundary — one failure
+raises nothing, three raise the item — and carries a note saying why it changed.
 
 ---
 

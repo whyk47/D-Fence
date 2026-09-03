@@ -40,6 +40,9 @@ export class GeocodingUnavailable extends Error {
 export class GeocodingController {
   /** 3.1.16 — set when a lookup fails on authentication, and read by the dashboard's source health. */
   private authFailure: { at: Date; detail: string } | null = null;
+  /** 1.4.1 — the last time OneMap actually answered. The geocoder has no ingestion job, so this is
+   *  the only place a "last successful retrieval" for this source can come from. */
+  private lastSuccess: Date | null = null;
 
   constructor(private readonly geocoder: GeocodingSource) {}
 
@@ -67,6 +70,10 @@ export class GeocodingController {
     if (candidates.length === 0) {
       throw new AddressNotFound(searched); // 3.1.5, 3.1.13
     }
+    // A found address and a confirmed empty answer both mean OneMap is up, but only this branch
+    // is reached on a match; 1.4.1 asks for the last *successful retrieval*, and an AddressNotFound
+    // above has already returned, so recording here keeps the two failure kinds apart (3.1.13).
+    this.lastSuccess = new Date();
     // 3.1.4 caps the list rather than the query: OneMap ranks its own results, and taking the top
     // five of a good ranking is better than asking for five and getting an arbitrary five.
     return candidates.slice(0, MAX_CANDIDATES);
@@ -83,10 +90,16 @@ export class GeocodingController {
     try {
       await this.geocoder.requestToken();
       this.authFailure = null;
+      this.lastSuccess = new Date(); // 1.4.1 — the scheduled retrieval this source actually has
     } catch (error) {
       this.authFailure = { at: new Date(), detail: error instanceof Error ? error.message : String(error) };
       throw new GeocodingUnavailable(this.authFailure.detail);
     }
+  }
+
+  /** 1.4.1 — for SourceHealthController, which cannot read it from an ingestion run. */
+  lastSuccessAt(): Date | null {
+    return this.lastSuccess;
   }
 
   /** 3.1.16, 10.2.x — for the dashboard's source-health panel. */

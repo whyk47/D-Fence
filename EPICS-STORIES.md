@@ -268,6 +268,15 @@ before rain, not after.
 - Implement the keyword rule and store the flag with validity.
 - Unit-test area mapping for a cluster outside every area polygon.
 
+*Delivered 2026-09-03, commit `dbc16bb` on `feat/us-1.4-forecast`. One correction to the story as
+written: requirement 1.3.2 asks for "the region polygon containing the cluster centroid", but the
+24-hour forecast endpoint **publishes no polygons** — it returns `periods[].regions.{north, south,
+east, west, central}` only. The five macro-regions are therefore defined in
+`src/control/ingestion/ForecastRegionMap.ts` as five axis-aligned rectangles that partition
+Singapore's bounding box exactly, with no overlap and no gap, so 1.3.2's "exactly one region" is
+true by construction; a nearest-region-centroid fallback catches any point outside the bounds. The
+rectangles are coarser than NEA's own region shapes and must be named as a limitation in the demo.*
+
 ### US-1.5 — Watch the health of every data source
 **As** an Operations Manager, **I want** to see when a feed last succeeded **so that** I do not act on
 stale data without knowing it.

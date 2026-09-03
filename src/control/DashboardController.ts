@@ -21,6 +21,7 @@ import { ClusterStore, IngestionRunStore, PriorityScoreStore, ReportStore, WorkO
 import { ReportStatus } from '../entity/enums';
 import { WorkOrder } from '../entity/WorkOrder';
 import { AccessControlService } from './AccessControlService';
+import { SourceHealthController, SourceHealthRow } from './SourceHealthController';
 import { Principal } from './Principal';
 
 /** 7.1.2–7.1.6, with 7.1.9's timestamp. Null means "not computable yet", never "zero". */
@@ -35,6 +36,12 @@ export interface DashboardOverview {
   tierDistribution: Record<PriorityTier, number>;
   /** 7.1.9 — the timestamp of the data being presented, not of the request. */
   dataAsOf: Date | null;
+  /**
+   * 1.4.4 — the sources whose data is older than one of their own intervals. Every screen that
+   * presents this payload has what it needs to show the staleness indicator without asking a
+   * second endpoint, which is what stops one screen from quietly not showing it.
+   */
+  staleSources: SourceKind[];
   /** 7.1.7's seven-day deltas, absent until seven days of history exist. */
   weekOverWeek: { totalActiveCases: number | null; activeClusters: number | null };
 }
@@ -88,6 +95,12 @@ export class DashboardController {
     private readonly workOrders: WorkOrderStore | null = null,
     /** Same again for reports: null means "not wired", which is not the same as "none" (7.5.3). */
     private readonly reports: ReportStore | null = null,
+    /**
+     * 1.4.1-1.4.4. Optional so every existing caller keeps working; when it is absent the
+     * dashboard builds a default one over the same run store, which reports the three ingesting
+     * sources correctly and the geocoder as unconfigured rather than as healthy.
+     */
+    private readonly sourceHealth: SourceHealthController | null = null,
   ) {}
 
   /** 7.1.x. */
@@ -118,6 +131,7 @@ export class DashboardController {
       overdueWorkOrders: open === null ? null : open.filter((w) => w.isOverdue(new Date())).length,
       tierDistribution,
       dataAsOf: latest.length === 0 ? null : (latest[0] as PriorityScore).computedAt,
+      staleSources: (await this.reportSourceHealth()).filter((h) => h.isStale).map((h) => h.source),
       weekOverWeek: await this.weekOverWeek(active),
     };
   }
@@ -171,7 +185,9 @@ export class DashboardController {
       if (health.isWarning) {
         items.push({
           kind: 'sourceHealth',
-          detail: `${health.source} has not succeeded since ${health.lastSuccessAt?.toISOString() ?? 'never'}`,
+          // 10.5.3 — the reason, not a restated boolean. "three consecutive failed retrievals"
+          // and "no attempt has succeeded for three intervals" send a manager to different places.
+          detail: `${health.source}: ${health.reason}`,
           link: '/ops/sources',
         });
       }
@@ -210,19 +226,16 @@ export class DashboardController {
     return items;
   }
 
-  /** 7.5.1, 10.2.2 — a source is warning when its most recent run failed or never succeeded. */
-  async reportSourceHealth(): Promise<Array<{ source: SourceKind; lastSuccessAt: Date | null; isWarning: boolean }>> {
-    const out = [];
-    for (const source of [SourceKind.Clusters, SourceKind.Rainfall]) {
-      const runs = await this.runs.recentRuns(source, 10);
-      const succeeded = runs.find((r) => r.outcome === 'SUCCESS' || r.outcome === 'UNCHANGED');
-      out.push({
-        source,
-        lastSuccessAt: succeeded?.endedAt ?? null,
-        isWarning: runs.length === 0 || runs[0]?.outcome === 'FAILED',
-      });
-    }
-    return out;
+  /**
+   * 1.4.1-1.4.3, 7.5.1. Delegated to SourceHealthController, which owns the rule.
+   *
+   * It used to be four lines here, and they warned on a single failed run against 1.4.3's three
+   * consecutive intervals, over two sources against 1.4.1's every source. Both defects were
+   * invisible from the dashboard's own tests, because the dashboard was asserting what it did
+   * rather than what §1.4 asked for.
+   */
+  async reportSourceHealth(now = new Date()): Promise<SourceHealthRow[]> {
+    return (this.sourceHealth ?? new SourceHealthController(this.runs)).report(now);
   }
 
   /**

@@ -202,12 +202,26 @@ describe('DashboardController — §7', () => {
     expect(new Set(lines.map(cells)).size).toBe(1);
   });
 
-  it('D9 — a source whose last run failed raises an attention item (7.5.1)', async () => {
-    const run = await runs.recordStart(SourceKind.Clusters, 'SCHEDULED');
-    await runs.recordOutcome(run, 'FAILED', 0);
+  it('D9 — THREE consecutive failed runs raise an attention item; one does not (1.4.3, 7.5.1)', async () => {
+    // Corrected 2026-09-03 with US-1.5. This case used to assert that a single failed run raised
+    // the item, which is what the code did and is not what 1.4.3 says. A public API returning one
+    // 503 is ordinary; warning on it trains a manager to ignore the panel.
+    const fail = async (): Promise<void> => {
+      const run = await runs.recordStart(SourceKind.Clusters, 'SCHEDULED');
+      await runs.recordOutcome(run, 'FAILED', 0);
+    };
+    const succeed = async (): Promise<void> => {
+      const run = await runs.recordStart(SourceKind.Clusters, 'SCHEDULED');
+      await runs.recordOutcome(run, 'SUCCESS', 15);
+    };
 
+    await succeed();
+    await fail();
+    expect((await dashboard.buildAttentionPanel(manager)).some((i) => i.kind === 'sourceHealth')).toBe(false);
+
+    await fail();
+    await fail();
     const items = await dashboard.buildAttentionPanel(manager);
-
     expect(items.some((i) => i.kind === 'sourceHealth' && i.detail.includes('Clusters'))).toBe(true);
     // 7.5.4: every attention item links to where it can be resolved.
     expect(items.every((i) => i.link.startsWith('/'))).toBe(true);
