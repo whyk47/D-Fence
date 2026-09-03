@@ -52,6 +52,13 @@ export interface RainfallStore {
   newestReadingAt(): Promise<Date | null>;
 }
 
+export interface AuditStore {
+  /** 2.3.8 — every refusal is logged, and the log is the only path a refusal can take. */
+  appendDenial(accountId: Uuid, action: string, targetEntity: string, targetId: Uuid | null): Promise<void>;
+  /** 2.4.x — the audit trail, newest first. */
+  recent(limit: number): Promise<Array<{ accountId: Uuid; action: string; targetEntity: string; occurredAt: Date }>>;
+}
+
 export interface PriorityScoreStore {
   saveAll(scores: PriorityScore[]): Promise<void>;
   /** 4.1.11 — score history, newest first. */

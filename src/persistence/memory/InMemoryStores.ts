@@ -16,7 +16,7 @@
  * already warns about.
  */
 import { randomUUID } from 'node:crypto';
-import { ClusterStore, IngestionRunStore, PriorityScoreStore, RainfallStore } from '../../ports/Stores';
+import { AuditStore, ClusterStore, IngestionRunStore, PriorityScoreStore, RainfallStore } from '../../ports/Stores';
 import { ParsedReading, ParsedStation } from '../../control/ingestion/RainfallFeedParser';
 import { ParsedBatch } from '../../ports/types';
 import { Uuid } from '../../entity/valueTypes';
@@ -211,6 +211,22 @@ export class InMemoryRainfallStore implements RainfallStore {
         this.readings.delete(key);
       }
     }
+  }
+}
+
+export class InMemoryAuditStore implements AuditStore {
+  private readonly records: Array<{ accountId: Uuid; action: string; targetEntity: string; occurredAt: Date }> = [];
+
+  async appendDenial(accountId: Uuid, action: string, targetEntity: string, _targetId: Uuid | null): Promise<void> {
+    this.records.push({ accountId, action: `DENIED:${action}`, targetEntity, occurredAt: new Date() });
+  }
+
+  async recent(limit: number): Promise<Array<{ accountId: Uuid; action: string; targetEntity: string; occurredAt: Date }>> {
+    return this.records.slice(-Math.max(0, limit)).reverse();
+  }
+
+  size(): number {
+    return this.records.length;
   }
 }
 

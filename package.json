@@ -11,7 +11,8 @@
     "dev:scheduler": "tsx watch src/scheduler.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "ingest": "tsx src/tools/ingest-once.ts"
+    "ingest": "tsx src/tools/ingest-once.ts",
+    "serve": "tsx src/server.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
