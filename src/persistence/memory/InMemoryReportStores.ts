@@ -131,20 +131,71 @@ export class InMemoryClusterLocator implements ClusterLocator {
     return null;
   }
 
-  /** 5.1.8 — the locality of the nearest active cluster centroid inside the radius, else null. */
-  async nearestLocalityWithin(point: GeoPoint, radiusMetres: number): Promise<string | null> {
-    let best: { locality: string; distance: number } | null = null;
+  /**
+   * 3.1.9, 5.1.8 — the nearest active cluster within the radius, measured **to its boundary**.
+   *
+   * Boundary distance, not centroid distance, and the difference is the requirement: NEA's
+   * clusters run to several hundred metres across, so a home just outside the edge of a large one
+   * is metres away by boundary and half a kilometre away by centre. With centroid distance the
+   * 150 m band in 3.1.9 would mean something different for every cluster, depending on its size.
+   */
+  async nearestWithin(
+    point: GeoPoint,
+    radiusMetres: number,
+  ): Promise<{ cluster: Cluster; distanceMetres: number } | null> {
+    let best: { cluster: Cluster; distanceMetres: number } | null = null;
     for (const cluster of await this.clusters.findActive()) {
       const ring = cluster.boundary?.rings[0];
       if (ring === undefined || ring.length === 0) {
         continue;
       }
-      const distance = point.distanceTo(cluster.boundary.centroid());
-      if (distance <= radiusMetres && (best === null || distance < best.distance)) {
-        best = { locality: cluster.locality, distance };
+      const distance = InMemoryClusterLocator.ringContains(ring, point)
+        ? 0 // inside the boundary: 3.1.9's IN_CLUSTER, and no distance to speak of
+        : InMemoryClusterLocator.distanceToRing(ring, point);
+      if (distance <= radiusMetres && (best === null || distance < best.distanceMetres)) {
+        best = { cluster, distanceMetres: distance };
       }
     }
-    return best?.locality ?? null;
+    return best;
+  }
+
+  /**
+   * Shortest distance from a point to any edge of the ring, in metres.
+   *
+   * Latitude and longitude are projected onto a local plane first — a degree of longitude is only
+   * about 0.9998 of a degree of latitude in length at one degree north, but the two axes are not
+   * interchangeable in general and treating them as such would skew every distance by the cosine
+   * of the latitude. Over Singapore the correction is small and it is still cheaper to apply than
+   * to explain away.
+   */
+  private static distanceToRing(ring: GeoPoint[], p: GeoPoint): number {
+    const metresPerDegreeLat = 111_320;
+    const metresPerDegreeLon = metresPerDegreeLat * Math.cos((p.latitude * Math.PI) / 180);
+    const toXY = (g: GeoPoint): { x: number; y: number } => ({
+      x: (g.longitude - p.longitude) * metresPerDegreeLon,
+      y: (g.latitude - p.latitude) * metresPerDegreeLat,
+    });
+
+    let shortest = Number.POSITIVE_INFINITY;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+      const a = toXY(ring[i] as GeoPoint);
+      const b = toXY(ring[j] as GeoPoint);
+      shortest = Math.min(shortest, InMemoryClusterLocator.pointToSegment(a, b));
+    }
+    return shortest;
+  }
+
+  /** Distance from the origin to the segment ab, both already in local metres. */
+  private static pointToSegment(a: { x: number; y: number }, b: { x: number; y: number }): number {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared === 0) {
+      return Math.hypot(a.x, a.y); // a degenerate edge is a point
+    }
+    // Projection of the origin onto the line, clamped to the segment.
+    const t = Math.max(0, Math.min(1, -(a.x * dx + a.y * dy) / lengthSquared));
+    return Math.hypot(a.x + t * dx, a.y + t * dy);
   }
 
   /**

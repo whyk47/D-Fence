@@ -95,7 +95,14 @@ export class LocalAuthProvider implements AuthProvider {
 
   async register(credentials: AuthCredentials): Promise<AuthUserId> {
     const authUserId = await this.createUser(credentials);
-    this.verificationTokens.set(authUserId, randomBytes(16).toString('base64url')); // 2.1.5
+    const token = randomBytes(16).toString('base64url'); // 2.1.5
+    this.verificationTokens.set(authUserId, token);
+    // Printed because there is no mail server. 2.1.6 refuses an unverified account, so without
+    // this a resident who registers can never sign in and the demo has no resident in it. This is
+    // the single most development-only line in the codebase, and it is in the class whose name
+    // says so; a deployment that reaches production with `LocalAuthProvider` bound has a much
+    // larger problem than this log line.
+    console.log(`[dev] verification token for ${credentials.email}: ${token}`);
     return authUserId;
   }
 
@@ -153,6 +160,17 @@ export class LocalAuthProvider implements AuthProvider {
     }
     Object.assign(user, LocalAuthProvider.hash(newPassword));
     entry.used = true; // usable once
+  }
+
+  /** 2.1.5, 2.1.6. Single use, like the reset link. */
+  async consumeVerification(token: string): Promise<AuthUserId | null> {
+    for (const [authUserId, issued] of this.verificationTokens) {
+      if (issued === token) {
+        this.verificationTokens.delete(authUserId);
+        return authUserId;
+      }
+    }
+    return null;
   }
 
   async verifyToken(_token: string): Promise<AuthUserId | null> {

@@ -12,14 +12,14 @@
  * `POST /api/auth/post/getToken`; a token supplied through configuration is used as-is until it
  * expires, which is how the team can work from a pasted token before the credentials are shared.
  */
-import { GeocodingSource } from '../../ports/ExternalGateway';
+import { GeocodeCandidate, GeocodingSource } from '../../ports/ExternalGateway';
 import { HttpClient } from './HttpClient';
 import { SourceKind } from '../../entity/enums';
 import { GeoPoint } from '../../entity/valueTypes';
 
 interface SearchResponse {
   found?: number;
-  results?: Array<{ LATITUDE?: string; LONGITUDE?: string; ADDRESS?: string; POSTAL?: string }>;
+  results?: Array<{ LATITUDE?: string; LONGITUDE?: string; ADDRESS?: string; POSTAL?: string; SEARCHVAL?: string }>;
 }
 
 interface TokenResponse {
@@ -100,7 +100,7 @@ export class OneMapGateway implements GeocodingSource {
    * 3.1.3 — resolve an address to coordinates.
    * @returns every match, in OneMap's own ranking order; empty when the address does not exist.
    */
-  async search(address: string): Promise<GeoPoint[]> {
+  async search(address: string): Promise<GeocodeCandidate[]> {
     await this.ensureToken();
     const url =
       `${this.baseUrl}/api/common/elastic/search` +
@@ -120,7 +120,13 @@ export class OneMapGateway implements GeocodingSource {
     const body = (await res.json()) as SearchResponse;
     return (body.results ?? [])
       .filter((r) => r.LATITUDE !== undefined && r.LONGITUDE !== undefined)
-      .map((r) => new GeoPoint(Number(r.LATITUDE), Number(r.LONGITUDE)));
+      .map((r) => ({
+        point: new GeoPoint(Number(r.LATITUDE), Number(r.LONGITUDE)),
+        // Live payloads carry SEARCHVAL for the matched name and ADDRESS for the full one; either
+        // may be absent, and a candidate with no readable label cannot satisfy 3.1.4.
+        address: r.ADDRESS ?? r.SEARCHVAL ?? 'unnamed location',
+        postalCode: r.POSTAL === undefined || r.POSTAL === 'NIL' ? null : r.POSTAL,
+      }));
   }
 
   /** Reads `exp` out of the JWT without verifying it — this is scheduling, not authentication. */

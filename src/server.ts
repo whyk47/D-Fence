@@ -21,6 +21,7 @@ import { ReportRoutes } from './boundary/http/ReportRoutes';
 import { ModerationRoutes } from './boundary/http/ModerationRoutes';
 import { AuthRoutes } from './boundary/http/AuthRoutes';
 import { AdminRoutes } from './boundary/http/AdminRoutes';
+import { LocationRoutes } from './boundary/http/LocationRoutes';
 import {
   InMemoryAuditStore,
   InMemoryClusterStore,
@@ -36,6 +37,13 @@ import { ReportController } from './control/ReportController';
 import { ModerationController } from './control/ModerationController';
 import { AuthenticationController } from './control/AuthenticationController';
 import { StaffAccountController } from './control/StaffAccountController';
+import { GeocodingController } from './control/GeocodingController';
+import { SavedLocationController } from './control/SavedLocationController';
+import { OneMapGateway } from './boundary/gateways/OneMapGateway';
+import {
+  InMemoryAlertSubscriptionStore,
+  InMemorySavedLocationStore,
+} from './persistence/memory/InMemoryLocationStores';
 import {
   InMemoryAccountStore,
   InMemorySessionStore,
@@ -68,6 +76,18 @@ async function main(): Promise<void> {
   const authProvider = new LocalAuthProvider();
   const authentication = new AuthenticationController(authProvider, accounts, sessions, auditStore);
   const staff = new StaffAccountController(ac0, authProvider, accounts, sessions, auditStore);
+
+  const savedLocations = new InMemorySavedLocationStore();
+  const subscriptions = new InMemoryAlertSubscriptionStore();
+  const oneMap = new OneMapGateway(
+    http,
+    'https://www.onemap.gov.sg',
+    config.get('ONE_MAP_TOKEN') || null,
+    config.get('ONE_MAP_EMAIL')
+      ? { email: config.get('ONE_MAP_EMAIL'), password: config.get('ONE_MAP_PASSWORD') }
+      : null,
+  );
+  const geocoding = new GeocodingController(oneMap);
   const clusters = new InMemoryClusterStore();
   const rainfall = new InMemoryRainfallStore();
   const runs = new InMemoryIngestionRunStore();
@@ -81,6 +101,17 @@ async function main(): Promise<void> {
   const reportLifecycle = new ReportLifecycleController(new ReportTransitionTable(), reports, notifier);
   const moderation = new ModerationController(ac0, reports, reportLifecycle);
   const residentReports = new ReportController(ac0, reports, locator, reportLifecycle);
+  const locations = new SavedLocationController(ac0, savedLocations, locator, geocoding, subscriptions, {
+    // 1.2.5-1.2.8 for an arbitrary point rather than a cluster centroid — the same accumulator,
+    // asked about a resident's home.
+    forPoint: async (point, at) => {
+      const stations = await rainfall.stations();
+      const readings = await rainfall.readingsSince(new Date(at.getTime() - 72 * 3_600_000));
+      return stations.length === 0 || readings.length === 0
+        ? null
+        : accumulator.accumulate(point, stations, readings, at);
+    },
+  });
 
   const clusterJob = new ClusterIngestionJob(
     new NEAFeedGateway(
@@ -134,6 +165,13 @@ async function main(): Promise<void> {
       });
     }
     await engine.computeScores(active, inputs, now);
+    // 3.1.8 — every saved location is re-evaluated against the boundaries this cycle just wrote.
+    // After scoring rather than before: the clusters have to be current for the answer to be.
+    const moved = await locations.evaluateAll(now);
+    if (moved.length > 0) {
+      // 6.1.2's trigger. E6 turns this into an alert; for now the change is at least visible.
+      console.log(`  exposure changed for ${moved.length} saved location(s)`);
+    }
     console.log(
       `cycle: clusters ${clusterRun.outcome} (${clusterRun.featureCount}), ` +
         `rainfall ${rainRun.outcome} (${rainRun.featureCount}), scored ${active.length}`,
@@ -147,6 +185,16 @@ async function main(): Promise<void> {
   const clusterInterval = (config.ingestionIntervals.get(SourceKind.Clusters) ?? 3600) * 1000;
   const rainInterval = (config.ingestionIntervals.get(SourceKind.Rainfall) ?? 300) * 1000;
   setInterval(() => void cycle().catch((e: unknown) => console.error('cycle failed:', e)), Math.min(clusterInterval, rainInterval));
+
+  // 3.1.15 — no more than 48 hours between refreshes. The gateway also refreshes lazily an hour
+  // before expiry; this is the belt to that bracer, because a deployment that geocodes nothing for
+  // four days would otherwise discover the lapsed token at the first request that matters.
+  if (config.get('ONE_MAP_EMAIL')) {
+    setInterval(
+      () => void geocoding.refreshToken().catch((e: unknown) => console.error('OneMap token refresh failed:', e)),
+      24 * 3_600_000,
+    );
+  }
 
   const ac = ac0;
   void audit;
@@ -188,6 +236,7 @@ async function main(): Promise<void> {
   app.mount(new ModerationRoutes(ac, moderation));
   app.mount(new AuthRoutes(ac, authentication));
   app.mount(new AdminRoutes(ac, staff));
+  app.mount(new LocationRoutes(ac, locations));
   // The stand-in dashboard page renders for the seeded manager. It is a **development page**, not
   // the graded screen (E10), and it is the one place left that does not resolve a session — an
   // HTML page cannot carry a bearer token. Every JSON route above does resolve one.

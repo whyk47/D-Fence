@@ -21,6 +21,7 @@ import { ReportPhoto } from '../entity/ReportPhoto';
 import { Corroboration } from '../entity/Corroboration';
 import { Account } from '../entity/Account';
 import { Session } from '../entity/Session';
+import { SavedLocation } from '../entity/SavedLocation';
 import { TreatmentRecord } from '../entity/TreatmentRecord';
 import { ParsedBatch } from './types';
 import { ParsedReading, ParsedStation } from '../control/ingestion/RainfallFeedParser';
@@ -150,8 +151,15 @@ export interface ReportStore {
 export interface ClusterLocator {
   /** 5.1.7 — the active cluster whose boundary contains the point, or null. */
   containing(point: GeoPoint): Promise<Cluster | null>;
-  /** 5.1.8 — the nearest locality within the radius, or null; 5.1.9 turns null into Unassigned. */
-  nearestLocalityWithin(point: GeoPoint, radiusMetres: number): Promise<string | null>;
+  /**
+   * 3.1.9, 5.1.8 — the nearest active cluster within the radius, with the distance **to its
+   * boundary** rather than to its centroid, or null when none is that close.
+   *
+   * Boundary distance is the point for 3.1.9's 150 m band: a cluster three hundred metres across
+   * would put addresses just outside its edge half a kilometre away if measured from the centre,
+   * so the band would mean something different for every cluster. A point inside is at distance 0.
+   */
+  nearestWithin(point: GeoPoint, radiusMetres: number): Promise<{ cluster: Cluster; distanceMetres: number } | null>;
 }
 
 /**
@@ -190,6 +198,37 @@ export interface SessionStore {
   save(session: Session): Promise<Session>;
   /** 2.2.4 - deactivating an account must not leave a live session behind it. */
   terminateAllFor(accountId: Uuid, at: Date): Promise<number>;
+}
+
+/**
+ * 3.1.1-3.1.12. A resident's saved locations.
+ */
+export interface SavedLocationStore {
+  findById(id: Uuid): Promise<SavedLocation | null>;
+  /** 2.3.1, 3.1.1 — a resident's own, and the list the five-location limit is counted from. */
+  findForAccount(accountId: Uuid): Promise<SavedLocation[]>;
+  save(location: SavedLocation): Promise<SavedLocation>;
+  delete(id: Uuid): Promise<void>;
+  /** 3.1.8 — every location, re-evaluated on each cluster ingestion cycle. */
+  all(): Promise<SavedLocation[]>;
+}
+
+/**
+ * 3.1.12, 6.1.x. Declared now with the one method 3.1.12 needs; E6 extends it rather than
+ * replacing it. A cascade left as a TODO is an orphaned subscription that still tries to fire,
+ * and it is the alert nobody can turn off.
+ */
+export interface AlertSubscriptionStore {
+  /** @returns how many were removed, which the confirmation states. */
+  deleteForLocation(locationId: Uuid): Promise<number>;
+}
+
+/**
+ * Rainfall accumulated at an arbitrary point. The scoring cycle asks this for cluster centroids;
+ * a resident's saved location asks the same question about a different point.
+ */
+export interface RainfallReadingSource {
+  forPoint(point: GeoPoint, now: Date): Promise<{ accum24hMm: number; accum72hMm: number } | null>;
 }
 
 export interface AuditStore {

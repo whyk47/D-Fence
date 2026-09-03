@@ -163,10 +163,10 @@ async function main(): Promise<void> {
         ? { email: config.get('ONE_MAP_EMAIL'), password: config.get('ONE_MAP_PASSWORD') }
         : null,
     );
-    const points = await onemap.search(address);
-    console.log(`\n  OneMap "${address}": ${points.length} match(es)`);
-    for (const p of points.slice(0, 3)) {
-      console.log(`    ${p.latitude.toFixed(6)}, ${p.longitude.toFixed(6)}`);
+    const matches = await onemap.search(address);
+    console.log(`\n  OneMap "${address}": ${matches.length} match(es)`);
+    for (const m of matches.slice(0, 3)) {
+      console.log(`    ${m.point.latitude.toFixed(6)}, ${m.point.longitude.toFixed(6)}  ${m.address}`);
     }
   }
 }
