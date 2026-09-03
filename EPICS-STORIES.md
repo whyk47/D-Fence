@@ -1580,10 +1580,15 @@ engine should be.
    cluster feed actually changes. If it is daily or weekly, the hourly poll in 1.1.1 fetches identical
    data almost every cycle and the cluster ranking may not visibly move during the demo. Check in week 1.
    Requirement 1.1.18 (manual ingestion trigger) is the mitigation, not the fix.
-3. **Driver weights (4.1.5).** The requirement says configurable; someone must still choose the
-   starting values and be able to justify them in the demo.
-4. **Normalisation method per driver (4.1.4).** Min-max across active clusters is the obvious default
-   but makes scores non-comparable across days. Decide before US-4.1 starts.
+3. **Driver weights (4.1.5).** **PROPOSED 2026-09-03**, on Yen Kit's instruction — `SCORING-SPEC.md`
+   §3 and `config/scoring.default.json`, with a per-driver justification written to be said out loud
+   in the demo. Still needs one round of team review; they are a proposal, not a measurement.
+4. **Normalisation method per driver (4.1.4).** **RESOLVED 2026-09-03** — a method per driver is
+   documented in `SCORING-SPEC.md` §2 and implemented as a Strategy per driver, bound by
+   `NormalisationFactory`. The comparability trap flagged here was real and applies to log as much as
+   to min-max: both log drivers now normalise against a **fixed reference ceiling** (300 cases, 40
+   new cases), not against the observed maximum, so a score means the same thing tomorrow as today.
+   Test case F6 in `tests/cluster-feed.test.ts` locks that in.
 5. **Crew teams versus individuals (8.2.1).** Currently one assignee per work order. Teams would be
    more realistic and more work.
 6. **Notification channel for staff (8.2.4).** Telegram is already built for residents; reusing it for

@@ -41,8 +41,8 @@ Three facts from that payload drive everything below.
 
 | Driver | Method | Parameter | Class |
 |---|---|---|---|
-| Case size | Log scale against the observed maximum | — | `LogScaleNormalisation` |
-| Case growth delta | Log scale against the observed maximum, negatives floored at 0 | — | `LogScaleNormalisation` |
+| Case size | Log scale against a fixed reference | ceiling 300 cases | `LogScaleNormalisation` |
+| Case growth delta | Log scale against a fixed reference, negatives floored at 0 | ceiling 40 new cases | `LogScaleNormalisation` |
 | 24-hour rainfall | Capped linear | cap 50 mm | `CappedLinearNormalisation` |
 | 72-hour rainfall | Capped linear | cap 120 mm | `CappedLinearNormalisation` |
 | Verified open report count | Capped linear | cap 5 reports | `CappedLinearNormalisation` |
@@ -68,6 +68,19 @@ quarter of the driver — a 61-case cluster and a 2-case cluster become almost t
 driver stops discriminating exactly where an Operations Manager needs it to. Log preserves order and
 keeps the separation. `MinMaxNormalisation` is retained in the Strategy family (and still tested); it
 is simply not the right method for this distribution.
+
+**The ceiling is fixed, not observed.** Both columns above were computed against the day's observed
+maximum, and that is exactly the trap `EPICS-STORIES.md` open point 4 warned about for min-max: if
+the ceiling moves with today's population, the same 61-case cluster scores differently tomorrow
+merely because a larger cluster appeared or a small one closed. 4.1.11 keeps every score as history
+and 4.1.17 compares scores across cycles, so a moving ceiling would make both meaningless. The
+implementation therefore normalises against a **configured reference** — 300 cases for case size
+(above the largest cluster observed, with headroom) and 40 new cases for growth — and falls back to
+the observed maximum only when no reference is configured. Against the fixed 300-case reference the
+61-case cluster reads 0.720 rather than 0.743, and it reads 0.720 tomorrow too.
+
+If a cluster ever exceeds the reference it saturates at 1.0, which is the intended reading: past a
+certain size, "bigger" stops changing the decision — it is already top priority.
 
 ### 2.2 Rainfall — capped, and 72 hours weighted above 24
 

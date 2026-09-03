@@ -1,23 +1,46 @@
 {
   "$comment": "D-Fence default scoring configuration. Traces: 4.1.5, 4.1.6, 4.1.9, 10.6.2. Justification: SCORING-SPEC.md. These are a team proposal, not fitted values.",
   "driverWeights": {
-    "CaseSize": 0.30,
-    "CaseGrowthDelta": 0.20,
+    "CaseSize": 0.3,
+    "CaseGrowthDelta": 0.2,
     "DaysSinceLastTreatment": 0.15,
     "Rainfall72h": 0.12,
     "Rainfall24h": 0.08,
-    "VerifiedOpenReportCount": 0.10,
+    "VerifiedOpenReportCount": 0.1,
     "PremisesMix": 0.05
   },
-  "tierThresholds": { "high": 70.0, "medium": 40.0 },
+  "tierThresholds": {
+    "high": 70.0,
+    "medium": 40.0
+  },
   "normalisation": {
-    "CaseSize": { "method": "log" },
-    "CaseGrowthDelta": { "method": "log" },
-    "Rainfall24h": { "method": "cappedLinear", "capMm": 50 },
-    "Rainfall72h": { "method": "cappedLinear", "capMm": 120 },
-    "VerifiedOpenReportCount": { "method": "cappedLinear", "capReports": 5 },
-    "DaysSinceLastTreatment": { "method": "recencyDecay", "saturationDays": 60 },
-    "PremisesMix": { "method": "passThrough" }
+    "CaseSize": {
+      "method": "log",
+      "referenceMax": 300
+    },
+    "CaseGrowthDelta": {
+      "method": "log",
+      "referenceMax": 40
+    },
+    "Rainfall24h": {
+      "method": "cappedLinear",
+      "capMm": 50
+    },
+    "Rainfall72h": {
+      "method": "cappedLinear",
+      "capMm": 120
+    },
+    "VerifiedOpenReportCount": {
+      "method": "cappedLinear",
+      "capReports": 5
+    },
+    "DaysSinceLastTreatment": {
+      "method": "recencyDecay",
+      "saturationDays": 60
+    },
+    "PremisesMix": {
+      "method": "passThrough"
+    }
   },
   "ingestionIntervalsSeconds": {
     "Clusters": 3600,

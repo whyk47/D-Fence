@@ -20,6 +20,10 @@ import { PremisesMixNormalisation } from './PremisesMixNormalisation';
 
 /** Parameters that live in configuration (10.6.2), defaulted to the SCORING-SPEC.md §2 values. */
 export interface NormalisationParameters {
+  /** Fixed ceiling for the case-size driver. Fixed, not observed, so scores compare across days. */
+  caseSizeReferenceMax?: number;
+  /** Fixed ceiling for the growth driver, in new cases since the previous snapshot. */
+  caseGrowthReferenceMax?: number;
   rainfall24hCapMm?: number;
   rainfall72hCapMm?: number;
   openReportCap?: number;
@@ -27,6 +31,10 @@ export interface NormalisationParameters {
 }
 
 export const DEFAULT_NORMALISATION: Required<NormalisationParameters> = {
+  // 300 cases is above the largest cluster seen on 2026-09-03 (258) with headroom. A cluster at or
+  // above the reference saturates this driver at 1.0, which is the intended reading.
+  caseSizeReferenceMax: 300,
+  caseGrowthReferenceMax: 40,
   rainfall24hCapMm: 50,
   rainfall72hCapMm: 120,
   openReportCap: 5,
@@ -38,8 +46,11 @@ export class NormalisationFactory {
     const p = { ...DEFAULT_NORMALISATION, ...params };
     const strategies: NormalisationStrategy[] = [
       // Case size moved from min-max to log on the 2026-09-03 payload evidence (SCORING-SPEC §2.1).
-      new LogScaleNormalisation(Driver.CaseSize),
-      new LogScaleNormalisation(Driver.CaseGrowthDelta),
+      // Both log drivers take a FIXED reference ceiling, not the observed maximum: 4.1.11 keeps
+      // scores as history and 4.1.17 compares them across cycles, so a ceiling that moves with
+      // today's population would make yesterday's score mean something different.
+      new LogScaleNormalisation(Driver.CaseSize, p.caseSizeReferenceMax),
+      new LogScaleNormalisation(Driver.CaseGrowthDelta, p.caseGrowthReferenceMax),
       new CappedLinearNormalisation(Driver.Rainfall24h, p.rainfall24hCapMm),
       new CappedLinearNormalisation(Driver.Rainfall72h, p.rainfall72hCapMm),
       new CappedLinearNormalisation(Driver.VerifiedOpenReportCount, p.openReportCap),

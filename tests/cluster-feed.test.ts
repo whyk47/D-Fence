@@ -218,8 +218,24 @@ describe('EC: every driver named by 4.1.3 has a normalisation strategy (4.1.4)',
   it('F3 — case size now uses the log strategy, so 61 cases no longer collapses towards 0', () => {
     const map = NormalisationFactory.build();
     const caseSize = map.get(Driver.CaseSize)!;
-    // Min-max put this at 0.230 against a 258-case maximum; log puts it at 0.743.
-    expect(caseSize.normalise(61, ctx(2, 258))).toBeCloseTo(0.743, 3);
+    // Min-max put this at 0.230 against a 258-case observed maximum. Log against the fixed
+    // reference ceiling of 300 puts it at 0.720.
+    expect(caseSize.normalise(61, ctx(2, 258))).toBeCloseTo(0.72, 2);
+  });
+
+  it('F6 — the same raw value scores the same tomorrow, whatever the day\'s population (4.1.11)', () => {
+    const caseSize = NormalisationFactory.build().get(Driver.CaseSize)!;
+    // Today's largest cluster is 258; tomorrow a 500-case cluster appears and a small one closes.
+    // The 61-case cluster must not move merely because its neighbours did.
+    const today = caseSize.normalise(61, ctx(2, 258));
+    const tomorrow = caseSize.normalise(61, ctx(5, 500));
+    expect(tomorrow).toBe(today);
+  });
+
+  it('F7 — a cluster at the reference ceiling saturates at 1.0', () => {
+    const caseSize = NormalisationFactory.build({ caseSizeReferenceMax: 300 }).get(Driver.CaseSize)!;
+    expect(caseSize.normalise(300, ctx(2, 258))).toBe(1);
+    expect(caseSize.normalise(900, ctx(2, 258))).toBe(1);
   });
 
   it('F4 — an untreated cluster (4.1.16 default of 90 days) enters this driver saturated at 1.0', () => {

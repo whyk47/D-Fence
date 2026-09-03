@@ -17,7 +17,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | Lab requirement | State |
 |---|---|
 | §3.2.1 Equivalence-class and boundary-value cases for **1 key control class** | **Done.** `PriorityScoringEngine`, 27 cases — `tests/priority-scoring.test.ts` |
-| §3.2.1 (extension) EC/BV cases for the feed parser and driver bindings | **Done 2026-09-03.** `ClusterFeedParser` and `NormalisationFactory`, 30 cases — `tests/cluster-feed.test.ts`, designed in §2.5 |
+| §3.2.1 (extension) EC/BV cases for the feed parser and driver bindings | **Done 2026-09-03.** `ClusterFeedParser` and `NormalisationFactory`, 32 cases — `tests/cluster-feed.test.ts`, designed in §2.5 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -161,13 +161,21 @@ means either the code broke or the publisher changed the contract. Both are wort
 | F3 | factory bindings | 61 cases over an observed max of 258 | ≈0.743 (log, not 0.230 min-max) | 0.743 ✓ |
 | F4 | factory bindings | 90 days untreated (4.1.16 default) | 1.0, saturated | 1.0 ✓ |
 | F5 | factory bindings | cap reconfigured to 25 mm | 25 mm now saturates | saturates ✓ |
+| **F6** | factory bindings | 61 cases, observed max 258 today vs 500 tomorrow | **the same value both days** | identical ✓ |
+| F7 | factory bindings | 300 and 900 cases against a 300 reference | 1.0, saturated | 1.0 ✓ |
+
+**F6 is the case that encodes a design decision.** Both log drivers normalise against a *fixed*
+reference ceiling rather than the day's observed maximum, because 4.1.11 stores every score as
+history and 4.1.17 compares scores across cycles — a ceiling that moved with today's cluster
+population would make yesterday's score mean something different. F6 fails the moment someone
+"simplifies" the strategy back to using `ctx.observedMax`.
 
 **D4 and C4 are the two cases worth pointing at in a viva.** Both encode the same rule: an unknown
 state must never be recorded as "unchanged". A parser that returned `false` in either case would pass
 every happy-path test and silently freeze the cluster data the first time a metadata field went
 missing — a failure with no error message anywhere.
 
-**Execution.** `npm test` — 4 files, **85 cases, all passing**, `tsc --strict` clean (2026-09-03).
+**Execution.** `npm test` — 4 files, **87 cases, all passing**, `tsc --strict` clean (2026-09-03).
 
 ---
 
