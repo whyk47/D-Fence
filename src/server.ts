@@ -68,6 +68,7 @@ import { AccessControlService } from './control/AccessControlService';
 import { AccessPolicy } from './control/AccessPolicy';
 import { DashboardController, principalFor } from './control/DashboardController';
 import { SourceHealthController } from './control/SourceHealthController';
+import { AnalyticsController } from './control/AnalyticsController';
 import { ClusterIngestionJob } from './control/ingestion/ClusterIngestionJob';
 import { RainfallIngestionJob } from './control/ingestion/RainfallIngestionJob';
 import { ForecastIngestionJob } from './control/ingestion/ForecastIngestionJob';
@@ -310,7 +311,9 @@ async function main(): Promise<void> {
 
   // 2.3.6 — the resolver is the only way a request acquires a role, and every handler gets it.
   const app = new ExpressApp(authentication);
-  app.mount(new DashboardRoutes(ac, dashboard));
+  // 7.3.1-7.3.5 — the five charts, over the same stores everything else reads.
+  const analytics = new AnalyticsController(ac, clusters, scores, workOrders, reports);
+  app.mount(new DashboardRoutes(ac, dashboard, analytics));
   app.mount(new ReportRoutes(ac, residentReports));
   app.mount(new ModerationRoutes(ac, moderation));
   app.mount(new AuthRoutes(ac, authentication));

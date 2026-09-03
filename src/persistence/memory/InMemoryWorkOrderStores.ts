@@ -34,6 +34,14 @@ export class InMemoryWorkOrderStore implements WorkOrderStore {
    * 8.3.19 says a rejected completion is work still outstanding; treating it as closed would let a
    * second work order be created for a job the crew is about to resume.
    */
+  /** 7.3.4 — verified inside the window, oldest first. A work order verified before the
+   *  window opened is not part of this month's turnaround, however long it took. */
+  async findVerifiedSince(since: Date): Promise<WorkOrder[]> {
+    return [...this.orders.values()]
+      .filter((w) => w.verifiedAt !== null && w.verifiedAt.getTime() >= since.getTime())
+      .sort((a, b) => (a.verifiedAt as Date).getTime() - (b.verifiedAt as Date).getTime());
+  }
+
   async findOpenForCluster(clusterId: Uuid): Promise<WorkOrder[]> {
     return [...this.orders.values()].filter((w) => w.clusterId === clusterId && !w.isTerminal());
   }

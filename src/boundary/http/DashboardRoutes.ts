@@ -15,18 +15,28 @@
 import { RouteHandler, Request, Response } from './RouteHandler';
 import { AccessControlService } from '../../control/AccessControlService';
 import { DashboardController, TableQuery, SortColumn } from '../../control/DashboardController';
+import { AnalyticsController } from '../../control/AnalyticsController';
 import { PriorityTier } from '../../entity/enums';
 
 export class DashboardRoutes extends RouteHandler {
   constructor(
     ac: AccessControlService,
     private readonly dashboard: DashboardController,
+    /** 7.3.x. Optional so the dashboard routes predate the charts rather than being blocked
+     *  by them; the route answers `null` rather than 404 when it is absent. */
+    private readonly analytics: AnalyticsController | null = null,
   ) {
     super(ac);
   }
 
   routes(): string[] {
-    return ['/api/ops/dashboard', '/api/ops/priority', '/api/ops/priority.csv', '/api/ops/sources'];
+    return [
+      '/api/ops/dashboard',
+      '/api/ops/priority',
+      '/api/ops/priority.csv',
+      '/api/ops/analytics',
+      '/api/ops/sources',
+    ];
   }
 
   async handle(req: Request, res: Response): Promise<void> {
@@ -50,6 +60,11 @@ export class DashboardRoutes extends RouteHandler {
           res.status(200).text(DashboardController.toCsv(rows), 'text/csv');
           return;
         }
+        case '/api/ops/analytics':
+          // 7.3.x — all five charts in one call. They are one screen, and five round trips for a
+          // screen the manager opens first would spend the §10.1 budget on plumbing.
+          res.json({ charts: await this.analytics?.buildAll(principal) ?? null });
+          return;
         case '/api/ops/sources':
           res.json({ sources: await this.dashboard.reportSourceHealth() });
           return;

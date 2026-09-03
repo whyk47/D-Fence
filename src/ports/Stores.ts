@@ -42,6 +42,14 @@ export interface ClusterStore {
   /** 9.1.9, 9.1.10 — the snapshots for one cluster since a cut-off, for the trend view. */
   snapshotsSince(clusterId: Uuid, since: Date): Promise<ClusterSnapshot[]>;
   /**
+   * 7.3.1 — every cluster's snapshots since a cut-off, for the 30-day case series.
+   *
+   * Deliberately not `findActive()` then `snapshotsSince()` per cluster: the series must include
+   * clusters that have since closed, or a cluster that ended last week would silently subtract
+   * itself from every historical day it was actually part of.
+   */
+  allSnapshotsSince(since: Date): Promise<ClusterSnapshot[]>;
+  /**
    * 1.3.2–1.3.5 — write back the four forecast-derived fields after a forecast cycle.
    *
    * A narrow method rather than a general `save(cluster)`: the forecast job has no business
@@ -103,6 +111,8 @@ export interface WorkOrderStore {
   /** 8.4.1 — a crew member sees only what is assigned to them. */
   findForAssignee(assigneeId: Uuid): Promise<WorkOrder[]>;
   findAllOpen(): Promise<WorkOrder[]>;
+  /** 7.3.4 — work orders verified at or after a cut-off, for the turnaround median. */
+  findVerifiedSince(since: Date): Promise<WorkOrder[]>;
   /** 8.2.7 — every previous assignee is retained. */
   appendAssignmentHistory(workOrderId: Uuid, assigneeId: Uuid | null, at: Date): Promise<void>;
   assignmentHistory(workOrderId: Uuid): Promise<Array<{ assigneeId: Uuid | null; at: Date }>>;
@@ -155,6 +165,8 @@ export interface ReportStore {
   findByStatus(status: ReportStatus): Promise<Report[]>;
   /** 2.3.2, 5.2.9 — a Resident's own reports. */
   findByReporter(reporterId: Uuid): Promise<Report[]>;
+  /** 7.3.5 — reports submitted at or after a cut-off, for the reports-per-day chart. */
+  submittedSince(since: Date): Promise<Report[]>;
   /** 5.2.5 into 4.1.3 — the verified open report count, per cluster, in one query per cycle. */
   verifiedOpenCountByCluster(): Promise<Map<Uuid, number>>;
   /** 8.5.1, 8.3.21 — every report linked to a work order. */

@@ -99,6 +99,11 @@ export class WorkOrderLifecycleController {
     if (to === WorkOrderStatus.InProgress && workOrder.startedAt === null) {
       workOrder.startedAt = new Date(); // 8.3.17
     }
+    if (to === WorkOrderStatus.Verified) {
+      // 7.3.4's right-hand end. Set here rather than in `verify()` so a verification reached by
+      // any future path still stamps it — the same argument as the audit hook two lines below.
+      workOrder.verifiedAt = new Date();
+    }
     await this.workOrders.save(workOrder);
     // 2.4.1 — after the write and before the destination's obligations, so a failing notification
     // cannot lose the record of a change that has already happened.

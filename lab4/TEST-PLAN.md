@@ -31,6 +31,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | US-1.4 (§1.3) The 24-hour forecast, region mapping and the heavy-rain flag | **Done 2026-09-03.** 26 cases — `tests/forecast.test.ts`, designed in §2.16 |
 | US-1.5 (§1.4) Source health: the three-interval rule and the staleness marker | **Done 2026-09-03.** 17 cases — `tests/source-health.test.ts`, designed in §2.17 |
 | US-2.5 (§2.4) The audit trail across the operational write paths | **Done 2026-09-03.** 10 cases — `tests/audit.test.ts`, designed in §2.18 |
+| US-7.3 (§7.3) The five dashboard visualisations and their insufficient-data states | **Done 2026-09-03.** 21 cases — `tests/analytics.test.ts`, designed in §2.19 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -768,6 +769,69 @@ accepting the target id and **throwing it away**: 2.4.1 specifies four fields an
 stored, so every row said what *kind* of thing changed without saying which one. And `recent()` was
 returning the stored objects, so any caller could rewrite a record through an ordinary read — 2.4.2
 false by accident. Both are fixed; A1 and A9 are the cases that hold them fixed.
+
+### 2.19 Fifteenth subject - the §7.3 charts (`tests/analytics.test.ts`)
+
+Added 2026-09-03 for US-7.3. Four of the five visualisations did not exist. Only 7.3.2's tier
+distribution was computed — the one chart a dashboard can answer from today's scores with no history
+at all — so "analytics" was in effect a pie chart of this afternoon.
+
+**The cases are weighted towards the insufficient-data state, not the arithmetic.** US-7.3's second
+acceptance criterion asks for that state explicitly, and the reason is that the failure mode of a
+chart is not a wrong number, it is a **plausible** one. A 30-day case series drawn from four hours
+of snapshots is a flat line, and a flat line asserts "cases are steady", which the data does not
+support. A median over one work order is that work order. Summing a column is not where this
+feature can go wrong.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| C1 | One point per day, summed across clusters, oldest first | 7.3.1 | ✓ |
+| **C2** | A cluster snapshotted twice in a day counts **once**, at its last value | 7.3.1 | ✓ |
+| **C3** | A **closed** cluster still counts on the days it was open | 7.3.1, 1.1.10 | ✓ |
+| **C4** | A day with no snapshots is **omitted**, never drawn as zero | 7.3.1 | ✓ |
+| **C5** | The boundary: six days is insufficient, seven is not | 7.3.1, BV | ✓ |
+| C6 | Snapshots older than the window are excluded | 7.3.1 | ✓ |
+| C7 | The tier distribution is insufficient before any scoring cycle has run | 7.3.2 | ✓ |
+| C8 | Counted per assignee, busiest first, with an **unassigned** bucket | 7.3.3, 8.2.1 | ✓ |
+| C9 | A verified order is not open; no open work is a real answer | 7.3.3 | ✓ |
+| **C10** | Unwired work orders are **insufficient**, not an empty chart | 7.3.3, 7.5.3 | ✓ |
+| C11, C12 | Odd sample takes the middle; even sample averages the middle pair | 7.3.4, BV | ✓ |
+| **C13** | The median resists the outlier a mean would not; fastest and slowest travel with it | 7.3.4 | ✓ |
+| **C14** | The boundary: four verified orders is an anecdote, five is a median | 7.3.4, BV | ✓ |
+| C15 | An order verified before the window opened is excluded, however long it took | 7.3.4 | ✓ |
+| C16 | Thirty points, one per day, ending today | 7.3.5 | ✓ |
+| **C17** | A day with no reports is a **real zero** — unlike 7.3.1's omitted day | 7.3.5 | ✓ |
+| C18 | With no reports at all the chart is insufficient, not a confident flat zero | 7.3.5 | ✓ |
+| C19 | Every report counts, whatever its moderation outcome | 7.3.5 | ✓ |
+| C20, C21 | All five together, each naming its requirement; a Resident is refused | 7.3.x, 2.3.4 | ✓ |
+
+**C4 and C17 are the pair worth reading together.** They look inconsistent and are not: a day with
+no *snapshot* is omitted, a day with no *report* is a zero. A missed ingestion cycle is a fact about
+the scheduler and drawing it as zero would put a cliff in the case series; nobody filing a report on
+a Tuesday is a fact about the world and omitting it would hide a quiet week. The same shape of
+absence means different things in the two feeds, and the charts have to say so.
+
+**C10 restates the 7.5.3 argument in a new place.** "No crew has any work" and "we are not reading
+work orders" look identical on a bar chart and mean opposite things. Every chart whose source is
+unwired therefore reports insufficient with a reason, exactly as `DashboardOverview` returns `null`
+rather than `0` for a count it cannot compute.
+
+**C13's median is the requirement's own choice and worth defending.** One work order left open over
+a public holiday drags a mean of six far more than it drags a median, and the number is read as "how
+long a job takes" — a typical case, not an average one. The fastest and slowest are returned
+alongside so that a median of 5 hours over a 3-to-400 spread cannot be misread as consistency.
+
+**Two entity fields had to exist first.** 7.3.4 measures creation to verified completion and neither
+end was recorded: `WorkOrder.startedAt` is 8.3.17's *work* start, a third instant and not either of
+these. `createdAt` is now stamped by `DispatchController.createWorkOrder` and `verifiedAt` inside
+`WorkOrderLifecycleController.transition` — in the transition rather than in `verify()`, so any
+future path into Verified stamps it, which is the same argument as the audit hook beside it.
+Deriving the pair from the audit trail was rejected: the trail is evidence, not a reporting table.
+
+**Verified live over HTTP.** `GET /api/ops/analytics` on a fresh deployment returns all five charts
+with honest insufficiency: 7.3.1 "1 of 7 days of cluster history", 7.3.4 "0 of 5 verified work
+orders", 7.3.2 sufficient with the real tier split of the 15 live clusters. That is the behaviour
+the acceptance criterion asks for, seen from outside the process rather than asserted inside it.
 
 ---
 

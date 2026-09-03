@@ -479,6 +479,39 @@ can be reviewed.
 - Deny update and delete on the audit table at the database level.
 - Test that a report moderation and a work-order assignment both produce entries.
 
+*Delivered 2026-09-03, commit `2e9fecd`, merged to `dev` with `--no-ff`. §2.4 was two-thirds built:
+registration, sign-in, sign-out and staff provisioning wrote audit rows, but **report moderation and
+work-order assignment wrote nothing** — exactly the pair this story's acceptance criteria name, and
+exactly the pair a review of a dispatch decision would ask about. A trail that covers authentication
+but not operations records who logged in and not who sent a crew somewhere. The fix reuses the
+pattern that already carries 5.2.8's status notification: **the single write path is the single audit
+point.** The hook sits inside `ReportLifecycleController.transition` and
+`WorkOrderLifecycleController.transition` — each the only class permitted to write its entity's
+status — so one hook covers every present and future caller. Only changes a controller makes itself
+are logged at the call site: work-order creation (8.3.15 makes Created an initial state, not a
+transition), the assignee field, a cancellation reason, a report submission, a corroboration, a saved
+location added or removed, an alert preference update. Two consequences were chosen deliberately.
+An assignment produces **two** rows — the assignee changed and the status changed — because "who
+moved this to Assigned" and "who put Ah Meng on it" are two questions. A **refused** transition writes
+no action row, since 2.4.1 is about operations that change stored state and logging a refusal as
+though it happened would make the log unusable as evidence; a **system-initiated** change (5.2.6
+moving a linked report to Actioned when a work order is assigned) is attributed to a new
+`SYSTEM_ACTOR_ID = 'system'` in `src/control/Principal.ts`, because attributing it to the nearest
+human would be a lie in the one log that exists to be trusted, and a blank actor would make "nobody
+did this" indistinguishable from "we did not record who did this". Two silent defects surfaced while
+the tests were being written, not by running them: `InMemoryAuditStore` **accepted the target entity
+id and threw it away**, so every row said what kind of thing changed without saying which one — 2.4.1
+names four fields and only three were stored; and `recent()` returned the stored objects by
+reference, so any caller could rewrite a record through an ordinary read, making 2.4.2 false by
+accident. Both fixed: a new exported `AuditEntry` interface in `src/ports/Stores.ts` names all four
+fields, and `recent()` returns copies. `src/server.ts` also held **two** `InMemoryAuditStore`
+instances, one of which nothing read; a trail split across two objects is not a trail, and there is
+now one, shared by `AccessControlService` and every controller that writes state. 10 new cases in
+`tests/audit.test.ts` (TEST-PLAN §2.18); **414 tests passing across 18 files**, `tsc --strict` clean.
+**No audit-reading HTTP route was added** — no requirement in §2.4 asks for the trail to be
+displayed, and scope was not widened. The database-level deny on update and delete remains
+outstanding for the same reason as everything else: the build still runs on in-memory stores.*
+
 ---
 
 # E3 — Saved locations and exposure
