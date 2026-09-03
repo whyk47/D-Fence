@@ -677,6 +677,7 @@ reader of this document alone can tell assumption from requirement.*
 | 4.1.4 | The normalisation method chosen per driver | Judgement, argued from the live payload | A driver saturates too early or too late and stops discriminating |
 | 1.2.6 | Inverse-distance weighting over the three nearest stations | Judgement | A cluster's rainfall is over- or under-stated where stations are sparse |
 | 1.2.5 | Three stations is the right number | Judgement | Too few is noisy, too many washes out local rain |
+| 9.1.10 | A ±10% change over the fortnight separates Growing and Receding from Stable | Judgement, added 2026-09-03 with the implementation. 9.1.10 names three classes and does not say where the lines fall; below 10% a single late-reported case would flip the label on a small cluster every other day | The trend column flickers, or a real escalation reads as Stable |
 
 **The polling question is now answered, and the answer shaped the design.** A live pull on
 2026-09-03 (dataset `d_dbfabf16158d1b0e1c420627c0819168`, 25 KB, 12 active clusters) gives:

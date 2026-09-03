@@ -25,6 +25,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | §3.2 (extension) Accounts, sessions, lock-out and staff provisioning | **Done 2026-09-03.** 38 cases — `tests/account.test.ts`, designed in §2.10 |
 | §3.2 (extension) Saved locations, geocoding failure modes and the exposure band | **Done 2026-09-03.** 27 cases — `tests/location.test.ts`, designed in §2.11 |
 | §3.2 (extension) Resident alerts: triggers, the daily cap, delivery and retries | **Done 2026-09-03.** 29 cases — `tests/alert.test.ts`, designed in §2.12 |
+| §3.2 (extension) Map layers as an access surface, and the trend classification | **Done 2026-09-03.** 24 cases — `tests/map-trend.test.ts`, designed in §2.13 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -475,6 +476,52 @@ send it, whereas `Failed` means we tried and could not.
 **Testable because the schedule is a port.** 6.1.11's five-minute retry interval is asserted by a
 `RetryScheduler` the test controls; a suite that actually waited fifteen minutes is a suite nobody
 runs, and an interval nobody asserts is an interval that silently becomes fifty milliseconds.
+
+### 2.13 Ninth subject - the map, the trend and the history (`tests/map-trend.test.ts`)
+
+Added 2026-09-03 with the implementation. Two halves, and they are tested for different reasons.
+
+**`TrendAnalyser.classify` is the only judgement in §9** — every other requirement there displays
+a fact — so it is a pure function tested at its band edges, the way `assignTier` is. The band
+itself (±10% over the fortnight) is a judgement recorded in the code, because 9.1.10 names three
+classes and does not say where the lines fall.
+
+**The layers are an access-control surface wearing map clothes.** 9.1.4 and 9.1.5 read as display
+rules and are really §2.3: a resident's home address appearing in another resident's layer is the
+most sensitive leak this system could have.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| J1 | A rise beyond the band is Growing; a fall is Receding | 9.1.10 | ✓ |
+| **J2–J3** | Exactly the band is classified; just inside it is Stable | 9.1.10 (BV) | ✓ |
+| **J4** | The **ends** are compared, not the last step | 9.1.10 | ✓ |
+| J5–J6 | Too short to judge is Stable; growth from zero does not divide by zero | 9.1.10 | ✓ |
+| **S1** | One point per calendar day, taking the last observation of each | 9.1.9 | ✓ |
+| S2 | The 30-day window excludes anything older | 9.1.9 (BV) | ✓ |
+| **S3** | The trajectory reads **14** days even though the chart shows 30 | 9.1.9, 9.1.10 | ✓ |
+| S4 | No history yields an empty series and a Stable label | 9.1.9 | ✓ |
+| M1 | Boundaries carry a tier **and** a tier label in words | 9.1.2, 9.1.11 | ✓ |
+| **M2** | The ring is in GeoJSON order, longitude first | 9.1.1 | ✓ |
+| **M3–M4** | A resident sees verified reports only; a manager sees unmoderated ones too | 9.1.3, 5.3.5, 2.3.4 | ✓ |
+| **M5** | No report marker carries the reporter's identity | 5.2.9 | ✓ |
+| M6–M7 | A crew member sees only their own work orders; a resident sees none | 9.1.4, 2.3.3, 2.3.5 | ✓ |
+| **M8–M9** | A resident sees only their own saved locations; a manager sees none | 9.1.5, 2.3.1 | ✓ |
+| M10 | The layers arrive separately, so one can be hidden | 9.1.6 | ✓ |
+| P1 | The panel carries score, breakdown, reports, work orders, series and trajectory | 9.1.8 | ✓ |
+| **P2–P3** | A resident gets the panel **without** the driver breakdown or the work orders | 2.3.3, 2.3.4 | ✓ |
+| P4 | An unknown cluster is an error, not an empty panel | 9.1.7 | ✓ |
+
+**S3, M2 and P2 are the three to point at.** S3 is a distinction it would be easy to lose: the
+chart shows thirty days and the label reads fourteen, and reusing one series for both would
+quietly change what the label means — the test builds a cluster that halved a month ago and has
+been flat since, which is Receding over 30 days and Stable over 14. M2 catches the error no type
+system can: GeoJSON is [longitude, latitude], the reverse of how the coordinates are spoken, and
+swapping them puts Singapore in Somalia. P2 is 2.3.3 closing a side door — without it the
+operations dashboard is reachable by tapping a boundary on the public map.
+
+**Verified live.** The running server returned all fifteen active NEA cluster boundaries (the
+first with a 36-point ring), each tier-coloured and tier-labelled, and a detail panel for the
+top-ranked cluster carrying a score of 45.6, tier Medium and all seven driver contributions.
 
 ---
 

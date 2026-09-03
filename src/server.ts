@@ -23,6 +23,7 @@ import { AuthRoutes } from './boundary/http/AuthRoutes';
 import { AdminRoutes } from './boundary/http/AdminRoutes';
 import { LocationRoutes } from './boundary/http/LocationRoutes';
 import { AlertRoutes } from './boundary/http/AlertRoutes';
+import { MapRoutes } from './boundary/http/MapRoutes';
 import {
   InMemoryAuditStore,
   InMemoryClusterStore,
@@ -51,6 +52,8 @@ import { TelegramGateway } from './boundary/gateways/TelegramGateway';
 import { AlertTriggerEvaluator } from './control/AlertTriggerEvaluator';
 import { AlertPreferenceController } from './control/AlertPreferenceController';
 import { NotificationController } from './control/NotificationController';
+import { TrendAnalyser } from './control/TrendAnalyser';
+import { MapViewController } from './control/MapViewController';
 import {
   InMemoryAccountStore,
   InMemorySessionStore,
@@ -118,6 +121,17 @@ async function main(): Promise<void> {
   const moderation = new ModerationController(ac0, reports, reportLifecycle);
   const residentReports = new ReportController(ac0, reports, locator, reportLifecycle);
   const alertTriggers = new AlertTriggerEvaluator(savedLocations, subscriptions, alertStore, locator);
+  // 9.1.x — the map and the trend view read the same stores everything else writes to; nothing
+  // here computes a second version of a score or a boundary.
+  const mapView = new MapViewController(
+    ac0,
+    clusters,
+    scores,
+    new TrendAnalyser(clusters),
+    reports,
+    workOrders,
+    savedLocations,
+  );
   const locations = new SavedLocationController(ac0, savedLocations, locator, geocoding, subscriptions, {
     // 1.2.5-1.2.8 for an arbitrary point rather than a cluster centroid — the same accumulator,
     // asked about a resident's home.
@@ -263,6 +277,7 @@ async function main(): Promise<void> {
   app.mount(new AdminRoutes(ac, staff));
   app.mount(new LocationRoutes(ac, locations));
   app.mount(new AlertRoutes(ac, notifications, alertPreferences));
+  app.mount(new MapRoutes(ac, mapView));
   // The stand-in dashboard page renders for the seeded manager. It is a **development page**, not
   // the graded screen (E10), and it is the one place left that does not resolve a session — an
   // HTML page cannot carry a bearer token. Every JSON route above does resolve one.
