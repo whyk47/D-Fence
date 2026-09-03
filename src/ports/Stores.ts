@@ -9,7 +9,7 @@
  * database, which is what lets `npm run ingest` pull live NEA data before Supabase exists.
  */
 import { Uuid, GeoPoint } from '../entity/valueTypes';
-import { ReportStatus, ReportType, Role, SourceKind } from '../entity/enums';
+import { AlertTrigger, ReportStatus, ReportType, Role, SourceKind } from '../entity/enums';
 import { Cluster } from '../entity/Cluster';
 import { ClusterSnapshot } from '../entity/ClusterSnapshot';
 import { IngestionRun } from '../entity/IngestionRun';
@@ -22,6 +22,8 @@ import { Corroboration } from '../entity/Corroboration';
 import { Account } from '../entity/Account';
 import { Session } from '../entity/Session';
 import { SavedLocation } from '../entity/SavedLocation';
+import { Alert } from '../entity/Alert';
+import { AlertSubscription } from '../entity/AlertSubscription';
 import { TreatmentRecord } from '../entity/TreatmentRecord';
 import { ParsedBatch } from './types';
 import { ParsedReading, ParsedStation } from '../control/ingestion/RainfallFeedParser';
@@ -214,13 +216,26 @@ export interface SavedLocationStore {
 }
 
 /**
- * 3.1.12, 6.1.x. Declared now with the one method 3.1.12 needs; E6 extends it rather than
- * replacing it. A cascade left as a TODO is an orphaned subscription that still tries to fire,
- * and it is the alert nobody can turn off.
+ * 3.1.12, 6.1.1, 6.1.3, 6.1.4. One subscription per saved location.
+ *
+ * Declared for 3.1.12's cascade before §6 existed, and widened here rather than replaced — which
+ * is what the cascade being real code from the start bought.
  */
 export interface AlertSubscriptionStore {
-  /** @returns how many were removed, which the confirmation states. */
+  findForLocation(locationId: Uuid): Promise<AlertSubscription | null>;
+  save(subscription: AlertSubscription): Promise<AlertSubscription>;
+  /** 3.1.12. @returns how many were removed, which the confirmation states. */
   deleteForLocation(locationId: Uuid): Promise<number>;
+}
+
+/** 6.1.9, 6.1.10, 6.1.11 — the alert log, which is also what the daily cap is read from. */
+export interface AlertStore {
+  findById(id: Uuid): Promise<Alert | null>;
+  save(alert: Alert): Promise<Alert>;
+  /** 6.1.9 — alerts for this location and trigger since a cut-off. */
+  recentFor(locationId: Uuid, trigger: AlertTrigger, since: Date): Promise<Alert[]>;
+  /** 6.1.10 — the delivery log, newest first. */
+  recent(limit: number): Promise<Alert[]>;
 }
 
 /**

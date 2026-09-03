@@ -24,6 +24,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | §3.2 (extension) Community reporting, its boundaries and its join to §8 | **Done 2026-09-03.** 42 cases — `tests/report.test.ts`, designed in §2.9 |
 | §3.2 (extension) Accounts, sessions, lock-out and staff provisioning | **Done 2026-09-03.** 38 cases — `tests/account.test.ts`, designed in §2.10 |
 | §3.2 (extension) Saved locations, geocoding failure modes and the exposure band | **Done 2026-09-03.** 27 cases — `tests/location.test.ts`, designed in §2.11 |
+| §3.2 (extension) Resident alerts: triggers, the daily cap, delivery and retries | **Done 2026-09-03.** 29 cases — `tests/alert.test.ts`, designed in §2.12 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -433,6 +434,47 @@ of *now* would read as "checked just now and found clear". G4 is the failure sep
 clusters: CLEAR, nearest cluster **Woodlands Ring Rd (Blk 655, 659)** at 1,992 m with 2 cases. A
 nonsense address returned 404 rather than 503, which is 3.1.13 and 3.1.17 behaving differently in
 production rather than only in a test.
+
+### 2.12 Eighth subject - resident alerts (`tests/alert.test.ts`)
+
+Added 2026-09-03 with the implementation. Every rule tested here exists to stop the feature
+becoming spam, which is the only way an alert feature fails in practice.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| T1 | Becoming IN_CLUSTER generates an alert | 6.1.2 | ✓ |
+| **T2** | *Being* IN_CLUSTER without changing generates nothing — the transition is the event | 6.1.2 | ✓ |
+| **T3–T4** | No subscription, or a disabled one, produces nothing | 6.1.1 | ✓ |
+| T5 | Muting one trigger leaves the others working | 6.1.1 | ✓ |
+| **T6** | Growth of five alerts, four does not | 6.1.3, 6.1.4 (BV) | ✓ |
+| T7 | A resident may raise their own threshold | 6.1.3 | ✓ |
+| T8 | Heavy rain forecast for a containing cluster alerts | 6.1.5 | ✓ |
+| **T9** | Growth in a cluster a location is only *near* does not alert | 6.1.3 | ✓ |
+| C1–C2 | A second alert of the same type inside 24 hours is suppressed, and allowed after | 6.1.9 (BV) | ✓ |
+| C3 | A different trigger type is not capped by the first | 6.1.9 | ✓ |
+| **C4** | The cap holds **within a single batch**, not only against yesterday | 6.1.9 | ✓ |
+| **C5** | A FAILED delivery does not consume the day's allowance | 6.1.9, 6.1.11 | ✓ |
+| D1 | The message carries all five required elements | 6.1.8 | ✓ |
+| D2–D3 | A send is logged Sent; an account with no linked chat is **Suppressed, not Failed** | 6.1.6, 6.1.10 | ✓ |
+| **D4** | Two retries at five-minute intervals, then FAILED — and no fourth attempt | 6.1.11 | ✓ |
+| D5 | A retry that succeeds records Sent and stops retrying | 6.1.11 | ✓ |
+| D6 | Recipient, trigger, timestamp and outcome are all logged | 6.1.10 | ✓ |
+| K1–K3 | A link code links the chat, is single-use, and expires at fifteen minutes | 6.1.7 (BV) | ✓ |
+| **K4** | A wrong code is consumed anyway, so retrying cannot brute-force it | 6.1.7 | ✓ |
+| P1 | The first preference update creates the subscription with the default threshold | 6.1.4 | ✓ |
+| P2–P5 | Another resident's location, a threshold below one, an empty trigger list and an unknown location are all refused | 2.3.1, 6.1.1, 6.1.3 | ✓ |
+
+**T2, C4 and D3 are the three to point at.** T2 is the difference between an alert feature and a
+nuisance: 6.1.2 says "changes to IN_CLUSTER", and alerting on the *state* would re-send every hour
+for as long as the cluster stands. C4 is a cap that a naive implementation gets half right —
+checking the store catches yesterday's alert and misses the second one in the same batch, because
+nothing has been written yet. D3 is a distinction 6.1.10's log depends on: an account with no
+linked Telegram chat is `Suppressed`, because nothing went wrong and there was simply nowhere to
+send it, whereas `Failed` means we tried and could not.
+
+**Testable because the schedule is a port.** 6.1.11's five-minute retry interval is asserted by a
+`RetryScheduler` the test controls; a suite that actually waited fifteen minutes is a suite nobody
+runs, and an interval nobody asserts is an interval that silently becomes fifty milliseconds.
 
 ---
 
