@@ -15,6 +15,7 @@ import { ConfigLoader } from './config/ConfigLoader';
 import { HttpClient } from './boundary/gateways/HttpClient';
 import { NEAFeedGateway } from './boundary/gateways/NEAFeedGateway';
 import { RainfallGateway } from './boundary/gateways/RainfallGateway';
+import { ForecastGateway } from './boundary/gateways/ForecastGateway';
 import { ExpressApp } from './boundary/http/ExpressApp';
 import { DashboardRoutes } from './boundary/http/DashboardRoutes';
 import { ReportRoutes } from './boundary/http/ReportRoutes';
@@ -28,6 +29,7 @@ import {
   InMemoryAuditStore,
   InMemoryClusterStore,
   InMemoryIngestionRunStore,
+  InMemoryForecastStore,
   InMemoryPriorityScoreStore,
   InMemoryRainfallStore,
 } from './persistence/memory/InMemoryStores';
@@ -67,6 +69,7 @@ import { AccessPolicy } from './control/AccessPolicy';
 import { DashboardController, principalFor } from './control/DashboardController';
 import { ClusterIngestionJob } from './control/ingestion/ClusterIngestionJob';
 import { RainfallIngestionJob } from './control/ingestion/RainfallIngestionJob';
+import { ForecastIngestionJob } from './control/ingestion/ForecastIngestionJob';
 import { RainfallAccumulator } from './control/RainfallAccumulator';
 import { NormalisationFactory } from './control/normalisation/NormalisationFactory';
 import { PriorityScoringEngine, DriverInputs } from './control/PriorityScoringEngine';
@@ -109,6 +112,7 @@ async function main(): Promise<void> {
   const notifications = new NotificationController(channel, accounts, alertStore);
   const clusters = new InMemoryClusterStore();
   const rainfall = new InMemoryRainfallStore();
+  const forecasts = new InMemoryForecastStore();
   const runs = new InMemoryIngestionRunStore();
   const scores = new InMemoryPriorityScoreStore();
   const audit = new InMemoryAuditStore();
@@ -155,6 +159,9 @@ async function main(): Promise<void> {
     clusters,
   );
   const rainJob = new RainfallIngestionJob(new RainfallGateway(http), runs, rainfall);
+  // 1.3.x — runs after the cluster job in every cycle, because it derives onto whatever clusters
+  // that job just wrote. A forecast joined to yesterday's cluster list is a flag on the wrong map.
+  const forecastJob = new ForecastIngestionJob(new ForecastGateway(http), runs, forecasts, clusters);
 
   const engine = new PriorityScoringEngine(NormalisationFactory.build(config.normalisation), config, scores);
   const accumulator = new RainfallAccumulator();
@@ -163,6 +170,10 @@ async function main(): Promise<void> {
   async function cycle(trigger: 'SCHEDULED' | 'MANUAL' = 'SCHEDULED'): Promise<void> {
     const clusterRun = await clusterJob.run(trigger);
     const rainRun = await rainJob.run(trigger);
+    // 1.3.1 allows six hours between forecast retrievals, so this is throttled rather than run on
+    // the five-minute rainfall beat — 288 requests a day for a payload that changes four times is
+    // exactly the discourtesy 10.4.6 asks us not to commit against a free public API.
+    const forecastRun = await forecastCycle(trigger);
     const active = await clusters.findActive();
     if (active.length === 0) {
       return;
@@ -212,8 +223,30 @@ async function main(): Promise<void> {
     }
     console.log(
       `cycle: clusters ${clusterRun.outcome} (${clusterRun.featureCount}), ` +
-        `rainfall ${rainRun.outcome} (${rainRun.featureCount}), scored ${active.length}`,
+        `rainfall ${rainRun.outcome} (${rainRun.featureCount}), ` +
+        `forecast ${forecastRun ?? 'SKIPPED'}, scored ${active.length}`,
     );
+  }
+
+  /**
+   * 1.3.1 — at most one forecast retrieval per interval, whatever the cycle's own cadence is.
+   * Returns the outcome, or null when the interval has not elapsed, so the cycle log can tell a
+   * skipped fetch from a failed one.
+   */
+  let lastForecastAt = 0;
+  const forecastInterval = (config.ingestionIntervals.get(SourceKind.Forecast) ?? 6 * 3600) * 1000;
+  async function forecastCycle(trigger: 'SCHEDULED' | 'MANUAL'): Promise<string | null> {
+    if (trigger === 'SCHEDULED' && Date.now() - lastForecastAt < forecastInterval) {
+      return null;
+    }
+    lastForecastAt = Date.now();
+    const run = await forecastJob.run(trigger);
+    if (forecastJob.outsideEveryRegion.length > 0) {
+      // 1.3.2's fallback fired. Not an error, but the count is the signal that the region boxes
+      // in ForecastRegionMap have drifted from where the feed is actually putting clusters.
+      console.log(`  forecast: ${forecastJob.outsideEveryRegion.length} cluster(s) took the nearest-region fallback`);
+    }
+    return `${run.outcome} (${run.featureCount} cluster(s) flagged)`;
   }
 
   console.log('Priming the first cycle…');

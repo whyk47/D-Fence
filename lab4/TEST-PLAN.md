@@ -28,6 +28,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | §3.2 (extension) Map layers as an access surface, and the trend classification | **Done 2026-09-03.** 24 cases — `tests/map-trend.test.ts`, designed in §2.13 |
 | §3.2 (extension) Dialog-map conformance, the route guard, navigation and field rules | **Done 2026-09-03.** 31 cases — `tests/client-navigation.test.ts`, designed in §2.14 |
 | US-0.5 (§10.1) Performance obligations measured rather than asserted | **Done 2026-09-03.** 6 cases — `tests/performance.test.ts`, designed in §2.15 |
+| US-1.4 (§1.3) The 24-hour forecast, region mapping and the heavy-rain flag | **Done 2026-09-03.** 26 cases — `tests/forecast.test.ts`, designed in §2.16 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -613,6 +614,64 @@ gone into a report. `tsc --strict` rejected the cast that hid it. The case now a
 `isDegraded === false` and a seven-entry breakdown before it believes its own stopwatch, which is
 the general lesson: a performance measurement needs a correctness assertion beside it, or it will
 eventually measure something cheaper than the thing it names.
+
+### 2.16 Twelfth subject - the 24-hour forecast and the heavy-rain flag (`tests/forecast.test.ts`)
+
+Added 2026-09-03 for US-1.4, and the reason it was written is worth stating plainly:
+**`Cluster.heavyRainExpected` was written by nothing at all.** Driver 4.1.4 read `false` for every
+cluster in the country, and the heavy-rain alert of 6.1.5 could never fire. Both features had
+passing tests. Both were being fed a constant. A suite that tests a driver against a value nobody
+produces is testing arithmetic, not the system — so the cases here are weighted towards the
+**join** (forecast → region → cluster) rather than towards parsing, which is the easy half.
+
+**The design problem 1.3.2 poses.** The requirement says a cluster maps to a region "by the region
+polygon containing the cluster centroid", and the endpoint publishes **no polygons** — it returns
+`periods[].regions.{north, south, east, west, central}` and nothing spatial (verified live
+2026-09-03; the v0.3 requirements note already records the resolution loss). The five boundaries
+therefore have to exist somewhere, and `ForecastRegionMap` is that somewhere: five axis-aligned
+rectangles that **partition** Singapore's bounding box exactly, so "exactly one region" holds by
+construction rather than by the test data behaving. The cut lines were chosen against real towns,
+and those towns are the assertions.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| M1 | Fifteen real places land where a Singaporean would put them | 1.3.2 | ✓ |
+| **M2** | The four cut lines, tested from **both sides** (1.29, 1.39 lat; 103.77, 103.89 lon) | 1.3.2, BV | ✓ |
+| M3 | A point outside every box takes the nearest-region fallback, never `null` | 1.3.2 | ✓ |
+| **M4** | Over a 6,000-point grid, every point inside the bounds gets a region — the partition property | 1.3.2 | ✓ |
+| M5 | The rectangles are available as closed polygons for the map layer | 1.3.5 | ✓ |
+| K1 | Each of the three keywords named by 1.3.3 sets the flag | 1.3.3, EC | ✓ |
+| K2 | The dry class (Fair, Cloudy, Hazy, Windy, Partly Cloudy) does not | 1.3.3, EC | ✓ |
+| K3 | The rule is case-insensitive — 1.3.3 names words, not capitalisation | 1.3.3 | ✓ |
+| **K4** | "Light Rain" is the near-miss: it *is* rain, and 1.3.3 still says no | 1.3.3, BV | ✓ |
+| F1 | The live shape yields one forecast per macro-region | 1.3.1 | ✓ |
+| **F2** | The three periods are folded with **OR** — rain in any period is rain expected | 1.3.3 | ✓ |
+| F3 | The stored text keeps the period labels, so the flag's basis is readable | 1.3.5 | ✓ |
+| F4 | Validity spans earliest period start to latest period end; `covers()` at both edges | 1.3.4, BV | ✓ |
+| F5, F6 | Validity falls back to `general.validPeriod`, then to 24 h from retrieval — never "forever" | 1.3.4 | ✓ |
+| **F7** | A region absent from every period is **omitted**, not defaulted to dry | 1.3.3, 4.1.12 | ✓ |
+| F8 | An empty payload throws rather than producing five empty forecasts | 10.2.4 | ✓ |
+| **J1** | Every active cluster comes out with a region, a flag **and** a validity window | 1.3.2–1.3.5 | ✓ |
+| **J2** | The run's feature count is *clusters flagged*, not *forecasts stored* | 1.1.14 | ✓ |
+| J3 | The forecast a flag came from is retrievable per region | 1.3.5 | ✓ |
+| **J4** | A region missing from a later payload leaves its clusters **untouched**, not cleared | 10.2.2 | ✓ |
+| J5 | A failed fetch marks the source stale and changes no stored flag | 10.2.4 | ✓ |
+| J6 | A cluster outside every box is flagged by the fallback **and reported** | 1.3.2 | ✓ |
+| G1–G3 | Health is "returns a forecast", not "returns 200" | 1.4.x | ✓ |
+
+**Three cases carry the argument.** J2 exists because storing five region rows and joining none of
+them would look like a successful run while the driver stayed constant — which is precisely how
+this gap survived ten epics. J4 and F7 are the same principle in the other direction: an absent
+region must not become a confident all-clear, because for a *warning* the cheap failure and the
+expensive one are not symmetric. M4 is the only case that tests the property 1.3.2 actually states;
+M1's fifteen towns would happily pass a map with a hole in the middle of it.
+
+**Verified live, not only against a fixture.** `npx tsx src/tools/forecast-live.ts` runs the real
+NEA cluster feed and the real forecast endpoint through the same job: on 2026-09-03 it flagged all
+15 active clusters, assigning Woodlands and Yishun north, Bt Batok and Teban Gardens west, Bishan
+and Marymount central. Every flag came back `false`, which is the genuine forecast for that day
+("Fair (Night) | Fair (Day) | Windy") and not a stub — the distinction the tests above exist to keep
+honest.
 
 ---
 

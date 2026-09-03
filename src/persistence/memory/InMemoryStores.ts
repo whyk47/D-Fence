@@ -17,14 +17,23 @@
  * answer to containment, not none in memory.
  */
 import { randomUUID } from 'node:crypto';
-import { AuditStore, ClusterStore, IngestionRunStore, PriorityScoreStore, RainfallStore } from '../../ports/Stores';
+import {
+  AuditStore,
+  ClusterStore,
+  ForecastDerivation,
+  ForecastStore,
+  IngestionRunStore,
+  PriorityScoreStore,
+  RainfallStore,
+} from '../../ports/Stores';
 import { ParsedReading, ParsedStation } from '../../control/ingestion/RainfallFeedParser';
 import { ParsedBatch } from '../../ports/types';
 import { Uuid } from '../../entity/valueTypes';
-import { SourceKind } from '../../entity/enums';
+import { ForecastRegion, SourceKind } from '../../entity/enums';
 import { Cluster } from '../../entity/Cluster';
 import { ClusterSnapshot } from '../../entity/ClusterSnapshot';
 import { IngestionRun } from '../../entity/IngestionRun';
+import { RegionForecast } from '../../entity/RegionForecast';
 import { PriorityScore } from '../../entity/PriorityScore';
 
 export class InMemoryClusterStore implements ClusterStore {
@@ -107,6 +116,49 @@ export class InMemoryClusterStore implements ClusterStore {
   /** 9.1.9, 9.1.10 — inclusive of the cut-off, so a 30-day window contains thirty days. */
   async snapshotsSince(clusterId: Uuid, since: Date): Promise<ClusterSnapshot[]> {
     return (this.snapshots.get(clusterId) ?? []).filter((s) => s.retrievedAt.getTime() >= since.getTime());
+  }
+
+  /** 1.3.2–1.3.5. Silently ignores an unknown id: a cluster closed between the forecast fetch and
+   *  the write-back is not an error, it is the feed doing what 1.1.10 says it does. */
+  async saveForecastDerivation(clusterId: Uuid, derivation: ForecastDerivation): Promise<void> {
+    const cluster = this.clusters.get(clusterId);
+    if (cluster === undefined) {
+      return;
+    }
+    cluster.forecastRegion = derivation.region;
+    cluster.heavyRainExpected = derivation.heavyRainExpected;
+    cluster.forecastValidFrom = derivation.validFrom;
+    cluster.forecastValidTo = derivation.validTo;
+  }
+}
+
+/**
+ * The stored 24-hour forecasts, newest retrieval per region.
+ *
+ * History is kept rather than overwritten — five rows every six hours is twenty rows a day — so
+ * that "why was this cluster flagged yesterday" has an answer, which is what 1.3.5 is for.
+ */
+export class InMemoryForecastStore implements ForecastStore {
+  private readonly forecasts: RegionForecast[] = [];
+
+  async saveAll(forecasts: RegionForecast[]): Promise<number> {
+    this.forecasts.push(...forecasts);
+    return forecasts.length;
+  }
+
+  async latest(): Promise<RegionForecast[]> {
+    const newest = new Map<ForecastRegion, RegionForecast>();
+    for (const forecast of this.forecasts) {
+      const held = newest.get(forecast.region);
+      if (held === undefined || forecast.retrievedAt.getTime() >= held.retrievedAt.getTime()) {
+        newest.set(forecast.region, forecast);
+      }
+    }
+    return [...newest.values()];
+  }
+
+  async latestFor(region: ForecastRegion): Promise<RegionForecast | null> {
+    return (await this.latest()).find((f) => f.region === region) ?? null;
   }
 }
 
