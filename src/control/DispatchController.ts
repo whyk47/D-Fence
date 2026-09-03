@@ -144,6 +144,7 @@ export class DispatchController {
     workOrder.issueReason = null;
     // 8.1.5 — default the priority to the cluster's current tier.
     workOrder.priority = await this.tierOf(cluster.id);
+    workOrder.createdAt = new Date(); // 7.3.4's left-hand end
     workOrder.applyStatus(WorkOrderStatus.Created); // 8.3.15
     const saved = await this.workOrders.save(workOrder);
     // 2.4.1. Creation does not pass through the lifecycle controller — 8.3.15 makes Created the

@@ -119,6 +119,15 @@ export class InMemoryClusterStore implements ClusterStore {
     return (this.snapshots.get(clusterId) ?? []).filter((s) => s.retrievedAt.getTime() >= since.getTime());
   }
 
+  /** 7.3.1 — every cluster's snapshots since a cut-off, closed clusters included. */
+  async allSnapshotsSince(since: Date): Promise<ClusterSnapshot[]> {
+    const out: ClusterSnapshot[] = [];
+    for (const list of this.snapshots.values()) {
+      out.push(...list.filter((s) => s.retrievedAt.getTime() >= since.getTime()));
+    }
+    return out.sort((a, b) => a.retrievedAt.getTime() - b.retrievedAt.getTime());
+  }
+
   /** 1.3.2–1.3.5. Silently ignores an unknown id: a cluster closed between the forecast fetch and
    *  the write-back is not an error, it is the feed doing what 1.1.10 says it does. */
   async saveForecastDerivation(clusterId: Uuid, derivation: ForecastDerivation): Promise<void> {

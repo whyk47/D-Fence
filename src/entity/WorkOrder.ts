@@ -25,6 +25,14 @@ export class WorkOrder {
   /** 8.3.8 */
   issueFlag!: boolean;
   issueReason!: string | null;
+  /**
+   * 7.3.4 measures "creation to verified completion", so both ends have to be recorded. Neither
+   * was: `startedAt` is 8.3.17's *work* start, which is a third instant and not either of these.
+   * Derived from the audit trail instead would be wrong twice over — the trail is evidence, not a
+   * reporting table, and it is optional wiring.
+   */
+  createdAt!: Date;
+  verifiedAt: Date | null = null;
 
 /**
  * Private with no public setter. 8.3.2 permits only the transitions in the state table,

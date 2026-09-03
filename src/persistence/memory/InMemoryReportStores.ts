@@ -47,6 +47,13 @@ export class InMemoryReportStore implements ReportStore {
     );
   }
 
+  /** 7.3.5 — inclusive of the cut-off, matching every other window in the system. */
+  async submittedSince(since: Date): Promise<Report[]> {
+    return [...this.reports.values()]
+      .filter((r) => r.submittedAt.getTime() >= since.getTime())
+      .sort((a, b) => a.submittedAt.getTime() - b.submittedAt.getTime());
+  }
+
   async findByStatus(status: ReportStatus): Promise<Report[]> {
     return [...this.reports.values()].filter((r) => r.currentStatus() === status);
   }
