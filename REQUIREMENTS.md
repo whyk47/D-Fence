@@ -667,7 +667,7 @@ reader of this document alone can tell assumption from requirement.*
 |---|---|---|---|
 | 3.1.9 | A 150 m buffer defines "near" a cluster | Judgement. **Implemented 2026-09-03**, measured to the cluster **boundary** (not its centroid) and **inclusive** at 150 m; tested at 149/150/151 m (lab4 §2.11, E2–E4) | Alert volume too high or too low |
 | 5.1.11 | 50 m and 24 hours defines a duplicate report | Judgement. **Implemented 2026-09-03 with both bounds inclusive** — a report at exactly 50 m or exactly 24 hours old is a duplicate; the prose does not settle this, so the choice is recorded here and tested at 49/50/51 m and 23/25 h (lab4 §2.9, D1–D3) | Genuine reports refused, or duplicates admitted |
-| 6.1.4 | Five new cases is an alert-worthy growth | Judgement | Alert fatigue or missed escalation |
+| 6.1.4 | Five new cases is an alert-worthy growth | Judgement. **Implemented 2026-09-03** as the default and **configurable per saved location** (6.1.3), so a resident who finds it noisy raises it rather than muting the location; tested at 4 and 5 (lab4 §2.12, T6) | Alert fatigue or missed escalation |
 | 4.1.8 | Tier cut points at 70.0 and 40.0 | Judgement | Tiers cluster at one end and stop discriminating |
 | 4.1.16 | 90 days is the default treatment recency | Judgement | Untreated clusters over- or under-weighted |
 | 1.1.1 | A 60-minute poll interval is useful | **Verified 2026-09-03** — the publisher revises on the order of days; 1.1.19–1.1.21 make the hourly cycle a cheap metadata check | See below |

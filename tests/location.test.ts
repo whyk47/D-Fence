@@ -29,6 +29,7 @@ import {
   InMemorySavedLocationStore,
 } from '../src/persistence/memory/InMemoryLocationStores';
 import { Cluster } from '../src/entity/Cluster';
+import { AlertSubscription } from '../src/entity/AlertSubscription';
 import { SavedLocation, MAX_SAVED_LOCATIONS, NEAR_CLUSTER_METRES } from '../src/entity/SavedLocation';
 import { GeoPoint, Polygon, PremisesMix } from '../src/entity/valueTypes';
 import { GeocodeCandidate, GeocodingSource } from '../src/ports/ExternalGateway';
@@ -259,11 +260,10 @@ describe('Saving locations — §3.1.1, §3.1.6, §3.1.7, §3.1.11, §3.1.12', (
 
   it('L9 — deleting a location removes its alert subscriptions (3.1.11, 3.1.12)', async () => {
     const location = await save(f, CENTRE);
-    f.subscriptions.add(location.id);
-    f.subscriptions.add(location.id);
+    await f.subscriptions.save(AlertSubscription.create(location.id, RESIDENT.accountId));
 
     const result = await f.locations.removeLocation(location.id, RESIDENT);
-    expect(result.subscriptionsRemoved).toBe(2);
+    expect(result.subscriptionsRemoved).toBe(1);
     expect(await f.store.findById(location.id)).toBeNull();
     // An orphaned subscription still fires, and it is the alert nobody can turn off.
     expect(f.subscriptions.countFor(location.id)).toBe(0);

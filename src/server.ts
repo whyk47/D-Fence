@@ -22,6 +22,7 @@ import { ModerationRoutes } from './boundary/http/ModerationRoutes';
 import { AuthRoutes } from './boundary/http/AuthRoutes';
 import { AdminRoutes } from './boundary/http/AdminRoutes';
 import { LocationRoutes } from './boundary/http/LocationRoutes';
+import { AlertRoutes } from './boundary/http/AlertRoutes';
 import {
   InMemoryAuditStore,
   InMemoryClusterStore,
@@ -40,10 +41,16 @@ import { StaffAccountController } from './control/StaffAccountController';
 import { GeocodingController } from './control/GeocodingController';
 import { SavedLocationController } from './control/SavedLocationController';
 import { OneMapGateway } from './boundary/gateways/OneMapGateway';
+import { InMemorySavedLocationStore } from './persistence/memory/InMemoryLocationStores';
 import {
+  InMemoryAlertStore,
   InMemoryAlertSubscriptionStore,
-  InMemorySavedLocationStore,
-} from './persistence/memory/InMemoryLocationStores';
+  RecordingChannel,
+} from './persistence/memory/InMemoryAlertStores';
+import { TelegramGateway } from './boundary/gateways/TelegramGateway';
+import { AlertTriggerEvaluator } from './control/AlertTriggerEvaluator';
+import { AlertPreferenceController } from './control/AlertPreferenceController';
+import { NotificationController } from './control/NotificationController';
 import {
   InMemoryAccountStore,
   InMemorySessionStore,
@@ -60,7 +67,7 @@ import { RainfallIngestionJob } from './control/ingestion/RainfallIngestionJob';
 import { RainfallAccumulator } from './control/RainfallAccumulator';
 import { NormalisationFactory } from './control/normalisation/NormalisationFactory';
 import { PriorityScoringEngine, DriverInputs } from './control/PriorityScoringEngine';
-import { Driver, Role, SourceKind } from './entity/enums';
+import { ChangeClass, Driver, Role, SourceKind } from './entity/enums';
 import { renderOpsDashboard } from './boundary/http/OpsDashboardPage';
 
 async function main(): Promise<void> {
@@ -88,6 +95,15 @@ async function main(): Promise<void> {
       : null,
   );
   const geocoding = new GeocodingController(oneMap);
+  const alertPreferences = new AlertPreferenceController(ac0, subscriptions, savedLocations);
+
+  const alertStore = new InMemoryAlertStore();
+  // 6.1.6 needs a bot token. Without one the recording channel keeps §6 runnable and testable —
+  // and, unlike a silent no-op, it keeps a record of what *would* have been sent, so the alert
+  // path can be demonstrated before the token arrives.
+  const telegramToken = config.get('TELEGRAM_BOT_TOKEN');
+  const channel = telegramToken ? new TelegramGateway(http, telegramToken) : new RecordingChannel();
+  const notifications = new NotificationController(channel, accounts, alertStore);
   const clusters = new InMemoryClusterStore();
   const rainfall = new InMemoryRainfallStore();
   const runs = new InMemoryIngestionRunStore();
@@ -101,6 +117,7 @@ async function main(): Promise<void> {
   const reportLifecycle = new ReportLifecycleController(new ReportTransitionTable(), reports, notifier);
   const moderation = new ModerationController(ac0, reports, reportLifecycle);
   const residentReports = new ReportController(ac0, reports, locator, reportLifecycle);
+  const alertTriggers = new AlertTriggerEvaluator(savedLocations, subscriptions, alertStore, locator);
   const locations = new SavedLocationController(ac0, savedLocations, locator, geocoding, subscriptions, {
     // 1.2.5-1.2.8 for an arbitrary point rather than a cluster centroid — the same accumulator,
     // asked about a resident's home.
@@ -168,9 +185,16 @@ async function main(): Promise<void> {
     // 3.1.8 — every saved location is re-evaluated against the boundaries this cycle just wrote.
     // After scoring rather than before: the clusters have to be current for the answer to be.
     const moved = await locations.evaluateAll(now);
-    if (moved.length > 0) {
-      // 6.1.2's trigger. E6 turns this into an alert; for now the change is at least visible.
-      console.log(`  exposure changed for ${moved.length} saved location(s)`);
+
+    // 6.1.2, 6.1.3, 6.1.5 — decide, then deliver. The evaluator applies 6.1.9's daily cap before
+    // anything is sent, so a cluster that grows every hour cannot produce an hourly message.
+    const due = await alertTriggers.evaluate(
+      { exposureChanges: moved, changedClusters: active.filter((c) => c.changeClass === ChangeClass.GROWN || c.heavyRainExpected) },
+      now,
+    );
+    if (due.length > 0) {
+      const tally = await notifications.deliverAll(due, now);
+      console.log(`  alerts: ${tally.Sent} sent, ${tally.Failed} failed, ${tally.Suppressed} suppressed`);
     }
     console.log(
       `cycle: clusters ${clusterRun.outcome} (${clusterRun.featureCount}), ` +
@@ -222,6 +246,7 @@ async function main(): Promise<void> {
     workOrders,
     treatments,
     notifier,
+    // 8.2.4, 8.3.11 travel the same road as resident alerts now that E6 exists.
     // 8.5.3 — a verified work order is reflected in the next cycle; here, immediately.
     { rescoreCluster: async () => cycle('MANUAL') },
     reportLifecycle, // 5.2.7, 8.5.1, 8.5.2
@@ -237,6 +262,7 @@ async function main(): Promise<void> {
   app.mount(new AuthRoutes(ac, authentication));
   app.mount(new AdminRoutes(ac, staff));
   app.mount(new LocationRoutes(ac, locations));
+  app.mount(new AlertRoutes(ac, notifications, alertPreferences));
   // The stand-in dashboard page renders for the seeded manager. It is a **development page**, not
   // the graded screen (E10), and it is the one place left that does not resolve a session — an
   // HTML page cannot carry a bearer token. Every JSON route above does resolve one.

@@ -21,6 +21,10 @@ const OWNERSHIP_SCOPED: ReadonlySet<Action> = new Set([
   'savedLocation:write',
   'report:readIdentified',
   'workOrder:readAssigned',
+  // 6.1.1 is a preference on *a resident's own* saved location. Added with E6, in this list rather
+  // than as a comparison inside AlertPreferenceController, because that is where every other
+  // ownership rule already lives — a second mechanism for the same question is how they diverge.
+  'alert:configure',
 ]);
 
 export class AccessPolicy {
