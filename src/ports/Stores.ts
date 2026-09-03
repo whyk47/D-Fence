@@ -9,9 +9,10 @@
  * database, which is what lets `npm run ingest` pull live NEA data before Supabase exists.
  */
 import { Uuid, GeoPoint } from '../entity/valueTypes';
-import { AlertTrigger, ReportStatus, ReportType, Role, SourceKind } from '../entity/enums';
+import { AlertTrigger, ForecastRegion, ReportStatus, ReportType, Role, SourceKind } from '../entity/enums';
 import { Cluster } from '../entity/Cluster';
 import { ClusterSnapshot } from '../entity/ClusterSnapshot';
+import { RegionForecast } from '../entity/RegionForecast';
 import { IngestionRun } from '../entity/IngestionRun';
 import { PriorityScore } from '../entity/PriorityScore';
 import { WorkOrder } from '../entity/WorkOrder';
@@ -40,6 +41,35 @@ export interface ClusterStore {
   latestSnapshot(objectId: string): Promise<ClusterSnapshot | null>;
   /** 9.1.9, 9.1.10 — the snapshots for one cluster since a cut-off, for the trend view. */
   snapshotsSince(clusterId: Uuid, since: Date): Promise<ClusterSnapshot[]>;
+  /**
+   * 1.3.2–1.3.5 — write back the four forecast-derived fields after a forecast cycle.
+   *
+   * A narrow method rather than a general `save(cluster)`: the forecast job has no business
+   * rewriting a case size or a boundary, and a wide setter here is how a job that only meant to set
+   * a flag ends up overwriting the feed's own values with whatever it happened to be holding.
+   */
+  saveForecastDerivation(clusterId: Uuid, derivation: ForecastDerivation): Promise<void>;
+}
+
+/** The four fields 1.3.2–1.3.5 derive onto a cluster, moved together because they are one claim. */
+export interface ForecastDerivation {
+  region: ForecastRegion;
+  heavyRainExpected: boolean;
+  validFrom: Date;
+  validTo: Date;
+}
+
+/**
+ * The stored 24-hour forecasts. 1.3.5 requires the flag's basis to be inspectable, which means the
+ * forecast text has to outlive the cycle that read it.
+ */
+export interface ForecastStore {
+  /** Idempotent per retrieval: five regions arrive together or not at all. */
+  saveAll(forecasts: RegionForecast[]): Promise<number>;
+  /** The most recently retrieved forecast for each region. Empty before the first successful run. */
+  latest(): Promise<RegionForecast[]>;
+  /** 1.3.5 — the forecast a cluster's flag was read from, for the detail screen. */
+  latestFor(region: ForecastRegion): Promise<RegionForecast | null>;
 }
 
 export interface IngestionRunStore {

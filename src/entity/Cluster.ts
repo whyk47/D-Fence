@@ -21,8 +21,14 @@ export class Cluster {
   premisesMix!: PremisesMix;
   caseDelta!: number;
   changeClass!: ChangeClass;
+  /** 1.3.2, 1.3.5 — the region the heavy-rain flag was read from, recorded so its basis is
+   *  inspectable rather than implied by the cluster's coordinates. */
   forecastRegion!: ForecastRegion;
   heavyRainExpected!: boolean;
+  /** 1.3.4 — the validity period of the forecast the flag was derived from. Null until a forecast
+   *  cycle has run; a flag with no window behind it is not a claim about any particular day. */
+  forecastValidFrom: Date | null = null;
+  forecastValidTo: Date | null = null;
   trajectory!: Trajectory;
   firstSeenAt!: Date;
   lastUpdatedAt!: Date;
