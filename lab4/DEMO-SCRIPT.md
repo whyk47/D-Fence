@@ -28,10 +28,13 @@ member must be seen to own something.
 
 ## 2. Segment A — framing (60 seconds)
 
-> "NEA publishes every active dengue cluster in Singapore as open data. Today there are twelve, and
-> one of them — Countryside Road — holds 258 cases while eight others hold two each. The data says
-> where the cases are. It does not say **where to send a cleaning crew tomorrow morning**. That is
-> the question D-Fence answers."
+> "NEA publishes every active dengue cluster in Singapore as open data. This morning there were
+> fifteen, and one of them — Countryside Road — held 258 cases while eight others held two each. The
+> data says where the cases are. It does not say **where to send a cleaning crew tomorrow morning**.
+> That is the question D-Fence answers."
+
+Read the cluster count off the dashboard on the day rather than from this script: it was twelve on
+2 September and fifteen on 3 September.
 
 Show: the raw GeoJSON in a browser tab for three seconds, then close it. The point is that the input
 is public and unglamorous, and the output is a decision.
@@ -68,7 +71,7 @@ This is the segment the "data processing" criterion is judged on. Spend the time
 | Beat | Action | Requirement shown |
 |---|---|---|
 | C1 | Sign in as the Operations Manager — the same URL, a different application | 2.2, 2.3 |
-| C2 | The dashboard: twelve clusters ranked, tiers coloured *and* worded | 7.1, 7.2 |
+| C2 | The dashboard: every active cluster ranked, tiers coloured *and* worded | 7.1, 7.2 |
 | C3 | Open Countryside Road → **the driver breakdown**: seven drivers, each with its raw value, its normalised value, its weight and its contribution | 4.1.10, 4.1.18 |
 | C4 | Say the sentence in §4.1 below | 4.1.3–4.1.8 |
 | C5 | Trigger an ingestion run by hand; a cluster's case delta and trajectory update | 1.1.18, 9.1.9 |
@@ -103,7 +106,7 @@ here is the score, lower. Traces: 8.1–8.5, 4.1.15–4.1.17.
 Four things, thirty seconds each: packaging by stereotype (`boundary` / `control` / `entity`) with
 the ports layer that keeps control classes testable without a network; the **table-driven** work-order
 machine and why the GoF State pattern was rejected; `main`/`dev` branching with squash merges; and
-`npm test` run live — 85 cases, four files, green.
+`npm test` run live — 120 cases, six files, green.
 
 ### F. Traceability (2½ minutes)
 Walk **one** requirement end to end, both directions, on screen:
@@ -126,7 +129,7 @@ Say these before the Q&A can ask:
 
 | Beat | Must be implemented | Currently |
 |---|---|---|
-| B1–B3 | `AuthenticationController`, `SavedLocationController`, `GeocodingController`, OneMap token | Skeleton; **OneMap token not yet registered** |
+| B1–B3 | `AuthenticationController`, `SavedLocationController`, `GeocodingController` | Skeleton. **OneMap is registered and verified live (2026-09-03)** — `OneMapGateway.search` works; the token expires 2026-09-06, after which the account credentials must be in `src/.env` |
 | B4–B5 | `ReportController`, object storage, duplicate rule 5.1.11 | Skeleton; Supabase Storage gateway written |
 | B6 | `NotificationController`, `TelegramGateway`, a bot token | Skeleton |
 | C2–C3 | `ClusterIngestionJob`, `PriorityScoringEngine.computeScores`/`scoreOne`/`buildBreakdown`, `DashboardController` | **Scoring is DONE 2026-09-03** — `npm run ingest` prints the ranked table with driver breakdowns from live NEA and rainfall data. Only `DashboardController` and the screen remain |
@@ -135,9 +138,11 @@ Say these before the Q&A can ask:
 | D | `DispatchController`, `WorkOrderLifecycleController.transition` | `isTransitionPermitted` done and tested; `transition` is not |
 | E–F | Nothing — these are true today | Ready |
 
-**Build order that unblocks the most demo per week:** `AbstractIngestionJob.run` + `ClusterIngestionJob`
-(unblocks C2, C5, and everything downstream that needs data) → `PriorityScoringEngine` orchestration
-(C3, C4, C6) → work-order `transition` (D) → notifications (B6) → the resident screens (B1–B5).
+**Build order, revised 2026-09-03.** The first two steps are done: ingestion (clusters and rainfall)
+and the scoring orchestration both run against live data, so C2–C6 are blocked only on the
+`DashboardController` and one screen. What remains, in the order that unblocks the most demo per week:
+`DashboardController` + the dashboard screen (C2, C3) → work-order `transition` (D) → accounts and
+the resident screens (B1–B5) → notifications (B6).
 Segments E and F need no further code, which is worth remembering if the build runs late: a team that
 demos less product but proves traceability still collects two of the three rubric segments.
 
