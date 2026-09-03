@@ -129,9 +129,9 @@ Say these before the Q&A can ask:
 | B1–B3 | `AuthenticationController`, `SavedLocationController`, `GeocodingController`, OneMap token | Skeleton; **OneMap token not yet registered** |
 | B4–B5 | `ReportController`, object storage, duplicate rule 5.1.11 | Skeleton; Supabase Storage gateway written |
 | B6 | `NotificationController`, `TelegramGateway`, a bot token | Skeleton |
-| C2–C3 | `ClusterIngestionJob`, `PriorityScoringEngine.computeScores`/`scoreOne`/`buildBreakdown`, `DashboardController` | **`applyWeights`, `assignTier`, `ClusterRanking.rank` and all normalisation are done and tested; the three orchestration methods are not** |
-| C5 | `AbstractIngestionJob.run` template, `IngestionController` | Skeleton |
-| C6 | Source-health staleness marking (1.4.x) | Skeleton |
+| C2–C3 | `ClusterIngestionJob`, `PriorityScoringEngine.computeScores`/`scoreOne`/`buildBreakdown`, `DashboardController` | **Scoring is DONE 2026-09-03** — `npm run ingest` prints the ranked table with driver breakdowns from live NEA and rainfall data. Only `DashboardController` and the screen remain |
+| C5 | `AbstractIngestionJob.run` template, `IngestionController` | **Template DONE 2026-09-03** (both jobs run through it, manual trigger included); `IngestionController` scheduling remains |
+| C6 | Source-health staleness marking (1.4.x) | **Half done** — the engine excludes stale drivers, names them and renormalises, proved by tests S3 and by the live run; 1.4.x's health *display* remains |
 | D | `DispatchController`, `WorkOrderLifecycleController.transition` | `isTransitionPermitted` done and tested; `transition` is not |
 | E–F | Nothing — these are true today | Ready |
 

@@ -15,6 +15,7 @@ import { ClusterSnapshot } from '../entity/ClusterSnapshot';
 import { IngestionRun } from '../entity/IngestionRun';
 import { PriorityScore } from '../entity/PriorityScore';
 import { ParsedBatch } from './types';
+import { ParsedReading, ParsedStation } from '../control/ingestion/RainfallFeedParser';
 
 export interface ClusterStore {
   findById(id: Uuid): Promise<Cluster | null>;
@@ -37,6 +38,18 @@ export interface IngestionRunStore {
   /** 10.2.2 — mark the source stale without touching the data it already produced. */
   markStale(source: SourceKind): Promise<void>;
   recentRuns(source: SourceKind, limit: number): Promise<IngestionRun[]>;
+}
+
+export interface RainfallStore {
+  /** Idempotent: the station list arrives with every readings payload (1.2.2). */
+  saveStations(stations: ParsedStation[]): Promise<void>;
+  stations(): Promise<ParsedStation[]>;
+  /** @returns the number of readings newly stored; duplicates from an overlapping page are ignored. */
+  saveReadings(readings: ParsedReading[]): Promise<number>;
+  /** Readings within the window, for the 1.2.7 and 1.2.8 accumulations. */
+  readingsSince(since: Date): Promise<ParsedReading[]>;
+  /** 1.2.10 — the newest reading held, or null when nothing has ever been stored. */
+  newestReadingAt(): Promise<Date | null>;
 }
 
 export interface PriorityScoreStore {

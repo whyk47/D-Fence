@@ -19,6 +19,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | §3.2.1 Equivalence-class and boundary-value cases for **1 key control class** | **Done.** `PriorityScoringEngine`, 27 cases — `tests/priority-scoring.test.ts` |
 | §3.2.1 (extension) EC/BV cases for the feed parser and driver bindings | **Done 2026-09-03.** `ClusterFeedParser` and `NormalisationFactory`, 32 cases — `tests/cluster-feed.test.ts`, designed in §2.5 |
 | §3.2 (extension) Ingestion template + full scoring cycle, no network, no database | **Done 2026-09-03.** 15 cases — `tests/ingestion.test.ts`, designed in §2.6 |
+| §3.2 (extension) The rainfall path — parsing, station assignment, accumulation, staleness | **Done 2026-09-03.** 18 cases — `tests/rainfall.test.ts`, designed in §2.7 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -176,7 +177,39 @@ state must never be recorded as "unchanged". A parser that returned `false` in e
 every happy-path test and silently freeze the cluster data the first time a metadata field went
 missing — a failure with no error message anywhere.
 
-**Execution.** `npm test` — 5 files, **102 cases, all passing**, `tsc --strict` clean (2026-09-03).
+**Execution.** `npm test` — 6 files, **120 cases, all passing**, `tsc --strict` clean (2026-09-03).
+
+### 2.7 Fourth subject — the rainfall path (`tests/rainfall.test.ts`)
+
+Added 2026-09-03 with the implementation of 1.2.x. **Every case runs against a fixture, and that is
+the point:** Singapore was dry on 1–3 September 2026 — three sampled days returned zero across every
+station and every five-minute block — so a test that asked the live API to prove the accumulation
+works would have passed while proving nothing. The fixture carries rain; reality currently does not.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| R1 | A station without coordinates is dropped, not defaulted to (0, 0) | 1.2.2 | ✓ |
+| **R3** | A missing `value` is skipped — "did not report" is not "reported no rain" | 1.2.3 | ✓ |
+| R4 | A reading older than 30 minutes is discarded | 1.2.4 | ✓ |
+| A1 | Exactly the three nearest stations, nearest first, ties broken by id | 1.2.5 | ✓ |
+| **A2** | The nearest station dominates the weighted mean (an unweighted mean would give 3.33) | 1.2.6 | ✓ |
+| A3 | A station at the centroid takes the value outright rather than dividing by zero | 1.2.6 | ✓ |
+| A4 | No reading from any assigned station gives **null**, never 0 | 4.1.12 | ✓ |
+| W1 | 24-hour and 72-hour windows sum only what falls inside them | 1.2.7, 1.2.8 | ✓ |
+| W2 | A reading exactly on the 24-hour boundary is inside the window | 1.2.7 | ✓ |
+| **W3** | Windows are measured from the cycle time, so a stopped feed shows a *falling* total | 1.2.7 | ✓ |
+| W4 | Nothing accepted for 30 minutes marks rainfall stale | 1.2.10 | ✓ |
+| W5 | The observed all-dry case scores 0 and is **not** stale — 0 is a measurement | 1.2.10 | ✓ |
+| J1 | The job stores stations and fresh readings and reports what it discarded | 1.2.2–1.2.4 | ✓ |
+| **J2** | An overlapping backfill page cannot double-count a reading | 1.2.7 | ✓ |
+| J3 | The API's `date` is a Singapore calendar date, not a UTC one | 1.2.x | ✓ |
+| H1–H2 | `Retry-After` is honoured and capped; absent falls back to backoff | 10.4.6 | ✓ |
+
+**W3, J2 and A4 are the three to point at.** W3 is the difference between "no rain fell" and "we
+stopped hearing" — measuring the window from the newest *reading* would freeze the accumulation at
+its last value forever. J2 protects an accumulation from a re-run backfill, which would otherwise
+inflate a scoring driver silently. A4 is the same principle as D4 and C4 elsewhere in this plan:
+an unknown is never a zero.
 
 ### 2.6 Third subject — the ingestion template and a full scoring cycle (`tests/ingestion.test.ts`)
 

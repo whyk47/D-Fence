@@ -16,7 +16,8 @@
  * already warns about.
  */
 import { randomUUID } from 'node:crypto';
-import { ClusterStore, IngestionRunStore, PriorityScoreStore } from '../../ports/Stores';
+import { ClusterStore, IngestionRunStore, PriorityScoreStore, RainfallStore } from '../../ports/Stores';
+import { ParsedReading, ParsedStation } from '../../control/ingestion/RainfallFeedParser';
 import { ParsedBatch } from '../../ports/types';
 import { Uuid } from '../../entity/valueTypes';
 import { SourceKind } from '../../entity/enums';
@@ -152,6 +153,64 @@ export class InMemoryIngestionRunStore implements IngestionRunStore {
       .filter((r) => r.source === source)
       .slice(-Math.max(0, limit))
       .reverse();
+  }
+}
+
+export class InMemoryRainfallStore implements RainfallStore {
+  private readonly stationsById = new Map<string, ParsedStation>();
+  /** Keyed by station and timestamp so an overlapping backfill page cannot double-count a reading
+   *  into the accumulation — which would silently inflate a scoring driver. */
+  private readonly readings = new Map<string, ParsedReading>();
+
+  /** 72 hours plus a margin. Nothing older can affect 1.2.8, and an unbounded map is a leak in a
+   *  process meant to run for weeks. */
+  constructor(private readonly retentionHours = 80) {}
+
+  async saveStations(stations: ParsedStation[]): Promise<void> {
+    for (const station of stations) {
+      this.stationsById.set(station.stationId, station);
+    }
+  }
+
+  async stations(): Promise<ParsedStation[]> {
+    return [...this.stationsById.values()];
+  }
+
+  async saveReadings(readings: ParsedReading[]): Promise<number> {
+    let written = 0;
+    for (const reading of readings) {
+      const key = `${reading.stationId}@${reading.readingAt.getTime()}`;
+      if (!this.readings.has(key)) {
+        this.readings.set(key, reading);
+        written += 1;
+      }
+    }
+    this.prune();
+    return written;
+  }
+
+  async readingsSince(since: Date): Promise<ParsedReading[]> {
+    return [...this.readings.values()].filter((r) => r.readingAt.getTime() >= since.getTime());
+  }
+
+  async newestReadingAt(): Promise<Date | null> {
+    if (this.readings.size === 0) {
+      return null;
+    }
+    return new Date(Math.max(...[...this.readings.values()].map((r) => r.readingAt.getTime())));
+  }
+
+  size(): number {
+    return this.readings.size;
+  }
+
+  private prune(): void {
+    const floor = Date.now() - this.retentionHours * 3_600_000;
+    for (const [key, reading] of this.readings) {
+      if (reading.readingAt.getTime() < floor) {
+        this.readings.delete(key);
+      }
+    }
   }
 }
 

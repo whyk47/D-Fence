@@ -64,24 +64,49 @@ export class HttpClient {
   /**
    * Exponential backoff. A failed source must degrade, not crash (10.2.1).
    *
-   * A 4xx is not retried: the request is wrong and repeating it wastes the source's quota and our
-   * cycle. Only transport failures and 5xx get another attempt.
+   * A 4xx is not retried — the request is wrong and repeating it wastes the source's quota — **with
+   * one exception: 429**. data.gov.sg rate-limits a sustained backfill (observed 2026-09-03, after
+   * roughly five rapid pages of the rainfall history endpoint), and a 429 means "not yet", not
+   * "never". It is retried, honouring `Retry-After` when the server sends one.
    */
   private async withRetry(fn: () => Promise<Response>, attempts: number): Promise<Response> {
     let lastError: unknown;
     for (let attempt = 0; attempt < Math.max(1, attempts); attempt += 1) {
       try {
         const res = await fn();
-        if (res.status < 500 || attempt === attempts - 1) {
+        const retryable = res.status >= 500 || res.status === HttpClient.TOO_MANY_REQUESTS;
+        if (!retryable || attempt === attempts - 1) {
           return res;
         }
         lastError = new Error(`upstream ${res.status}`);
+        const after = HttpClient.retryAfterMs(res);
+        if (after !== null) {
+          await HttpClient.sleep(after);
+          continue;
+        }
       } catch (error) {
         lastError = error;
       }
       await HttpClient.sleep(this.backoffBaseMs * 2 ** attempt);
     }
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  static readonly TOO_MANY_REQUESTS = 429;
+
+  /** `Retry-After` is seconds or an HTTP date; both are honoured, capped so a hostile or mistaken
+   *  header cannot stall a scheduled cycle for hours. */
+  static retryAfterMs(res: Response): number | null {
+    const header = res.headers.get('retry-after');
+    if (header === null) {
+      return null;
+    }
+    const seconds = Number(header);
+    const ms = Number.isNaN(seconds) ? new Date(header).getTime() - Date.now() : seconds * 1000;
+    if (!Number.isFinite(ms) || ms <= 0) {
+      return null;
+    }
+    return Math.min(ms, 60_000);
   }
 
   /** Per-host spacing. 10.4.6. */

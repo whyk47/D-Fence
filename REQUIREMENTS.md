@@ -675,6 +675,8 @@ reader of this document alone can tell assumption from requirement.*
 | 5.1.4, 5.1.5, 3.1.1 | 500 characters, three photographs, five locations | Judgement | None material |
 | 4.1.5 | The default driver weights in `SCORING-SPEC.md` §3 | Judgement, argued from the live payload | Ranking reflects the team's priorities rather than measured risk |
 | 4.1.4 | The normalisation method chosen per driver | Judgement, argued from the live payload | A driver saturates too early or too late and stops discriminating |
+| 1.2.6 | Inverse-distance weighting over the three nearest stations | Judgement | A cluster's rainfall is over- or under-stated where stations are sparse |
+| 1.2.5 | Three stations is the right number | Judgement | Too few is noisy, too many washes out local rain |
 
 **The polling question is now answered, and the answer shaped the design.** A live pull on
 2026-09-03 (dataset `d_dbfabf16158d1b0e1c420627c0819168`, 25 KB, 12 active clusters) gives:
@@ -709,7 +711,7 @@ Requirements are written against these sources. Verification status is from
 
 | Source | Used by | Status |
 |---|---|---|
-| Rainfall real-time | 1.2 | **Verified** — test pull, 97 stations, field-for-field |
+| Rainfall real-time | 1.2 | **Verified 2026-09-03** — pulled and parsed field-for-field. **87 stations, not 97** (the count is not a constant, and 1.2.x must not assume one); `readingType` is "TB1 Rainfall 5 Minute Total F" and `readingUnit` "mm", so a reading is a five-minute *total* and 1.2.7's accumulation is a sum. History via `?date=YYYY-MM-DD`, newest first, **25 blocks a page** with a `paginationToken`; a rapid backfill is answered with **HTTP 429** |
 | 24-hour forecast | 1.3 | **Verified** — test pull; five regions, not named areas |
 | NEA dengue clusters | 1.1 | **Verified 2026-09-03** — payload downloaded and read field-for-field; dataset id `d_dbfabf16158d1b0e1c420627c0819168`; 12 features, Polygon geometry. **Three fields are not what the dataset page implies** — HOMES, PUBLIC_PLACES and CONSTRUCTION_SITES are comma-separated habitat-type text, not counts (see 1.1.15) |
 | OneMap Search | 3.1.3 | **Not verified** — requires an account token; register and test-pull in week 1 |

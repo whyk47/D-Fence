@@ -45,6 +45,26 @@ export class Polygon {
     throw new Error('not implemented');
   }
 
+  /**
+   * Centroid of the outer ring, used by 1.2.5 to pick the three nearest rainfall stations.
+   *
+   * The arithmetic mean of the ring's vertices, not the area centroid: a dengue cluster boundary is
+   * a small, roughly convex blob a few hundred metres across, the two answers differ by metres, and
+   * the nearest-station choice cannot tell them apart. Stated because it is a simplification, not
+   * an oversight.
+   */
+  centroid(): GeoPoint {
+    const ring = this.rings[0] ?? [];
+    if (ring.length === 0) {
+      throw new Error('polygon has no outer ring; cannot compute a centroid');
+    }
+    const sum = ring.reduce(
+      (acc, p) => ({ lat: acc.lat + p.latitude, lon: acc.lon + p.longitude }),
+      { lat: 0, lon: 0 },
+    );
+    return new GeoPoint(sum.lat / ring.length, sum.lon / ring.length);
+  }
+
   toGeoJson(): string {
     throw new Error('not implemented');
   }
