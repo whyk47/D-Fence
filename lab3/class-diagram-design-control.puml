@@ -30,6 +30,7 @@ package "Startup and configuration" #FDF7F7 {
     + ingestionIntervals : Map<SourceKind, number>
     + get(key : string) : string
     + requireNumber(key : string) : number
+    + validate() : void
   }
   AppConfigurator *-- ServiceContainer
   AppConfigurator --> ConfigSet : loads
@@ -73,25 +74,54 @@ package "Scoring" #FAF7FD {
     + normalise(raw : number, ctx : NormalisationContext) : number
     + driver() : Driver
   }
-  class MinMaxNormalisation
-  class LogScaleNormalisation
-  class CappedLinearNormalisation
-  class RecencyDecayNormalisation
+  class NormalisationFactory <<control>> {
+    + {static} build(params : NormalisationParameters) : Map<Driver, NormalisationStrategy>
+  }
+  class MinMaxNormalisation {
+    - target : Driver
+  }
+  class LogScaleNormalisation {
+    - target : Driver
+  }
+  class CappedLinearNormalisation {
+    - target : Driver
+    - capValue : number
+    + cap() : number
+  }
+  class RecencyDecayNormalisation {
+    - saturationDays : number
+    + saturation() : number
+  }
   class PremisesMixNormalisation
   NormalisationStrategy <|.. MinMaxNormalisation
   NormalisationStrategy <|.. LogScaleNormalisation
   NormalisationStrategy <|.. CappedLinearNormalisation
   NormalisationStrategy <|.. RecencyDecayNormalisation
   NormalisationStrategy <|.. PremisesMixNormalisation
+  NormalisationFactory ..> NormalisationStrategy : builds all 7
 
   class ClusterRanking <<container>> {
     - ordered : PriorityScore[]
-    + add(score : PriorityScore) : void
+    - keys : Map<Uuid, RankingKey>
+    + add(score : PriorityScore, key : RankingKey) : void
     + rank() : void
     + top(n : number) : PriorityScore[]
     + byTier(tier : PriorityTier) : PriorityScore[]
     + size() : number
   }
+  class RankingKey <<value>> {
+    + caseSize : number
+    + locality : string
+  }
+  ClusterRanking o--> "0..*" RankingKey
+  note bottom of ClusterRanking
+    4.1.14 orders on three keys: score descending,
+    then case size, then locality name. The last two
+    live on Cluster, not on PriorityScore, so the
+    engine supplies them rather than the container
+    reaching back into a repository.
+    rank() is a Lab 4 basis-path subject.
+  end note
   PriorityScoringEngine o--> "1..7" NormalisationStrategy : strategies
   PriorityScoringEngine --> ClusterRanking : produces
 }
@@ -112,6 +142,15 @@ package "Ingestion" #FAF7FD {
     - clusterRepo : ClusterRepository
     - detectChange(previous : ClusterSnapshot, current : ClusterSnapshot) : ChangeClass
   }
+  class ClusterFeedParser <<control>> {
+    + {static} parseHabitatList(field : string) : string[]
+    + {static} computePremisesMix(homes : string[], publicPlaces : string[], sites : string[]) : number
+    + {static} parseFeature(props : RawClusterProperties, geometryPresent : boolean) : ParsedCluster | RejectedFeature
+    + {static} shouldDownload(metadataStamp : string, lastRecorded : string) : boolean
+    + {static} featureChanged(incomingCrc : string, storedCrc : string) : boolean
+    + {static} parseFeedTimestamp(fmelUpdD : string) : Date
+  }
+  ClusterIngestionJob ..> ClusterFeedParser : parses with
   class RainfallIngestionJob
   class ForecastIngestionJob
   AbstractIngestionJob <|-- ClusterIngestionJob
@@ -166,17 +205,21 @@ package "Work-order lifecycle" #FAF7FD {
     + complete(id : Uuid, evidence : CompletionEvidence, by : Principal) : Promise<WorkOrder>
     + verify(id : Uuid, by : Principal) : Promise<TreatmentRecord>
     + rejectCompletion(id : Uuid, reason : string, by : Principal) : Promise<WorkOrder>
+    + resume(id : Uuid, by : Principal) : Promise<WorkOrder>
   }
   class WorkOrderTransitionTable {
-    - permitted : Map<WorkOrderStatus, TransitionRule[]>
+    - permitted : TransitionRule[]
     + rulesFrom(status : WorkOrderStatus) : TransitionRule[]
-    + find(from : WorkOrderStatus, to : WorkOrderStatus) : TransitionRule
+    + find(from : WorkOrderStatus, to : WorkOrderStatus, actor : Role) : TransitionRule
+    + isTerminal(status : WorkOrderStatus) : boolean
   }
   class TransitionRule {
+    + from : WorkOrderStatus
     + to : WorkOrderStatus
     + actor : Role
-    + guard : Predicate
+    + guard : Guard
     + requirement : string
+    + assigneeOnly : boolean
   }
   class DispatchController <<control>> {
     - lifecycle : WorkOrderLifecycleController
@@ -222,6 +265,29 @@ note right of NormalisationStrategy
   design decision rather than a constant buried in the
   engine, and 10.6.2 already puts the weights in
   configuration.
+
+  **2026-09-03.** The methods and parameters are now
+  written down in SCORING-SPEC.md §2, and the driver is a
+  constructor parameter rather than a constant, because
+  three drivers share the capped-linear method with
+  different caps. NormalisationFactory owns the binding and
+  asserts that all seven drivers of 4.1.3 resolve — two did
+  not, which a scoring cycle would have discovered at run
+  time.
+end note
+
+note bottom of ClusterFeedParser
+  **Pure functions, deliberately.** Everything here is
+  decided by the payload alone, so the Lab 4 cases run
+  against a 2026-09-03 fixture instead of against whatever
+  NEA published this morning (10.6.3).
+
+  It exists because the feed is not shaped as the dataset
+  page implies: HOMES, PUBLIC_PLACES and CONSTRUCTION_SITES
+  are comma-separated habitat text, not counts, so 1.1.15
+  had to be rewritten. shouldDownload() implements the
+  1.1.20 metadata check that keeps the hourly cycle of
+  1.1.1 cheap against a feed that moves twice a week.
 end note
 
 note bottom of WorkOrderTransitionTable

@@ -80,7 +80,13 @@ package "Ports — external service interfaces (src/ports)" #F2F7F2 {
 }
 
 package "Boundary — external gateway adapters (src/boundary/gateways)" #F7FAFD {
-  class NEAFeedGateway <<boundary>>
+  class NEAFeedGateway <<boundary>> {
+    - datasetId : string
+    + metadataUrl() : string
+    + pollDownloadUrl() : string
+    + fetchLastUpdatedAt() : Promise<string>
+    + fetchClusters() : Promise<RawPayload>
+  }
   class RainfallGateway <<boundary>>
   class ForecastGateway <<boundary>>
   class OneMapGateway <<boundary>> {
@@ -163,8 +169,11 @@ note top of ExternalGateway
   Three things follow: 10.4.6 rate limiting and retry live in
   one place (HttpClient); a control class can be unit-tested
   against a fake port, which 10.6.3 requires; and the two
-  sources still unverified — the NEA feed's update frequency
-  and OneMap Search — are each isolated behind one adapter.
+  one source still unverified — OneMap Search — is isolated
+  behind one adapter. The NEA feed was characterised on
+  2026-09-03: it revises twice a week, so NEAFeedGateway now
+  exposes fetchLastUpdatedAt() and the hourly cycle of 1.1.1
+  downloads only when that stamp moves (1.1.20).
 end note
 
 note bottom of SupabaseAuthGateway

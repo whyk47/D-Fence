@@ -84,10 +84,10 @@ The team decision this needs is only *who runs it and in which tool*. Everything
 ## Outstanding
 
 1. **Deliverable 4** above.
-2. **Driver weights unset.** 4.1.5 defers them to configuration and 4.1.6 requires them to sum to 1.0.
-   `ConfigSet` holds them; the values should be set against real cluster data.
-3. **NEA feed update frequency still unverified** — carried from Lab 2, still load-bearing for the
-   grader's "live data update" criterion.
+2. **Driver weights proposed 2026-09-03** — `../SCORING-SPEC.md` §3 and `../config/scoring.default.json`.
+   Argued from the live payload; the team should revise them against a week of real scores.
+3. **NEA feed update frequency resolved 2026-09-03** — revises about twice a week, so the hourly
+   cycle is now a metadata check with a conditional download (1.1.19–1.1.21).
 4. **OneMap Search still not test-pulled.**
 5. **Lab 1 mockups B3–B12** remain outstanding.
 

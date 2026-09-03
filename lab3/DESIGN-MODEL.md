@@ -263,11 +263,15 @@ so the Lab 4 basis-path tests can be named after requirements rather than after 
 
 ## 7. Open items carried into Lab 4
 
-1. **Driver weights are still unset.** 4.1.5 defers them to configuration and 4.1.6 only requires
-   them to sum to 1.0. The design puts them in `ConfigSet`; the *values* are a team decision and
-   should be made against real cluster data, not invented.
-2. **NEA feed update frequency — still unverified**, and still load-bearing for the "live data"
-   criterion. Carried from Lab 2 unchanged.
+1. **Driver weights proposed, not agreed.** A default set and its per-driver justification are in
+   `../SCORING-SPEC.md` §3, shipped as `../config/scoring.default.json` and validated at startup by
+   `ConfigSet.validate()`. They are argued from the live payload, not fitted to outcome data, and
+   the team should revise them once a week of scores exists.
+2. **NEA feed update frequency — resolved 2026-09-03.** A live pull shows two distinct `FMEL_UPD_D`
+   values across all twelve clusters, so the publisher revises roughly twice a week. The hourly
+   cycle in 1.1.1 stands but is now a sub-2 KB metadata check (1.1.19–1.1.21), with the payload
+   downloaded only when `lastUpdatedAt` moves. Rainfall (5-minute cadence) carries the live-data
+   criterion; 1.1.18's manual trigger carries the demo.
 3. **OneMap Search — still not test-pulled.**
 4. **The AI project-initialisation exercise (§3.3) is not done** — see `lab3/README.md` for why it
    has to be run in a fresh session and what it needs from the team.

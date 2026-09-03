@@ -1,6 +1,6 @@
 # D-Fence — Atomised Software Requirements
 
-Version 0.4 · drafted 2026-09-02, revised 2026-09-03 · status: DRAFT for team review
+Version 0.5 · drafted 2026-09-02, revised 2026-09-03 · status: DRAFT for team review
 Revised after adversarial review; findings and dispositions are recorded in §14.
 Project: NTU SC2006/CZ2006 team project (dengue sanitisation prioritiser)
 Working product name is a placeholder.
@@ -49,13 +49,23 @@ system: someone must decide where crews go, and someone must do the work and rep
 treatment-recency driver in 4.1.15 has no source. The three actors exist because the feedback loop
 needs them.
 
-**Open issue on A2 and A3, unresolved.** In Singapore, fogging and larviciding are NEA vector-control
-functions, while refuse and drain clearance sit with town councils. The task type set in 8.1.3 spans
-both, dispatched by a single Operations Manager to a single Cleaning Crew role. That is a simplification
-of two separate authorities into one persona, and a grader who knows the domain may ask who in real
-life receives this dispatch. The team must decide before Lab 1 whether to narrow A2 to town-council
-tasks and drop fogging and larviciding from 8.1.3, or to state in the SRS that A2 is a deliberate
-composite actor. See open point 1 in `EPICS-STORIES.md`.
+**Decision on A2 and A3 (2026-09-03, Yen Kit; consistent with the team decision recorded 2026-09-02).**
+In Singapore, fogging and larviciding are NEA vector-control functions, while refuse and drain
+clearance sit with town councils. The task type set in 8.1.3 spans both, and **D-Fence models both
+under a single composite Operations Manager dispatching a single Cleaning Crew role.** This is a
+deliberate simplification, declared here rather than engineered away, for three reasons:
+
+1. The system's contribution is the *priority ranking*, which is authority-independent — the same
+   ranked list is what either body would work from.
+2. Modelling two dispatch authorities would duplicate §8 wholesale for no analytical gain, at the
+   cost of a second state machine the 11-week schedule cannot absorb.
+3. Narrowing A2 to town-council tasks would drop fogging and larviciding — the two interventions the
+   public actually recognises — from the demo.
+
+**What this obliges.** The SRS and the Lab 5 extensibility segment shall state the simplification and
+name the extension point: A2 gains a `dispatchAuthority` attribute and 8.1.3's task types are
+partitioned by it. Nothing else in the model changes. The alternative — narrowing A2 and removing
+fogging and larviciding from 8.1.3 — was considered and rejected on 2026-09-03.
 
 ## Definitions used by the requirements
 
@@ -86,7 +96,7 @@ composite actor. See open point 1 in `EPICS-STORIES.md`.
 ## 1.1 Dengue cluster ingestion
 
 - **1.1.1** The system shall retrieve the NEA Dengue Clusters GeoJSON feed at intervals of no more than 60 minutes.
-- **1.1.2** The system shall parse each retrieved feature into the fields OBJECTID, LOCALITY, CASE_SIZE, HOMES, PUBLIC_PLACES, CONSTRUCTION_SITES, FMEL_UPD_D and boundary geometry.
+- **1.1.2** The system shall parse each retrieved feature into the fields OBJECTID, LOCALITY, CASE_SIZE, HOMES, PUBLIC_PLACES, CONSTRUCTION_SITES, INC_CRC, FMEL_UPD_D and boundary geometry. *(INC_CRC added in v0.5: the payload carries a per-feature checksum, which 1.1.22 uses for change detection.)*
 - **1.1.3** The system shall reject any feature missing OBJECTID, LOCALITY, CASE_SIZE or geometry.
 - **1.1.4** The system shall log each rejected feature with the retrieval timestamp and the missing field name.
 - **1.1.5** The system shall store each accepted feature as a new timestamped snapshot record without overwriting any previous snapshot.
@@ -99,10 +109,15 @@ composite actor. See open point 1 in `EPICS-STORIES.md`.
 - **1.1.12** The system shall raise an ingestion-failure event when all retries for a cycle fail.
 - **1.1.13** The system shall continue to serve the most recent successful snapshot as active data when an ingestion cycle fails.
 - **1.1.14** The system shall record for each ingestion run the start time, end time, feature count and outcome.
-- **1.1.15** The system shall compute a premises mix value for each cluster as (PUBLIC_PLACES + CONSTRUCTION_SITES) divided by (HOMES + PUBLIC_PLACES + CONSTRUCTION_SITES), expressed as a value between 0 and 1.
-- **1.1.16** The system shall set the premises mix to 0 for a cluster whose three premises counts are all zero.
+- **1.1.15** The system shall compute a premises mix value for each cluster as the count of habitat types listed in PUBLIC_PLACES plus the count listed in CONSTRUCTION_SITES, divided by the total count of habitat types listed across HOMES, PUBLIC_PLACES and CONSTRUCTION_SITES, expressed as a value between 0 and 1. *(Rewritten in v0.5. The v0.3 form divided the three fields as if they were counts. A live payload pulled on 2026-09-03 shows they are **comma-separated free text listing breeding-habitat types** — e.g. HOMES = "Domestic container, Bin, Flower pot, Vase…" — so the original arithmetic was not computable. Counting listed habitat types preserves the driver's intent: habitats found outside homes carry more transmission risk per premises.)*
+- **1.1.16** The system shall set the premises mix to 0 for a cluster whose three premises fields are all empty or null. *(Rewritten in v0.5 for the field types established by 1.1.15. This is the common case, not an edge case: in the 2026-09-03 payload, 8 of 12 clusters carried no habitat text at all and CONSTRUCTION_SITES was null for 10 of 12. §13 records the consequence for the driver's weight.)*
 - **1.1.17** The system shall continue processing the remaining features after a feature is rejected under 1.1.3. *(Split from 1.1.3 in v0.3 for atomicity.)*
 - **1.1.18** The system shall provide a manually triggered ingestion run that an Operations Manager may invoke.
+- **1.1.19** The system shall retrieve the dataset metadata resource before each scheduled cluster retrieval. *(Added in v0.5.)*
+- **1.1.20** The system shall download the GeoJSON payload only when the metadata `lastUpdatedAt` value differs from the value recorded at the last successful download. *(Added in v0.5. The metadata resource is under 2 KB against a 25 KB payload, and the publisher revises the file on the order of days — see §13. This is what makes an hourly cycle honest rather than wasteful, and it is why 1.1.1's interval stands unchanged.)*
+- **1.1.21** The system shall record an ingestion run with outcome UNCHANGED, without downloading the payload, when the metadata check under 1.1.20 finds no change. *(Added in v0.5. A skipped download is still evidence the source is alive, so 1.4.x must not mark a healthy source stale merely because nothing was published.)*
+- **1.1.22** The system shall treat a feature whose INC_CRC value differs from the stored value for the same OBJECTID as changed, and a feature whose INC_CRC value is unchanged as unchanged. *(Added in v0.5. The publisher supplies a per-feature checksum, so change detection need not compare every attribute.)*
+- **1.1.23** The system shall parse HOMES, PUBLIC_PLACES and CONSTRUCTION_SITES as comma-separated lists of habitat-type names, treating a null or empty field as an empty list. *(Added in v0.5. See 1.1.15.)*
 
 ## 1.2 Rainfall ingestion
 
@@ -217,8 +232,8 @@ composite actor. See open point 1 in `EPICS-STORIES.md`.
 - **4.1.1** The system shall compute a priority score for every active cluster on each scoring cycle.
 - **4.1.2** The system shall execute a scoring cycle within ten minutes of the completion of each cluster ingestion cycle.
 - **4.1.3** The system shall compute the priority score from exactly these drivers: case size, case growth delta, 24-hour rainfall, 72-hour rainfall, verified open report count, days since last treatment, and premises mix.
-- **4.1.4** The system shall normalise each driver to a value between 0 and 1 using the normalisation method documented for that driver.
-- **4.1.5** The system shall read driver weights from the configuration source defined by 10.6.2.
+- **4.1.4** The system shall normalise each driver to a value between 0 and 1 using the normalisation method documented for that driver in `SCORING-SPEC.md` §2. *(Revised in v0.5. The method per driver was named nowhere until `SCORING-SPEC.md` was written; the strategy classes implementing them are in `src/control/normalisation/`.)*
+- **4.1.5** The system shall read driver weights from the configuration source defined by 10.6.2. *(v0.5: the default weight set and its justification are in `SCORING-SPEC.md` §3, shipped as `config/scoring.default.json`. It is a proposal to be revised against real data, not a sourced fact — see §13.)*
 - **4.1.6** The system shall reject a weight configuration whose weights do not sum to 1.0.
 - **4.1.7** The system shall compute the priority score as the weighted sum of normalised drivers, expressed on a 0–100 scale to one decimal place.
 - **4.1.8** The system shall assign a priority tier of High when a cluster's score is 70.0 or above, Medium when it is between 40.0 and 69.9, and Low when it is below 40.0.
@@ -655,17 +670,30 @@ reader of this document alone can tell assumption from requirement.*
 | 6.1.4 | Five new cases is an alert-worthy growth | Judgement | Alert fatigue or missed escalation |
 | 4.1.8 | Tier cut points at 70.0 and 40.0 | Judgement | Tiers cluster at one end and stop discriminating |
 | 4.1.16 | 90 days is the default treatment recency | Judgement | Untreated clusters over- or under-weighted |
-| 1.1.1 | A 60-minute poll interval is useful | **Unverified** — NEA's actual update frequency is unknown | See below |
+| 1.1.1 | A 60-minute poll interval is useful | **Verified 2026-09-03** — the publisher revises on the order of days; 1.1.19–1.1.21 make the hourly cycle a cheap metadata check | See below |
 | 8.1.3 | Five task types match real dispatch | **Unverified** — see the actor note in §Actors | Domain challenge in Q&A |
 | 5.1.4, 5.1.5, 3.1.1 | 500 characters, three photographs, five locations | Judgement | None material |
+| 4.1.5 | The default driver weights in `SCORING-SPEC.md` §3 | Judgement, argued from the live payload | Ranking reflects the team's priorities rather than measured risk |
+| 4.1.4 | The normalisation method chosen per driver | Judgement, argued from the live payload | A driver saturates too early or too late and stops discriminating |
 
-**The polling assumption is the one that matters.** NEA dengue cluster data is widely understood to be
-revised on the order of days, not hours. If that holds, 1.1.1's hourly poll will fetch identical data
-on almost every cycle, and the cluster ranking — the headline of the application — may not visibly
-move during a 13–15 minute demo. Rainfall (verified 5-minute cadence) carries the live-data criterion,
-but the mitigation for the cluster feed is requirement 1.1.18, a manually triggered ingestion run, so
-the change-detection path can be shown on cue rather than waited for. **Confirm NEA's actual update
-frequency in week 1.**
+**The polling question is now answered, and the answer shaped the design.** A live pull on
+2026-09-03 (dataset `d_dbfabf16158d1b0e1c420627c0819168`, 25 KB, 12 active clusters) gives:
+
+| Observation | Value on 2026-09-03 | Consequence |
+|---|---|---|
+| Dataset `lastUpdatedAt` (metadata resource) | 2026-09-02T10:06:42+08:00 | The file is republished more often than its contents change |
+| Distinct `FMEL_UPD_D` values across all 12 features | two only — 2026-08-25 15:54 and 2026-08-28 15:51 | Cluster attributes are revised roughly **twice a week**, not hourly |
+| Active clusters | 12 | 10.1.3's 500-cluster performance bound is an order of magnitude of headroom, not a constraint |
+
+So the hourly cycle in 1.1.1 is retained but **restructured around the constraint**: 1.1.19–1.1.21
+poll the sub-2 KB metadata resource hourly and download the payload only when `lastUpdatedAt` moves,
+and 1.1.22 uses the publisher's own per-feature `INC_CRC` checksum for change detection. An hourly
+cycle that transfers 2 KB and records an UNCHANGED run is defensible; one that re-downloads and
+re-parses an identical 25 KB file twelve times a day is not.
+
+**What still carries the live-data criterion is rainfall** (verified 5-minute cadence), and the
+demo mitigation is unchanged: 1.1.18's manually triggered run shows the change-detection path on
+cue rather than waiting for NEA.
 
 ## Data verification status
 
@@ -676,12 +704,27 @@ Requirements are written against these sources. Verification status is from
 |---|---|---|
 | Rainfall real-time | 1.2 | **Verified** — test pull, 97 stations, field-for-field |
 | 24-hour forecast | 1.3 | **Verified** — test pull; five regions, not named areas |
-| NEA dengue clusters | 1.1 | **Partially verified** — endpoint reachable; field list documented on the dataset page, not read back from a payload |
+| NEA dengue clusters | 1.1 | **Verified 2026-09-03** — payload downloaded and read field-for-field; dataset id `d_dbfabf16158d1b0e1c420627c0819168`; 12 features, Polygon geometry. **Three fields are not what the dataset page implies** — HOMES, PUBLIC_PLACES and CONSTRUCTION_SITES are comma-separated habitat-type text, not counts (see 1.1.15) |
 | OneMap Search | 3.1.3 | **Not verified** — requires an account token; register and test-pull in week 1 |
 
 ---
 
 # 14. Revision history and review dispositions
+
+**v0.5 (2026-09-03)** — revised after the first live read of the NEA payload and two decisions taken
+by Yen Kit. Material changes:
+
+- **A2/A3 resolved.** The composite Operations Manager is now a stated design decision with its
+  reasoning and its extension point, replacing an open question (§Actors).
+- **Premises mix redefined (1.1.15, 1.1.16, 1.1.23).** The payload shows HOMES, PUBLIC_PLACES and
+  CONSTRUCTION_SITES are free-text habitat lists, not counts, so the v0.3 ratio was not computable.
+  It now counts listed habitat types. This is the most consequential correction in this revision:
+  a driver named in 4.1.3 was specified against a field shape that does not exist.
+- **Conditional ingestion added (1.1.19–1.1.22).** Hourly metadata check, payload download only on
+  change, UNCHANGED run recorded either way, per-feature INC_CRC change detection.
+- **Normalisation methods and default weights are now documented** (4.1.4, 4.1.5 → `SCORING-SPEC.md`).
+- §13's polling assumption is replaced by measured evidence; the NEA row of the data-verification
+  table moves from *partially verified* to *verified*.
 
 **v0.3 (2026-09-02)** — revised after an adversarial review by two independent reviewers. Material
 changes:

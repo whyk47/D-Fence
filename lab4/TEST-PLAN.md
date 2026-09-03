@@ -17,6 +17,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | Lab requirement | State |
 |---|---|
 | §3.2.1 Equivalence-class and boundary-value cases for **1 key control class** | **Done.** `PriorityScoringEngine`, 27 cases — `tests/priority-scoring.test.ts` |
+| §3.2.1 (extension) EC/BV cases for the feed parser and driver bindings | **Done 2026-09-03.** `ClusterFeedParser` and `NormalisationFactory`, 30 cases — `tests/cluster-feed.test.ts`, designed in §2.5 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -101,6 +102,72 @@ and expects a different tier for the same score — a hard-coded `70` passes eve
 fails only this one, so it is what actually tests 4.1.9. W5 sums seven realistic weights in binary
 floating point, where `0.3 + 0.2 + 0.15 + 0.1 + 0.1 + 0.1 + 0.05` does not land exactly on 1.0; a
 strict equality check would reject a correct configuration, so the tolerance is tested, not assumed.
+
+### 2.5 Second EC/BV subject — `ClusterFeedParser` and the driver bindings
+
+Added 2026-09-03, after the NEA payload was read field-for-field for the first time. The lab asks for
+one key control class and `PriorityScoringEngine` remains that subject; this suite exists because the
+*feed's real shape* decides behaviour in two places the engine tests cannot reach, and because
+writing it caught a defect that had survived three reviews.
+
+**The defect it caught.** Requirement 4.1.3 names seven drivers. Only five had a normalisation
+strategy: `Rainfall72h` and `VerifiedOpenReportCount` were bound to nothing, so a full scoring cycle
+would have thrown at run time rather than at wiring time. `NormalisationFactory.build()` now asserts
+completeness at startup, and case **F1** is the test that fails if a driver is ever added to 4.1.3
+without a method.
+
+**Equivalence classes, by requirement.**
+
+| Requirement | Classes |
+|---|---|
+| 1.1.23 habitat lists | populated text · empty string · null/undefined · trailing-comma text |
+| 1.1.15 premises mix | all habitats in homes (0) · all outside homes (1) · mixed · none listed |
+| 1.1.3 rejection | one invalid class per required field: OBJECTID, LOCALITY, CASE_SIZE, geometry |
+| 1.1.20 conditional download | unchanged stamp · moved stamp · no recorded stamp · unreadable stamp |
+| 1.1.22 change detection | equal checksum · different checksum · unseen feature · absent checksum |
+
+Fixtures are the values NEA actually published on 2026-09-03 — the 258-case Countryside Rd cluster
+with habitat text in all three fields, and the 2-case Punggol Dr cluster with none — so a failure
+means either the code broke or the publisher changed the contract. Both are worth knowing.
+
+#### 2.5.1 Executed results
+
+| # | Method | Test input | Expected output | Actual output |
+|---|---|---|---|---|
+| H1 | `parseHabitatList` | `"Domestic container, Bin, Flower pot"` | 3 named habitats | 3 ✓ |
+| H2 | `parseHabitatList` | `null` / `undefined` | `[]` | `[]` ✓ |
+| H3 | `parseHabitatList` | `"Bin, Vase, "` | 2, not 3 | 2 ✓ |
+| H4 | `parseHabitatList` | `""` | `[]` | `[]` ✓ |
+| **P1** | `computePremisesMix` | 2 home, 0 public, 0 construction | **0** | 0 ✓ |
+| **P2** | `computePremisesMix` | 0 home, 1 public, 1 construction | **1** | 1 ✓ |
+| P3 | `computePremisesMix` | 2 home, 1 public, 1 construction | 0.5 | 0.5 ✓ |
+| **P4** | `computePremisesMix` | all fields empty | **0**, no division by zero | 0 ✓ |
+| P5 | `parseFeature` | real Countryside Rd feature | mix 0.5, cases 258 | as expected ✓ |
+| P6 | `parseFeature` | real Punggol Dr feature (no habitat text) | mix 0 | 0 ✓ |
+| R1–R4 | `parseFeature` | each required field removed in turn | rejected, naming that field | as expected ✓ |
+| R5 | `parseFeature` | `CASE_SIZE: 0` | accepted — 0 is data, not absence | accepted ✓ |
+| D1 | `shouldDownload` | stamp equal to the recorded one | `false` | `false` ✓ |
+| D2 | `shouldDownload` | stamp later than the recorded one | `true` | `true` ✓ |
+| D3 | `shouldDownload` | nothing recorded (restart) | `true` | `true` ✓ |
+| **D4** | `shouldDownload` | metadata stamp null / empty | **`true`** — fail towards fetching | `true` ✓ |
+| C1 | `featureChanged` | identical INC_CRC | `false` | `false` ✓ |
+| C2 | `featureChanged` | different INC_CRC | `true` | `true` ✓ |
+| C3 | `featureChanged` | feature never seen | `true` | `true` ✓ |
+| **C4** | `featureChanged` | checksum absent from payload | **`true`** — unknown is not unchanged | `true` ✓ |
+| T1 | `parseFeedTimestamp` | `"20260828155154"` | 2026-08-28T07:51:54Z | as expected ✓ |
+| T2 | `parseFeedTimestamp` | `"28-08-2026"` / `null` | `null`, not Invalid Date | `null` ✓ |
+| **F1** | `NormalisationFactory.build` | — | all 7 drivers of 4.1.3 bound | 7 bound ✓ |
+| F2 | factory bindings | 60 mm on each rainfall driver | 1.0 (24 h) and 0.5 (72 h) | as expected ✓ |
+| F3 | factory bindings | 61 cases over an observed max of 258 | ≈0.743 (log, not 0.230 min-max) | 0.743 ✓ |
+| F4 | factory bindings | 90 days untreated (4.1.16 default) | 1.0, saturated | 1.0 ✓ |
+| F5 | factory bindings | cap reconfigured to 25 mm | 25 mm now saturates | saturates ✓ |
+
+**D4 and C4 are the two cases worth pointing at in a viva.** Both encode the same rule: an unknown
+state must never be recorded as "unchanged". A parser that returned `false` in either case would pass
+every happy-path test and silently freeze the cluster data the first time a metadata field went
+missing — a failure with no error message anywhere.
+
+**Execution.** `npm test` — 4 files, **85 cases, all passing**, `tsc --strict` clean (2026-09-03).
 
 ---
 
@@ -209,6 +276,7 @@ Four rules were applied, and each one removed cases:
 | `WorkOrderLifecycleController.transition` end to end | Implementation, plus fakes for four collaborators |
 | Dialog map ↔ router agreement (11.3.2) | The client router, which is a stub. This one should be a **test**, not an inspection — every route in the code must be a state on the map |
 | One end-to-end path (Playwright) | A running stack |
+| `NEAFeedGateway.fetchLastUpdatedAt` / `fetchClusters` against a fixture | Implementation. The two-hop download (poll-download → signed S3 URL) is the part worth a test, since the signed URL expires |
 
 **The last row is the one to protect.** 11.3.2 says no transition exists that is not in the dialog
 map. That claim is checkable mechanically once the router exists, and if it is left to eyeballing it
