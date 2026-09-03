@@ -169,6 +169,11 @@ export class ReportLifecycleController implements ReportLinkage {
       [ReportStatus.Actioned]: 'has been scheduled for treatment',
       [ReportStatus.Closed]: 'has been treated and closed. Thank you for reporting it',
     };
+    if (report.reporterId === null) {
+      // 10.4.3 — the reporter deleted their account. There is nobody to tell, and 5.2.8's
+      // obligation cannot outlive the person it was owed to.
+      return;
+    }
     await this.notifier?.notify(
       report.reporterId,
       `Your report of ${report.type} at ${report.localityBinding} ${wording[to]}. (was ${from})`,

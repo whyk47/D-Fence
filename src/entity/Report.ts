@@ -16,7 +16,13 @@ export const UNASSIGNED_LOCALITY = 'Unassigned';
 export class Report {
   id!: Uuid;
   /** 5.1.10 */
-  reporterId!: Uuid;
+  /**
+   * Null once the reporter has deleted their account (10.4.3). The report itself survives:
+   * a verified report is operational evidence that a crew was sent somewhere, it sits in the
+   * 4.1.3 driver, and 8.1.13 links it to a work order. Severing the owner satisfies the
+   * deletion without rewriting a history other people acted on.
+   */
+  reporterId!: Uuid | null;
   point!: GeoPoint;
   type!: ReportType;
   description!: string;

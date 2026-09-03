@@ -34,6 +34,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | US-7.3 (§7.3) The five dashboard visualisations and their insufficient-data states | **Done 2026-09-03.** 21 cases — `tests/analytics.test.ts`, designed in §2.19 |
 | US-6.1 (§6.1.6, §6.1.7) Linking a Telegram chat, and real delivery | **Done 2026-09-04.** 10 cases — `tests/telegram-link.test.ts`, designed in §2.20 |
 | Regression (§8.3.14, §4.1.15) The Singapore calendar date, found by the clock | **Done 2026-09-04.** 7 cases — `tests/singapore-date.test.ts`, designed in §2.21 |
+| US-0.4 (§10.3, §10.4) Deletion, the personal-data inventory and attribution | **Partly done 2026-09-04.** 16 cases — `tests/privacy.test.ts`, designed in §2.22 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -919,6 +920,59 @@ during office hours is not a test, and that is the transferable lesson here rath
 about timezones: **a case that derives its expected value the same way the code does cannot falsify
 the code.** The two work-order cases that failed were left as they were; these seven are what pin
 the behaviour down.
+
+### 2.22 Eighteenth subject - privacy, deletion and attribution (`tests/privacy.test.ts`)
+
+Added 2026-09-04 for US-0.4, which requirements v0.3 introduced with the note that its nine
+requirements "read as forgotten rather than deferred". Three of them still were: **10.4.3**
+(deletion within seven days), **10.4.4** (attribution for every government source) and **10.3.2**
+(HTTPS) had no implementation at all.
+
+**The interesting requirement is 10.4.3, and deleting is its easy half.** The hard half is deciding
+what counts as the person's own. A resident's reports are not theirs alone — a verified report is
+evidence a cleaning crew was sent somewhere, it sits in 4.1.3's driver, and 8.1.13 may link it to a
+work order. Deleting them rewrites an operational history other people acted on; keeping them whole
+ignores the request. They are therefore **dissociated**: `reporterId` is severed, the report stays.
+That is the line 10.4.1 already draws for a public projection, applied permanently, and P2 pins it
+down in both directions at once — gone from `findByReporter`, still present and still legible.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| P1 | Saved locations and the Telegram link are destroyed outright | 10.4.3 | ✓ |
+| **P2** | Reports are **dissociated, not deleted** — owner severed, content intact | 10.4.3, 10.4.1 | ✓ |
+| **P3** | The email becomes a tombstone, not `''` — or 2.1.4's index matches every deleted account | 10.4.3 | ✓ |
+| P4 | The credential is disabled at the provider, which this system does not own | 10.4.3, 10.3.1 | ✓ |
+| **P5** | The audit row **outlives the person it describes**, which is what proves the deletion | 2.4.1, 2.4.2 | ✓ |
+| P6 | Completed immediately, so nothing is ever overdue — checked eight days on | 10.4.3, BV | ✓ |
+| P7 | One caller cannot name another's account: there is no parameter to name it with | 2.3.1 | ✓ |
+| P8, P9 | The inventory is complete, and the two **retained** items each cite the rule permitting them | 10.4.2 | ✓ |
+| P10 | Every source carries an attribution, a URL and a licence | 10.4.4 | ✓ |
+| P11 | A screen gets exactly the sources it draws from — the map shows no OneMap credit | 10.4.4 | ✓ |
+| P12, P14 | The footer names each agency; Data Sources carries all four | 10.4.4 | ✓ |
+| **P13** | **10.4.5 is not satisfied**, and the exception is enumerable rather than argued away | 10.4.5 | ✓ |
+| P15, P16 | The redirect preserves host and query; enforcement is off by default on localhost | 10.3.2 | ✓ |
+
+**P13 is the case worth defending.** 10.4.5 says data comes only from public sources needing no
+third-party authentication, and OneMap needs a registered account and an expiring token. It is a
+Singapore government service publishing open data, so it would be easy to call it compliant — and
+that would be reading the requirement to suit us. `Attribution.credentialedSources()` returns the
+exception instead, so it is testable, appears in the API response, and reaches the demo notes rather
+than being discovered during marking.
+
+**P5 is the tension inside a deletion feature.** 2.4.2 forbids modifying an audit record, so the row
+recording the deletion cannot itself be deleted — and that is the point: it is the only remaining
+evidence the request was honoured. The inventory names it as retained, with the requirement that
+permits it, rather than leaving a reader to notice the leftover id.
+
+**Verified live over HTTP**: `GET /api/attribution?screenId=MapView` returned the two sources the map
+draws from and no OneMap credit; `GET /api/attribution` reported all four with
+`credentialedSources: ["Geocoding"]`. A full register → verify → sign-in → `POST /api/account/delete`
+run erased the account and the subsequent sign-in was refused.
+
+**Still not done, and gated rather than forgotten:** 10.3.5's signed, non-enumerable photograph URLs
+need Supabase Storage, which does not exist yet — `SupabaseStorageGateway.signedUrl` remains a stub
+and the bucket policy is the real guarantee. 10.3.2's actual TLS needs a deployment; what is
+implemented here is the redirect, HSTS and the header policy, which is the half we control.
 
 ---
 

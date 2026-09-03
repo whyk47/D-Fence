@@ -25,6 +25,7 @@ import { AdminRoutes } from './boundary/http/AdminRoutes';
 import { LocationRoutes } from './boundary/http/LocationRoutes';
 import { AlertRoutes } from './boundary/http/AlertRoutes';
 import { MapRoutes } from './boundary/http/MapRoutes';
+import { PrivacyRoutes } from './boundary/http/PrivacyRoutes';
 import {
   InMemoryAuditStore,
   InMemoryClusterStore,
@@ -70,6 +71,7 @@ import { AccessPolicy } from './control/AccessPolicy';
 import { DashboardController, principalFor } from './control/DashboardController';
 import { SourceHealthController } from './control/SourceHealthController';
 import { AnalyticsController } from './control/AnalyticsController';
+import { PrivacyController } from './control/PrivacyController';
 import { ClusterIngestionJob } from './control/ingestion/ClusterIngestionJob';
 import { RainfallIngestionJob } from './control/ingestion/RainfallIngestionJob';
 import { ForecastIngestionJob } from './control/ingestion/ForecastIngestionJob';
@@ -322,7 +324,10 @@ async function main(): Promise<void> {
   void dispatch;
 
   // 2.3.6 — the resolver is the only way a request acquires a role, and every handler gets it.
-  const app = new ExpressApp(authentication);
+  // 10.3.2 — off on localhost, which has no certificate, and on wherever DFENCE_REQUIRE_HTTPS
+  // is set. The flag is explicit rather than inferred from NODE_ENV: a security control that
+  // switches itself on by guessing the environment is one that can guess wrong.
+  const app = new ExpressApp(authentication, process.env.DFENCE_REQUIRE_HTTPS === 'true');
   // 7.3.1-7.3.5 — the five charts, over the same stores everything else reads.
   const analytics = new AnalyticsController(ac, clusters, scores, workOrders, reports);
   app.mount(new DashboardRoutes(ac, dashboard, analytics));
@@ -333,6 +338,13 @@ async function main(): Promise<void> {
   app.mount(new LocationRoutes(ac, locations));
   app.mount(new AlertRoutes(ac, notifications, alertPreferences));
   app.mount(new MapRoutes(ac, mapView));
+  // 10.4.3, 10.4.4 — deletion, and the attribution every government source obliges us to show.
+  app.mount(
+    new PrivacyRoutes(
+      ac,
+      new PrivacyController(ac, accounts, savedLocations, reports, subscriptions, authProvider, auditStore),
+    ),
+  );
   // The stand-in dashboard page renders for the seeded manager. It is a **development page**, not
   // the graded screen (E10), and it is the one place left that does not resolve a session — an
   // HTML page cannot carry a bearer token. Every JSON route above does resolve one.
