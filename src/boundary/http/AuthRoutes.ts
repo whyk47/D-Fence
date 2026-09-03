@@ -8,6 +8,7 @@
  *   POST /api/auth/signout          terminates it (2.1.12)
  *   POST /api/auth/reset/request    (2.1.11)
  *   POST /api/auth/reset/complete   (2.1.11)
+ *   POST /api/auth/verify           follows the emailed link (2.1.5, 2.1.6)
  *   GET  /api/auth/me               who the bearer token belongs to
  *
  * These are the only handlers that do **not** resolve a principal first: three of them exist
@@ -43,6 +44,7 @@ export class AuthRoutes extends RouteHandler {
       '/api/auth/signout',
       '/api/auth/reset/request',
       '/api/auth/reset/complete',
+      '/api/auth/verify',
     ];
   }
 
@@ -75,6 +77,11 @@ export class AuthRoutes extends RouteHandler {
           // Always the same answer, whether or not the address exists (2.1.11).
           res.json({ sent: true, next: 'if that address is registered, a reset link is on its way' });
           return;
+        case '/api/auth/verify': {
+          const account = await this.authentication.verifyEmail(body.token ?? '');
+          res.json({ accountId: account.id, verified: true, next: 'you can now sign in' });
+          return;
+        }
         case '/api/auth/reset/complete':
           await this.authentication.completeReset(body.token ?? '', body.password ?? '');
           res.json({ reset: true, next: 'sign in with your new password' });

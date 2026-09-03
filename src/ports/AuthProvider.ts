@@ -52,6 +52,16 @@ export interface AuthProvider {
   /** Verifies a bearer token and returns the provider identity it belongs to, or null. */
   verifyToken(token: string): Promise<AuthUserId | null>;
 
+  /**
+   * 2.1.5, 2.1.6 — consume the verification link. @returns the identity it belonged to, or null
+   * when the link is unknown or already used.
+   *
+   * On the port because 2.1.6 refuses an unverified account, so **something** has to be able to
+   * complete verification. Without this the registration path is a dead end: the account exists,
+   * the link was sent, and no code path can act on it.
+   */
+  consumeVerification(token: string): Promise<AuthUserId | null>;
+
   /** 2.2.3. Creates a staff account without a self-registration flow. */
   createUser(credentials: AuthCredentials): Promise<AuthUserId>;
 

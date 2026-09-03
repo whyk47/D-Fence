@@ -32,8 +32,22 @@ export interface ForecastSource extends ExternalGateway {
   fetch24hForecast(): Promise<RawPayload>;
 }
 
+/**
+ * One geocoding match. 3.1.4 asks for candidates to be **presented for confirmation**, and a bare
+ * coordinate pair cannot be confirmed by a person — "1.3521, 103.8198" tells a resident nothing.
+ * The address and postal code are what makes the choice answerable.
+ */
+export interface GeocodeCandidate {
+  point: GeoPoint;
+  address: string;
+  postalCode: string | null;
+}
+
 export interface GeocodingSource extends ExternalGateway {
-  search(address: string): Promise<GeoPoint[]>;
+  /** 3.1.3. Empty when the address does not exist (3.1.5); throws when the service is unwell (3.1.17). */
+  search(address: string): Promise<GeocodeCandidate[]>;
+  /** 3.1.14, 3.1.15 — mint a fresh token. On the port because the *schedule* is a control concern. */
+  requestToken(): Promise<void>;
 }
 
 export interface NotificationChannel {

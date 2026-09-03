@@ -23,6 +23,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | §3.2 (extension) The work-order lifecycle driven end to end | **Done 2026-09-03.** 27 cases — `tests/work-order.test.ts`, designed in §2.8 |
 | §3.2 (extension) Community reporting, its boundaries and its join to §8 | **Done 2026-09-03.** 42 cases — `tests/report.test.ts`, designed in §2.9 |
 | §3.2 (extension) Accounts, sessions, lock-out and staff provisioning | **Done 2026-09-03.** 38 cases — `tests/account.test.ts`, designed in §2.10 |
+| §3.2 (extension) Saved locations, geocoding failure modes and the exposure band | **Done 2026-09-03.** 27 cases — `tests/location.test.ts`, designed in §2.11 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -383,6 +384,55 @@ from an open tab.
    window *extended* the session, so the check just outside it was measuring a two-second-old
    session and passed for the wrong reason. Two separate sessions are needed to test the two edges
    — which is the requirement (2.1.9 is inactivity, not age) demonstrating itself.
+
+### 2.11 Seventh subject - saved locations, geocoding and exposure (`tests/location.test.ts`)
+
+Added 2026-09-03 with the implementation. Two things carry this suite.
+
+**The 150 m band (3.1.9) is measured to a cluster boundary, not to its centre.** The cases build a
+square cluster 400 m on a side and check 149, 150 and 151 metres from its *edge*. That is only a
+meaningful test because the distance is computed the way the requirement means it — measured from
+the centroid, a home a hundred metres outside a large cluster reads as three hundred metres away
+and is told it is CLEAR.
+
+**The two geocoding failures must not be the same sentence.** 3.1.13 says "no match was found" and
+3.1.17 says "temporarily unavailable", and collapsing them is the easiest defect in the system to
+write by accident: it tells a resident their home does not exist every time a token lapses.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| G1 | Candidates carry an address a person can recognise, not bare coordinates | 3.1.3, 3.1.4 | ✓ |
+| **G2** | At most five candidates are presented | 3.1.4 (BV) | ✓ |
+| G3 | No result raises "no match was found" | 3.1.5, 3.1.13 | ✓ |
+| **G4** | A failed lookup says **unavailable**, and is not an AddressNotFound | 3.1.17 | ✓ |
+| G5–G7 | An auth failure raises a source-health warning; a good refresh clears it; a failed one does not | 3.1.14–3.1.16 | ✓ |
+| L1 | The typed text and the confirmed address are both kept | 3.1.2, 3.1.4 | ✓ |
+| **L2–L3** | Five locations allowed, a sixth refused, and the limit is per resident | 3.1.1 (BV) | ✓ |
+| L4 | A label outside the four is refused | 3.1.6 | ✓ |
+| **L5–L6** | 40 characters accepted, 41 refused; an omitted name falls back to the label | 3.1.7 (BV) | ✓ |
+| L7–L8 | A resident sees only their own; a crew member has none at all | 2.3.1, 2.3.5 | ✓ |
+| **L9** | Deleting a location deletes its alert subscriptions | 3.1.11, 3.1.12 | ✓ |
+| L10 | One resident cannot delete another's location | 2.3.1 | ✓ |
+| E1 | Inside a boundary is IN_CLUSTER at distance 0 | 3.1.9 | ✓ |
+| **E2–E3** | 149 m is WITHIN_150M, 151 m is CLEAR, and exactly 150 m is **inside** the band | 3.1.9 (BV) | ✓ |
+| **E4** | Distance is measured to the boundary, not the centroid | 3.1.9 | ✓ |
+| E5 | A CLEAR location still reports the nearest cluster and its case size | 3.1.10 | ✓ |
+| **E6–E7** | The feed timestamp and the evaluation time are separate; an unevaluated location claims neither | 3.1.10 | ✓ |
+| **E8–E9** | Re-evaluation reports which locations *changed* status, and only those | 3.1.8, 6.1.2 | ✓ |
+| E10 | Every resident's locations are re-evaluated on a cycle | 3.1.8 | ✓ |
+
+**E4, E6 and G4 are the three to point at.** E4 is the geometry decision made visible: the
+in-memory locator projects to a local plane and measures point-to-segment distance, because a
+150 m band computed from centroids means something different for every cluster depending on its
+size. E6 is two facts a card must not merge — "we checked at 12:00" and "against a feed published
+at 10:06" — and E7 is its corollary: an unevaluated location reports `null`, because a timestamp
+of *now* would read as "checked just now and found clear". G4 is the failure separation above.
+
+**Verified live.** The running server geocoded postal code 730123 through OneMap to
+`123 MARSILING RISE SINGAPORE 730123`, saved it, and evaluated it against the fifteen active NEA
+clusters: CLEAR, nearest cluster **Woodlands Ring Rd (Blk 655, 659)** at 1,992 m with 2 cases. A
+nonsense address returned 404 rather than 503, which is 3.1.13 and 3.1.17 behaving differently in
+production rather than only in a test.
 
 ---
 

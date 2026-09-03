@@ -64,6 +64,11 @@ export class SupabaseAuthGateway implements AuthProvider {
     throw new Error('not implemented');
   }
 
+  /** 2.1.5, 2.1.6. Supabase confirms the address through its own link; this is `verifyOtp`. */
+  consumeVerification(_token: string): Promise<AuthUserId | null> {
+    throw new Error('not implemented');
+  }
+
   disableUser(_authUserId: AuthUserId): Promise<void> {
     throw new Error('not implemented');
   }

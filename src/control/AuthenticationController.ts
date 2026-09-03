@@ -178,7 +178,26 @@ export class AuthenticationController {
     await this.auth.completePasswordReset(token, password);
   }
 
-  /** Follows the 2.1.5 verification link. Until this runs, 2.1.6 refuses the account. */
+  /**
+   * 2.1.5, 2.1.6 — follows the verification link. Until this runs, 2.1.6 refuses the account.
+   *
+   * Keyed on the **token**, never on an account id: a verify endpoint that took an account id
+   * would let anyone verify anyone's address by guessing a uuid, which defeats the purpose of
+   * sending a link at all.
+   */
+  async verifyEmail(token: string): Promise<Account> {
+    const authUserId = await this.auth.consumeVerification(token);
+    const account = authUserId === null ? null : await this.accounts.findByAuthUserId(authUserId);
+    if (account === null) {
+      throw new AuthenticationRefused('that verification link is not valid, or has already been used');
+    }
+    account.emailVerified = true;
+    const saved = await this.accounts.save(account);
+    await this.audit?.appendAction(saved.id, 'account:verifyEmail', 'Account', saved.id);
+    return saved;
+  }
+
+  /** Direct verification, for a manager-provisioned account and for tests. */
   async markEmailVerified(accountId: Uuid): Promise<Account> {
     const account = await this.accounts.findById(accountId);
     if (account === null) {

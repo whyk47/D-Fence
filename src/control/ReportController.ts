@@ -139,9 +139,11 @@ export class ReportController {
     if (containing !== null) {
       return { clusterId: containing.id, localityBinding: containing.locality }; // 5.1.7
     }
-    const nearest = await this.locator.nearestLocalityWithin(point, NEAREST_LOCALITY_RADIUS_METRES);
+    const nearest = await this.locator.nearestWithin(point, NEAREST_LOCALITY_RADIUS_METRES);
     // 5.1.9 — Unassigned is the value of the binding, and the status stays Submitted regardless.
-    return { clusterId: null, localityBinding: nearest ?? UNASSIGNED_LOCALITY }; // 5.1.8
+    // Note the cluster id stays null even when a cluster is found: 5.1.8 binds the *locality*, and
+    // a report a kilometre from a boundary must not enter that cluster's 4.1.3 count.
+    return { clusterId: null, localityBinding: nearest?.cluster.locality ?? UNASSIGNED_LOCALITY }; // 5.1.8
   }
 
   /**
