@@ -21,7 +21,7 @@ node "Application Server\nNode 20 + Express + TypeScript" as AppServer {
   component "Access Control\nAccessControlService (2.3.6)\n<<control>>" as AC
   component "Domain Services\n15 control classes\n<<control>>" as Services
   component "Domain Model\n23 entity classes\n<<entity>>" as Domain
-  component "Persistence\nrepositories + SQL\n<<persistence>>" as Persistence
+  component "Persistence\nrepositories + SQL\nin-memory stores\n<<persistence>>" as Persistence
   component "External Gateways\n5 adapters\n<<boundary>>" as Gateways
 }
 

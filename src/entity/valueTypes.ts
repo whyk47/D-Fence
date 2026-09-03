@@ -50,16 +50,34 @@ export class Polygon {
   }
 }
 
-/** The three premises counts NEA publishes. Always read together, always summed. */
+/**
+ * The three premises fields NEA publishes. Always read together.
+ *
+ * **These are not counts.** A live payload on 2026-09-03 shows each field is comma-separated free
+ * text naming the *breeding-habitat types* found in that premises category — HOMES = "Domestic
+ * container, Bin, Flower pot, Vase…" — and each is frequently null. The class held three numbers
+ * until then, which is why requirement 1.1.15 was specified as arithmetic that could not run.
+ * Traces: 1.1.15, 1.1.16, 1.1.23, 4.1.21.
+ */
 export class PremisesMix {
   constructor(
-    readonly homes: number,
-    readonly publicPlaces: number,
-    readonly constructionSites: number,
+    readonly homes: string[] = [],
+    readonly publicPlaces: string[] = [],
+    readonly constructionSites: string[] = [],
   ) {}
 
+  /** Total habitat types listed across all three premises categories. */
   total(): number {
-    return this.homes + this.publicPlaces + this.constructionSites;
+    return this.homes.length + this.publicPlaces.length + this.constructionSites.length;
+  }
+
+  /**
+   * 1.1.15 — habitat types outside homes as a share of all listed, in [0, 1].
+   * 1.1.16 — 0 when nothing is listed, which on the 2026-09-03 payload is 8 of 12 clusters.
+   */
+  ratio(): number {
+    const total = this.total();
+    return total === 0 ? 0 : (this.publicPlaces.length + this.constructionSites.length) / total;
   }
 }
 

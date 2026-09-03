@@ -62,10 +62,12 @@ package "Scoring" #FAF7FD {
   class PriorityScoringEngine <<control>> {
     - strategies : Map<Driver, NormalisationStrategy>
     - config : ConfigSet
-    - scoreRepo : PriorityScoreRepository
-    + computeScores(clusters : Cluster[]) : Promise<ClusterRanking>
-    + scoreOne(cluster : Cluster) : PriorityScore
-    - buildBreakdown(cluster : Cluster) : DriverContribution[]
+    - scores : PriorityScoreStore
+    - staleDrivers : Set<Driver>
+    + markStale(drivers : Driver[]) : void
+    + computeScores(clusters : Cluster[], inputs : Map<Uuid, DriverInputs>, now : Date) : Promise<ClusterRanking>
+    + scoreOne(cluster : Cluster, inputs : DriverInputs, ctx : NormalisationContext) : PriorityScore
+    - buildBreakdown(cluster : Cluster, inputs : DriverInputs, ctx : NormalisationContext) : DriverContribution[]
     - applyWeights(contributions : DriverContribution[]) : number
     + assignTier(score : number) : PriorityTier
     - degradeForMissingDrivers(drivers : Driver[]) : Driver[]
@@ -129,8 +131,10 @@ package "Scoring" #FAF7FD {
 package "Ingestion" #FAF7FD {
   abstract class AbstractIngestionJob <<control>> {
     # gateway : ExternalGateway
-    # runRepo : IngestionRunRepository
-    + run() : Promise<IngestionRun>
+    # runs : IngestionRunStore
+    + run(trigger : 'SCHEDULED' | 'MANUAL') : Promise<IngestionRun>
+    # shouldRun() : Promise<boolean>
+    # afterPersist(raw : RawPayload, batch : ParsedBatch) : Promise<void>
     # {abstract} sourceKind() : SourceKind
     # {abstract} fetch() : Promise<RawPayload>
     # {abstract} parse(raw : RawPayload) : Promise<ParsedBatch>
@@ -139,7 +143,7 @@ package "Ingestion" #FAF7FD {
     # markStale() : Promise<void>
   }
   class ClusterIngestionJob {
-    - clusterRepo : ClusterRepository
+    - clusters : ClusterStore
     - detectChange(previous : ClusterSnapshot, current : ClusterSnapshot) : ChangeClass
   }
   class ClusterFeedParser <<control>> {

@@ -12,7 +12,7 @@ import { TierThresholds } from '../src/entity/valueTypes';
 import { Driver, PriorityTier } from '../src/entity/enums';
 import { ConfigSet } from '../src/config/ConfigSet';
 import { PriorityScoringEngine } from '../src/control/PriorityScoringEngine';
-import { PriorityScoreRepository } from '../src/persistence/PriorityScoreRepository';
+import { PriorityScoreStore } from '../src/ports/Stores';
 import { MinMaxNormalisation } from '../src/control/normalisation/MinMaxNormalisation';
 import { LogScaleNormalisation } from '../src/control/normalisation/LogScaleNormalisation';
 import { CappedLinearNormalisation } from '../src/control/normalisation/CappedLinearNormalisation';
@@ -23,7 +23,7 @@ import { NormalisationContext } from '../src/control/normalisation/Normalisation
 function engine(high = 70, medium = 40): PriorityScoringEngine {
   const config = new ConfigSet();
   Object.assign(config, { tierThresholds: new TierThresholds(high, medium) });
-  return new PriorityScoringEngine(new Map(), config, {} as PriorityScoreRepository);
+  return new PriorityScoringEngine(new Map(), config, {} as PriorityScoreStore);
 }
 
 const ctx = (min: number, max: number): NormalisationContext => ({

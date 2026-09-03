@@ -18,6 +18,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 |---|---|
 | §3.2.1 Equivalence-class and boundary-value cases for **1 key control class** | **Done.** `PriorityScoringEngine`, 27 cases — `tests/priority-scoring.test.ts` |
 | §3.2.1 (extension) EC/BV cases for the feed parser and driver bindings | **Done 2026-09-03.** `ClusterFeedParser` and `NormalisationFactory`, 32 cases — `tests/cluster-feed.test.ts`, designed in §2.5 |
+| §3.2 (extension) Ingestion template + full scoring cycle, no network, no database | **Done 2026-09-03.** 15 cases — `tests/ingestion.test.ts`, designed in §2.6 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -175,7 +176,41 @@ state must never be recorded as "unchanged". A parser that returned `false` in e
 every happy-path test and silently freeze the cluster data the first time a metadata field went
 missing — a failure with no error message anywhere.
 
-**Execution.** `npm test` — 4 files, **87 cases, all passing**, `tsc --strict` clean (2026-09-03).
+**Execution.** `npm test` — 5 files, **102 cases, all passing**, `tsc --strict` clean (2026-09-03).
+
+### 2.6 Third subject — the ingestion template and a full scoring cycle (`tests/ingestion.test.ts`)
+
+Added 2026-09-03 with the implementation. These are the cases that only exist once the pieces run
+together, and they run with **no network and no database** — against a fake `ClusterSource` and the
+in-memory stores. That is the claim the ports layer was built to make true (10.6.3), demonstrated
+rather than asserted.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| I1 | First cycle downloads, stores two features, rejects the third **by name** | 1.1.3, 1.1.4, 1.1.17 | ✓ |
+| **I2** | Second cycle with an unmoved stamp records UNCHANGED and **does not download** | 1.1.20, 1.1.21 | ✓ |
+| I3 | A moved stamp downloads again; case delta 42, class GROWN | 1.1.8, 1.1.9 | ✓ |
+| I4 | A failed fetch marks the source stale and **keeps the stored data** | 10.2.2, 10.2.4 | ✓ |
+| **I5** | The publisher stamp is saved only after a successful store, so a failed cycle retries | 1.1.20 | ✓ |
+| S1 | The 258-case cluster outranks the 2-case cluster; rank starts at 1 | 4.1.14 | ✓ |
+| S2 | All seven drivers present → not degraded, breakdown has 7 entries | 4.1.10, 4.1.13 | ✓ |
+| **S3** | A stale rainfall feed degrades, names the drivers, renormalises the rest | 4.1.12, 4.1.19, 4.1.20 | ✓ |
+| S4 | A treatment lowers the score, all else equal | 4.1.17 | ✓ |
+| S5 | Every cycle is kept as history; the top score explains itself | 4.1.11, 4.1.18 | ✓ |
+| S6 | A cluster with no habitat text still scores, premises mix 0 | 1.1.16 | ✓ |
+| C1 | `.env` parsing keeps a JWT intact, ignores comments and blanks | 10.3.4 | ✓ |
+| C2 | The shipped default configuration is valid and complete | 4.1.3, 4.1.6 | ✓ |
+| C3–C4 | A missing or unknown driver is rejected **at startup** | 4.1.3, 4.1.5 | ✓ |
+
+**I5 and S3 are the two worth pointing at.** I5 encodes an ordering that is easy to get wrong: save
+the publisher stamp before the data is stored and a failed cycle is never retried, because the next
+cycle thinks it already has that version. S3 is the graceful-degradation argument in one case.
+
+**S5 caught a real defect while it was being written.** `InMemoryPriorityScoreStore.latest()`
+grouped the newest cycle by `computedAt` equality; two cycles that run inside the same millisecond
+share a timestamp, so it returned both and the dashboard would have shown every cluster twice. The
+store now keeps scores **by cycle**. The note matters beyond the fake: the Postgres implementation
+must key on a cycle id for the same reason, not on `MAX(computed_at)`.
 
 ---
 
@@ -279,7 +314,7 @@ Four rules were applied, and each one removed cases:
 | Area | Blocked on |
 |---|---|
 | Repository spatial queries (1.2.5, 3.1.8, 5.1.7) | A live PostGIS instance; these are integration tests, not unit tests |
-| `AbstractIngestionJob.run` template — the 10.2.2 / 10.2.3 / 10.2.4 behaviour | Implementation, then a fake `ExternalGateway`. The `ports/` layer exists precisely so this needs no network |
+| ~~`AbstractIngestionJob.run` template~~ | **Done 2026-09-03** — §2.6, cases I1–I5 |
 | `AccessControlService.authorise` — every §2.3 rule | Implementation. `AccessPolicy` is done and tested; the ownership-scoped check is not |
 | `WorkOrderLifecycleController.transition` end to end | Implementation, plus fakes for four collaborators |
 | Dialog map ↔ router agreement (11.3.2) | The client router, which is a stub. This one should be a **test**, not an inspection — every route in the code must be a state on the map |

@@ -7,4 +7,5 @@ export * from './AuthProvider';
 export * from './ExternalGateway';
 export * from './ObjectStorage';
 export * from './Repository';
+export * from './Stores';
 export * from './types';

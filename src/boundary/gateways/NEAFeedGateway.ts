@@ -1,67 +1,91 @@
 /**
  * D-Fence — NEAFeedGateway (Adapter).
- * Stereotype: <<boundary>>. Traces: 1.1.1, 1.1.19, 1.1.20, 1.1.21.
+ * Stereotype: <<boundary>>. Traces: 1.1.1, 1.1.11, 1.1.19, 1.1.20, 1.1.21, 10.2.1.
  *
  * **Feed characterised 2026-09-03** (previously an open item carried from Lab 2):
  * - dataset `d_dbfabf16158d1b0e1c420627c0819168`, GeoJSON, ~25 KB, 12 active clusters
- * - metadata resource carries `lastUpdatedAt`; on 2026-09-03 it read 2026-09-02T10:06:42+08:00
- * - only two distinct `FMEL_UPD_D` values across all twelve features (25 Aug, 28 Aug), so the
- *   publisher revises cluster attributes roughly twice a week — **not hourly**
+ * - the metadata resource carries `lastUpdatedAt`, which moves **daily** at about 10:06 SGT
+ * - only two distinct `FMEL_UPD_D` values across all twelve features, so cluster *attributes* are
+ *   revised roughly twice a week — the daily republication usually carries identical data
  *
- * The hourly cycle in 1.1.1 is kept and made cheap instead: `fetchLastUpdatedAt()` polls the sub-2 KB
- * metadata resource, and `fetchClusters()` is called only when that value has moved (1.1.20). The
- * download itself is two hops — poll-download returns a short-lived signed S3 URL, not the payload.
+ * The hourly cycle in 1.1.1 is kept and made cheap: `fetchLastUpdatedAt()` polls the sub-2 KB
+ * metadata resource, and `fetchClusters()` runs only when that value has moved (1.1.20). The
+ * download is two hops — poll-download returns a short-lived signed S3 URL, not the payload — and
+ * both hops go through HttpClient so 10.4.6 and the 1.1.11 retry rule live in one place.
  */
 import { ClusterSource } from '../../ports/ExternalGateway';
 import { HttpClient } from './HttpClient';
 import { SourceKind } from '../../entity/enums';
 import { RawPayload } from '../../ports/types';
 
+interface DatasetMetadata {
+  code?: number;
+  data?: { lastUpdatedAt?: string; name?: string };
+}
+
+interface PollDownload {
+  code?: number;
+  data?: { url?: string };
+}
+
 export class NEAFeedGateway implements ClusterSource {
   /**
-   * @param baseUrl the data.gov.sg host; dataset id is configuration (10.6.2), not a constant here,
-   *   so a marker or a teammate can point the build at a fixture without editing code.
+   * @param metadataBaseUrl `api-production.data.gov.sg` — the metadata resource lives here only.
+   * @param downloadBaseUrl `api-open.data.gov.sg` — poll-download lives here only. Two hosts, and
+   *   getting them the wrong way round returns a 403 that reads like an auth problem.
    */
   constructor(
     private readonly http: HttpClient,
-    private readonly baseUrl: string,
+    private readonly metadataBaseUrl = 'https://api-production.data.gov.sg',
+    private readonly downloadBaseUrl = 'https://api-open.data.gov.sg',
     private readonly datasetId: string = NEAFeedGateway.DENGUE_CLUSTERS_DATASET_ID,
   ) {}
 
-  /** Verified live on 2026-09-03. Recorded here and in config/scoring.default.json. */
+  /** Verified live 2026-09-03. Also recorded in config/scoring.default.json. */
   static readonly DENGUE_CLUSTERS_DATASET_ID = 'd_dbfabf16158d1b0e1c420627c0819168';
 
   sourceKind(): SourceKind {
     return SourceKind.Clusters;
   }
 
-  isHealthy(): Promise<boolean> {
-    throw new Error('not implemented');
+  /** Health is the metadata resource answering, not the payload downloading: cheap and sufficient. */
+  async isHealthy(): Promise<boolean> {
+    try {
+      return (await this.fetchLastUpdatedAt()) !== null;
+    } catch {
+      return false;
+    }
   }
 
-  /** The metadata resource, which is what 1.1.19 retrieves before every scheduled cycle. */
   metadataUrl(): string {
-    return `${this.baseUrl}/v2/public/api/datasets/${this.datasetId}/metadata`;
+    return `${this.metadataBaseUrl}/v2/public/api/datasets/${this.datasetId}/metadata`;
   }
 
-  /** poll-download returns a signed, expiring URL to the GeoJSON — never the payload itself. */
   pollDownloadUrl(): string {
-    return `${this.baseUrl}/v1/public/api/datasets/${this.datasetId}/poll-download`;
+    return `${this.downloadBaseUrl}/v1/public/api/datasets/${this.datasetId}/poll-download`;
   }
 
   /**
-   * 1.1.19 — the publisher's own revision stamp, used by 1.1.20 to decide whether to download.
-   * @returns the `data.lastUpdatedAt` value, or null when the field is absent, which 1.1.20 treats
-   *   as "download anyway" rather than as "unchanged".
+   * 1.1.19 — the publisher's own revision stamp, which 1.1.20 uses to decide whether to download.
+   * @returns the `data.lastUpdatedAt` value, or null when the field is absent. Null is not an
+   *   error: 1.1.20 reads it as "download anyway", which is the safe direction.
    */
-  fetchLastUpdatedAt(): Promise<string | null> {
-    // TODO(F1): GET metadataUrl(), read data.lastUpdatedAt.
-    throw new Error('not implemented');
+  async fetchLastUpdatedAt(): Promise<string | null> {
+    const meta = await this.http.getJson<DatasetMetadata>(this.metadataUrl(), { attempts: 3 });
+    return meta.data?.lastUpdatedAt ?? null;
   }
 
-  /** The GeoJSON payload. Called only when 1.1.20 says the file has changed. */
-  fetchClusters(): Promise<RawPayload> {
-    // TODO(F1): GET pollDownloadUrl() -> data.url, then GET that signed URL.
-    throw new Error('not implemented');
+  /**
+   * The GeoJSON payload, in two hops. Called only when 1.1.20 says the file has changed.
+   * The signed URL expires, so it is requested immediately before use and never cached.
+   */
+  async fetchClusters(): Promise<RawPayload> {
+    const poll = await this.http.getJson<PollDownload>(this.pollDownloadUrl(), { attempts: 3 });
+    const signedUrl = poll.data?.url;
+    if (!signedUrl) {
+      throw new Error('poll-download returned no url; the dataset id may be wrong');
+    }
+    const body = await this.http.getJson<unknown>(signedUrl, { attempts: 3, timeoutMs: 30_000 });
+    return { retrievedAt: new Date(), body };
   }
 }

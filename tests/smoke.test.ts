@@ -11,7 +11,7 @@ import { GeoPoint, TierThresholds } from '../src/entity/valueTypes';
 import { PriorityTier, Role, WorkOrderStatus } from '../src/entity/enums';
 import { ConfigSet } from '../src/config/ConfigSet';
 import { PriorityScoringEngine } from '../src/control/PriorityScoringEngine';
-import { PriorityScoreRepository } from '../src/persistence/PriorityScoreRepository';
+import { PriorityScoreStore } from '../src/ports/Stores';
 import { WorkOrderTransitionTable } from '../src/control/WorkOrderTransitionTable';
 import { WorkOrderLifecycleController } from '../src/control/WorkOrderLifecycleController';
 import { AccessPolicy } from '../src/control/AccessPolicy';
@@ -21,7 +21,7 @@ import { NormalisationContext } from '../src/control/normalisation/Normalisation
 function engine(high = 70, medium = 40): PriorityScoringEngine {
   const config = new ConfigSet();
   Object.assign(config, { tierThresholds: new TierThresholds(high, medium) });
-  return new PriorityScoringEngine(new Map(), config, {} as PriorityScoreRepository);
+  return new PriorityScoringEngine(new Map(), config, {} as PriorityScoreStore);
 }
 
 function lifecycle(): WorkOrderLifecycleController {

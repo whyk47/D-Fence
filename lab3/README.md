@@ -31,15 +31,23 @@ control.
 src/
   boundary/    http/ (RouteHandler + 8 route classes), gateways/ (5 adapters + HttpClient)
   control/     15 control classes, 3 coordinators, ingestion/ (Template Method), normalisation/ (Strategy)
-  ports/       ExternalGateway family, AuthProvider, ObjectStorage, Repository, the DTOs
+  ports/       ExternalGateway family, AuthProvider, ObjectStorage, Repository, Stores, the DTOs
   entity/      23 entity classes, 15 enumerations, 4 value types
-  persistence/ 10 repositories, Database, migrations/
-  config/      AppConfigurator, ServiceContainer, ConfigSet
+  persistence/ 10 repositories, Database, migrations/, memory/ (in-memory stores)
+  config/      AppConfigurator, ServiceContainer, ConfigSet, ConfigLoader
+  tools/       ingest-once.ts — one live ingestion + scoring cycle, printed
 client/src/
   screens/     27 screen components, grouped by role
   lib/         LoadState (the four §11.4 sub-states as one value), ApiClient
   app/         AppShell, RouteGuard
 ```
+
+**Implemented on 2026-09-03, no longer skeleton:** `HttpClient`, `NEAFeedGateway`, `OneMapGateway`,
+`ClusterFeedParser`, `AbstractIngestionJob.run`, `ClusterIngestionJob`, `PriorityScoringEngine`
+(`computeScores` / `scoreOne` / `buildBreakdown`), `NormalisationFactory`, `ConfigLoader`, the three
+in-memory stores and `PriorityScore.explain()`. `npm run ingest` runs a live cycle against NEA and
+prints the ranked table; 102 tests cover it without a network. The rest — accounts, reports, alerts,
+work orders, the HTTP surface and every screen — is still skeleton.
 
 Packaged by stereotype, as lab §3.4.2 requires. The dependency rule is one-directional — **boundary →
 control → persistence, everything may import `ports/` and `entity/`, nothing imports `boundary/`** —
