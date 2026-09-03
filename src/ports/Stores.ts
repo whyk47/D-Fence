@@ -38,6 +38,8 @@ export interface ClusterStore {
   appendSnapshot(snapshot: ClusterSnapshot): Promise<void>;
   /** The previous snapshot for a cluster, or null the first time it is seen (1.1.6, 1.1.8). */
   latestSnapshot(objectId: string): Promise<ClusterSnapshot | null>;
+  /** 9.1.9, 9.1.10 — the snapshots for one cluster since a cut-off, for the trend view. */
+  snapshotsSince(clusterId: Uuid, since: Date): Promise<ClusterSnapshot[]>;
 }
 
 export interface IngestionRunStore {

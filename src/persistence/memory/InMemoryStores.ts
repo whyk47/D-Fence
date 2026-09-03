@@ -103,6 +103,11 @@ export class InMemoryClusterStore implements ClusterStore {
   async snapshotsFor(clusterId: Uuid): Promise<ClusterSnapshot[]> {
     return [...(this.snapshots.get(clusterId) ?? [])];
   }
+
+  /** 9.1.9, 9.1.10 — inclusive of the cut-off, so a 30-day window contains thirty days. */
+  async snapshotsSince(clusterId: Uuid, since: Date): Promise<ClusterSnapshot[]> {
+    return (this.snapshots.get(clusterId) ?? []).filter((s) => s.retrievedAt.getTime() >= since.getTime());
+  }
 }
 
 export class InMemoryIngestionRunStore implements IngestionRunStore {
