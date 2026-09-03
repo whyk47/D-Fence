@@ -30,6 +30,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | US-0.5 (§10.1) Performance obligations measured rather than asserted | **Done 2026-09-03.** 6 cases — `tests/performance.test.ts`, designed in §2.15 |
 | US-1.4 (§1.3) The 24-hour forecast, region mapping and the heavy-rain flag | **Done 2026-09-03.** 26 cases — `tests/forecast.test.ts`, designed in §2.16 |
 | US-1.5 (§1.4) Source health: the three-interval rule and the staleness marker | **Done 2026-09-03.** 17 cases — `tests/source-health.test.ts`, designed in §2.17 |
+| US-2.5 (§2.4) The audit trail across the operational write paths | **Done 2026-09-03.** 10 cases — `tests/audit.test.ts`, designed in §2.18 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
@@ -721,6 +722,52 @@ crying wolf and showing hour-old data unmarked.
 single failed run raised an attention item. It was passing, and it was wrong: it encoded the
 implementation's rule instead of 1.4.3's. It now asserts both halves of the boundary — one failure
 raises nothing, three raise the item — and carries a note saying why it changed.
+
+### 2.18 Fourteenth subject - the audit trail (`tests/audit.test.ts`)
+
+Added 2026-09-03 for US-2.5. §2.4 was two-thirds implemented: registration, sign-in, sign-out and
+staff provisioning wrote rows; **report moderation and work-order assignment wrote nothing** —
+exactly the pair US-2.5's own acceptance names, and exactly the pair a review of a dispatch decision
+would ask about. A trail that covers authentication and not operations records who logged in and
+not who sent a crew somewhere.
+
+**The design, not a list of call sites.** The fix reuses the pattern already carrying 5.2.8's
+notification: **the single write path is the single audit point.**
+`ReportLifecycleController.transition` and `WorkOrderLifecycleController.transition` each own their
+entity's status, so one hook there covers every present and future caller. Only the changes a
+controller makes *itself* — creation, the assignee field, a cancellation reason, a submission, a
+corroboration, a saved location, an alert preference — are logged at the call site. The cases below
+test that **property**, because the property is what stops the next hole appearing; testing eight
+call sites would pass while the ninth was written without a log line.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| **A1** | Report moderation records moderator, action, report id and time | 2.4.1 | ✓ |
+| **A2** | Assignment records the manager and the crew member — **and** the status move, as two rows | 2.4.1 | ✓ |
+| A3 | A reassignment records who it was taken **from** as well as who it went to | 2.4.1, 8.2.7 | ✓ |
+| A4 | Every status move is recorded, attributed to whoever made it (manager 1, crew 2) | 2.4.1 | ✓ |
+| **A5** | A **refused** transition writes no action row — nothing changed | 2.4.1 | ✓ |
+| **A6** | A system-initiated move is attributed to `system`, not to the nearest human | 2.4.1, 5.2.6 | ✓ |
+| A7 | A submission and a corroboration land against the right resident | 2.4.1 | ✓ |
+| A8 | A refusal is logged `DENIED:` and is not countable as a change | 2.3.8, 2.4.1 | ✓ |
+| **A9** | Reading the trail hands back **copies** — a caller cannot rewrite history | 2.4.2 | ✓ |
+| A10 | The store exposes no update, delete, remove, clear or truncate | 2.4.2 | ✓ |
+
+**A2 asserts two rows on purpose.** An assignment changes the assignee *and* the status, and a
+reviewer asking "who moved this to Assigned" and "who put Ah Meng on it" is asking two questions.
+Collapsing them would lose the second.
+
+**A5 and A6 are the two ways an audit trail becomes untrustworthy.** Logging a refused operation
+makes the log unusable as evidence, because a row would no longer mean a change happened.
+Attributing a system-initiated change to whichever human triggered the chain is a lie in the one log
+that exists to be trusted — and leaving the actor blank instead would make "nobody did this" and
+"we did not record who did this" indistinguishable. Hence `SYSTEM_ACTOR_ID`, a named non-user.
+
+**Two defects were found by writing these cases, not by running them.** `InMemoryAuditStore` was
+accepting the target id and **throwing it away**: 2.4.1 specifies four fields and three were being
+stored, so every row said what *kind* of thing changed without saying which one. And `recent()` was
+returning the stored objects, so any caller could rewrite a record through an ordinary read — 2.4.2
+false by accident. Both are fixed; A1 and A9 are the cases that hold them fixed.
 
 ---
 

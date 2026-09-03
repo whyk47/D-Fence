@@ -12,9 +12,9 @@
 import { ReportStatus, Role } from '../entity/enums';
 import { Uuid } from '../entity/valueTypes';
 import { Report } from '../entity/Report';
-import { Notifier, ReportLinkage, ReportStore } from '../ports/Stores';
+import { AuditStore, Notifier, ReportLinkage, ReportStore } from '../ports/Stores';
 import { ReportActor, ReportTransitionTable } from './ReportTransitionTable';
-import { Principal } from './Principal';
+import { Principal, SYSTEM_ACTOR_ID } from './Principal';
 
 /** Raised when a status move is refused. Mirrors TransitionRefused: the reason must be stated. */
 export class ReportTransitionRefused extends Error {
@@ -33,6 +33,12 @@ export class ReportLifecycleController implements ReportLinkage {
     private readonly table: ReportTransitionTable,
     private readonly reports: ReportStore,
     private readonly notifier: Notifier | null,
+    /**
+     * 2.4.1. Placed on the **one write path** for `Report.status` rather than at each call site,
+     * for the same reason 5.2.8's notification is: a hook here cannot be forgotten by a future
+     * caller, and an audit trail with a hole in it is worse than none, because it reads complete.
+     */
+    private readonly audit: AuditStore | null = null,
   ) {}
 
   /**
@@ -80,6 +86,14 @@ export class ReportLifecycleController implements ReportLinkage {
     }
     await this.reports.save(report);
     await this.reports.appendStatusChange(report.id, from, to, at);
+    // 2.4.1 — after the write, never before: an operation refused by the rules above changed no
+    // stored state, and logging it as though it had would make the trail unreadable as evidence.
+    await this.audit?.appendAction(
+      options.moderatorId ?? SYSTEM_ACTOR_ID,
+      `report:status:${from} -> ${to}`,
+      'Report',
+      report.id,
+    );
     await this.notifyReporter(report, from, to);
     return report;
   }

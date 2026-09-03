@@ -34,6 +34,7 @@ import { Cluster } from '../../entity/Cluster';
 import { ClusterSnapshot } from '../../entity/ClusterSnapshot';
 import { IngestionRun } from '../../entity/IngestionRun';
 import { RegionForecast } from '../../entity/RegionForecast';
+import { AuditEntry } from '../../ports/Stores';
 import { PriorityScore } from '../../entity/PriorityScore';
 
 export class InMemoryClusterStore implements ClusterStore {
@@ -273,26 +274,34 @@ export class InMemoryRainfallStore implements RainfallStore {
 }
 
 export class InMemoryAuditStore implements AuditStore {
-  private readonly records: Array<{ accountId: Uuid; action: string; targetEntity: string; occurredAt: Date }> = [];
+  private readonly records: AuditEntry[] = [];
 
-  async appendDenial(accountId: Uuid, action: string, targetEntity: string, _targetId: Uuid | null): Promise<void> {
-    this.records.push({ accountId, action: `DENIED:${action}`, targetEntity, occurredAt: new Date() });
+  async appendDenial(accountId: Uuid, action: string, targetEntity: string, targetId: Uuid | null): Promise<void> {
+    this.records.push({ accountId, action: `DENIED:${action}`, targetEntity, targetId, occurredAt: new Date() });
   }
 
   /**
-   * 2.4.1. Prefixed so a refusal and a state change are distinguishable when the log is read —
+   * 2.4.1 — actor, action, target **entity id** and timestamp. The target id was being accepted
+   * and thrown away until 2026-09-03, which made every row say what kind of thing changed without
+   * saying which one: four columns were specified and three were stored.
+   *
+   * Denials are prefixed so a refusal and a state change are distinguishable when the log is read —
    * they mean opposite things, and an unprefixed list of action names cannot tell them apart.
    *
    * 2.4.2 says an audit record may not be modified or deleted by any role. Here that is the array
-   * being append-only and `recent()` returning a copy; in Postgres it is a table with no UPDATE or
-   * DELETE grant, which is where the real guarantee has to live.
+   * being append-only and `recent()` returning **copies** rather than the stored objects; in
+   * Postgres it is a table with no UPDATE or DELETE grant, which is where the real guarantee has
+   * to live. Handing out the stored object would make 2.4.2 false through an ordinary read.
    */
-  async appendAction(accountId: Uuid, action: string, targetEntity: string, _targetId: Uuid | null): Promise<void> {
-    this.records.push({ accountId, action, targetEntity, occurredAt: new Date() });
+  async appendAction(accountId: Uuid, action: string, targetEntity: string, targetId: Uuid | null): Promise<void> {
+    this.records.push({ accountId, action, targetEntity, targetId, occurredAt: new Date() });
   }
 
-  async recent(limit: number): Promise<Array<{ accountId: Uuid; action: string; targetEntity: string; occurredAt: Date }>> {
-    return this.records.slice(-Math.max(0, limit)).reverse();
+  async recent(limit: number): Promise<AuditEntry[]> {
+    return this.records
+      .slice(-Math.max(0, limit))
+      .reverse()
+      .map((r) => ({ ...r, occurredAt: new Date(r.occurredAt.getTime()) }));
   }
 
   size(): number {

@@ -298,6 +298,29 @@ stale data without knowing it.
 - Build the Data Sources screen.
 - Build the staleness banner component and apply it to affected views.
 
+*Delivered 2026-09-03 (server side), commit `c261bda`, merged to `dev` with `--no-ff`. The §1.4 rule
+now lives in `src/control/SourceHealthController.ts`. Two corrections to what was previously built:
+the panel raised a warning after **one** failed run where 1.4.3 says three consecutive scheduled
+intervals, and it reported only **two** sources (clusters, rainfall) where 1.4.1 says every external
+data source — the forecast and geocoding sources were simply absent, and a source missing from a
+health panel does not look unhealthy, it looks fine. A warning now needs either the three most recent
+settled runs all FAILED, or no success across three of the source's own configured intervals — the
+second condition exists because a failure counter is structurally blind to a scheduler that has
+stopped: a job that never runs writes no FAILED rows. Intervals come from `ConfigSet.ingestionIntervals`
+(10.6.2) with per-source fallbacks; UNCHANGED counts as a success (1.1.21); "has not run yet" is its
+own state — not a warning, but stale. Geocoding has no ingestion job (it runs on resident address
+saves and a 48-hour token schedule per 3.1.15), so it self-reports a `lastSuccess` instead of writing
+an IngestionRun per lookup (3.1.16), and an authentication failure warns immediately because, unlike
+a 503, a lapsed token does not clear itself. `isStale` (1.4.4) is deliberately a lower bar than the
+warning — one missed interval marks the data, three raise the alarm — and `DashboardOverview` now
+carries `staleSources` so no screen needs a second endpoint to know whether to show the indicator.
+17 new cases in `tests/source-health.test.ts` (TEST-PLAN §2.17); dashboard case D9 was **corrected** —
+it asserted that a single failed run raised an attention item, which was passing and wrong, and now
+asserts both sides of the 1.4.3 boundary. **The remaining two subtasks — the Data Sources screen and
+applying the staleness banner to affected views — are E10 work and stay gated on mockups B3-B12,
+like every other screen.** The shared stale-state component already exists in
+`client/src/components/States.tsx`.*
+
 ### US-1.6 — Survive a feed outage without losing the application
 **As** an Operations Manager, **I want** the system to keep working when a source fails **so that** an
 NEA outage does not take the dashboard down with it.

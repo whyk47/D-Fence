@@ -11,7 +11,13 @@ import { ExposureStatus, LocationLabel } from '../entity/enums';
 import { GeoPoint, Uuid } from '../entity/valueTypes';
 import { SavedLocation, ExposureDetail, MAX_LOCATION_NAME_CHARS, MAX_SAVED_LOCATIONS } from '../entity/SavedLocation';
 import { GeocodeCandidate } from '../ports/ExternalGateway';
-import { AlertSubscriptionStore, ClusterLocator, RainfallReadingSource, SavedLocationStore } from '../ports/Stores';
+import {
+  AlertSubscriptionStore,
+  AuditStore,
+  ClusterLocator,
+  RainfallReadingSource,
+  SavedLocationStore,
+} from '../ports/Stores';
 import { AccessControlService } from './AccessControlService';
 import { GeocodingController } from './GeocodingController';
 import { Principal } from './Principal';
@@ -43,6 +49,9 @@ export class SavedLocationController {
     private readonly subscriptions: AlertSubscriptionStore | null = null,
     /** 6.1.x — rainfall at the location, for the resident's card. Optional. */
     private readonly rainfall: RainfallReadingSource | null = null,
+    /** 2.4.1. A saved location is personal data (10.3.x); who added and who removed one is exactly
+     *  the kind of change an audit trail exists to answer for. */
+    private readonly audit: AuditStore | null = null,
   ) {}
 
   /**
@@ -99,6 +108,7 @@ export class SavedLocationController {
     location.evaluatedAt = null;
 
     const saved = await this.locations.save(location);
+    await this.audit?.appendAction(by.accountId, 'savedLocation:add', 'SavedLocation', saved.id); // 2.4.1
     // Evaluated immediately, so the card is meaningful on the screen the resident lands on rather
     // than at the next ingestion cycle up to an hour later.
     await this.evaluateExposure([saved], now);
@@ -132,6 +142,9 @@ export class SavedLocationController {
     // try to fire, and it is the alert nobody can turn off.
     const subscriptionsRemoved = (await this.subscriptions?.deleteForLocation(id)) ?? 0;
     await this.locations.delete(id);
+    // 2.4.1, and the one case where the audit row outlives the row it describes: the location is
+    // gone, so this entry is the only remaining evidence that it ever existed.
+    await this.audit?.appendAction(by.accountId, 'savedLocation:remove', 'SavedLocation', id);
     return { subscriptionsRemoved };
   }
 

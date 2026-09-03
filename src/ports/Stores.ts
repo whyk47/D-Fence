@@ -287,8 +287,18 @@ export interface AuditStore {
    * when the log is read.
    */
   appendAction(accountId: Uuid, action: string, targetEntity: string, targetId: Uuid | null): Promise<void>;
-  /** 2.4.x — the audit trail, newest first. */
-  recent(limit: number): Promise<Array<{ accountId: Uuid; action: string; targetEntity: string; occurredAt: Date }>>;
+  /** 2.4.x — the audit trail, newest first. Implementations return copies: 2.4.2 forbids
+   *  modification by any role, and handing back the stored object makes that false. */
+  recent(limit: number): Promise<AuditEntry[]>;
+}
+
+/** One row of the 2.4.1 trail: who, what, which thing, when. All four, or it is not the trail. */
+export interface AuditEntry {
+  accountId: Uuid;
+  action: string;
+  targetEntity: string;
+  targetId: Uuid | null;
+  occurredAt: Date;
 }
 
 export interface PriorityScoreStore {

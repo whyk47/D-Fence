@@ -11,7 +11,7 @@ import { GeoPoint, Uuid } from '../entity/valueTypes';
 import { Report, UNASSIGNED_LOCALITY } from '../entity/Report';
 import { Corroboration } from '../entity/Corroboration';
 import { MAX_PHOTOS_PER_REPORT, PhotoUpload, ReportPhoto } from '../entity/ReportPhoto';
-import { ClusterLocator, ReportStore } from '../ports/Stores';
+import { AuditStore, ClusterLocator, ReportStore } from '../ports/Stores';
 import { AccessControlService } from './AccessControlService';
 import { ReportLifecycleController } from './ReportLifecycleController';
 import { Principal } from './Principal';
@@ -57,6 +57,9 @@ export class ReportController {
     private readonly reports: ReportStore,
     private readonly locator: ClusterLocator,
     private readonly lifecycle: ReportLifecycleController,
+    /** 2.4.1. Submission and corroboration are writes this class makes itself; the status moves
+     *  that follow are recorded by ReportLifecycleController. */
+    private readonly audit: AuditStore | null = null,
   ) {}
 
   /**
@@ -123,6 +126,9 @@ export class ReportController {
       photo.sizeBytes = upload.sizeBytes;
       await this.reports.savePhoto(photo);
     }
+    // 2.4.1. Logged after the photographs, so the row means "the whole submission landed" rather
+    // than "a report row was inserted and then something failed".
+    await this.audit?.appendAction(by.accountId, 'report:submit', 'Report', saved.id);
     return saved;
   }
 
@@ -187,7 +193,9 @@ export class ReportController {
     await this.reports.saveCorroboration(corroboration);
 
     report.corroborationCount += 1; // 5.1.14
-    return this.reports.save(report);
+    const saved = await this.reports.save(report);
+    await this.audit?.appendAction(by.accountId, 'report:corroborate', 'Report', reportId); // 2.4.1
+    return saved;
   }
 
   /** 2.3.2 — a Resident sees only their own reports, with full detail and their own photographs. */
