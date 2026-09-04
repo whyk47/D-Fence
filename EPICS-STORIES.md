@@ -85,6 +85,70 @@ separated **so that** the Lab 3 design model matches the code.
 - Configure environment-variable loading; commit `.env.example` only.
 - Deploy a hello-world build to the hosting target.
 
+*Database half delivered 2026-09-04, commits `ec0f5cf`, `02cc7da`, `626e811` and `7b7d64e` on `dev` —
+"Wire the Postgres repositories in, and prove a restart keeps its memory". The subtask "set up the
+database project and migration tooling" is now real: the build has persistent storage on **Supabase
+Postgres**, and a process restart keeps what the previous process learned. `src/persistence/Database.ts`
+was a stub and is now a `pg` Pool (`max: 10`) over TLS with `rejectUnauthorized: true` and an explicit
+`ca` read from `src/certs/prod-ca-2021.crt` — the Supabase Root 2021 CA is **committed deliberately**,
+because it is a public certificate and not a key, and because the pooler presents a chain rooted in a
+private self-signed CA that Node does not trust by default. (`https://supabase.com/downloads/prod-ca-2021.crt`
+is a dead 404; the certificate has to come out of the Supabase dashboard.) `transaction()` binds the
+work to a `ScopedDatabase` wrapping one checked-out client, so a transaction cannot leak onto a
+different connection halfway through. `src/persistence/migrations/001_initial_schema.sql` is the whole
+schema, 26 tables (27 live, counting PostGIS's `spatial_ref_sys`), on three conventions: **text with
+CHECK constraints rather than ENUM**, so adding a status is a migration and not a type rewrite;
+**`geography` rather than `geometry`**, so a distance is metres and not degrees; and `timestamptz`
+throughout. `src/tools/migrate.ts` is checksummed and transactional and **refuses to re-run a migration
+whose file has been edited**; `src/tools/schema-verify.ts` exercises the schema's guarantees rather
+than inspecting them; `src/tools/supabase-check.ts` diagnoses a connection without ever printing a
+secret, and its `unusableBecause()` names the reserved characters in a password.
+`ClusterRepository.ts` (a full `ClusterStore` plus `PostgresClusterLocator`), `RainfallRepository.ts`,
+`IngestionRunRepository.ts` and `PriorityScoreRepository.ts` are the four stores now on Postgres.
+`src/server.ts` chooses Postgres or in-memory purely on `DATABASE_URL` and binds **exactly one**
+`ClusterLocator`; `src/tools/ingest-once.ts` is database-aware the same way, prints what the store
+holds rather than what the run wrote, and closes the pool on exit — it previously printed its table and
+then hung. `InMemoryClusterLocator` was widened from the concrete `InMemoryClusterStore` to the
+`ClusterStore` port, which is the single change that makes the two locators swappable at all.
+
+**Decisions worth reading before touching this.** Cluster containment uses **`ST_Covers`, not
+`ST_Contains`**, so a point exactly on a boundary counts as inside (3.1.8, 5.1.7) — the resident who
+lives on the edge of a cluster is the one the alert is for. Exactly **one** `ClusterLocator` is bound
+per process; binding both would be the second answer that the warning on `Polygon.contains` exists to
+forbid. `audit_record` has **no foreign key at all**, plus a `BEFORE UPDATE OR DELETE` trigger raising
+`'audit records cannot be % (2.4.2)'` — a deleted account must not be able to erase its own trail, and
+a cascade from `account` would let it. `report.reporter_id` is `ON DELETE SET NULL` (10.4.3), which is
+the same dissociate-don't-delete rule US-0.4 settled, now enforced by the schema.  `corroboration`
+carries `UNIQUE (report_id, account_id)` (5.1.13) in the database and not only in the controller.
+`rainfall_reading`'s primary key is `(station_id, reading_at)` with `ON CONFLICT DO NOTHING`, and
+`saveReadings` returns the rows **actually written**, so a backfill re-run reports 0 new instead of
+thousands — a double-counted reading changes a cluster's rank, not merely a row count.
+`PriorityScoreRepository.latest()` is scoped to a single `computed_at`, because "newest row per
+cluster" would rank across two cycles, which ranks nothing. Postgres `numeric` is parsed through
+`Number()` deliberately: `pg` hands it back as a string, and left implicit a 72-hour rainfall
+accumulation would concatenate rather than add.
+
+**Only four stores are persistent, and the boot log says so.** Accounts, sessions, reports, work
+orders, saved locations, alerts, forecasts and audit are still in-memory in both modes. This is
+printed openly at start-up rather than hidden, because a half-migrated system that looked fully
+persistent would be a worse claim than an honestly mixed one.
+
+Verified live, not asserted. `schema-verify` confirmed seven guarantees against the real database:
+at least four GIST spatial indexes, at least four `geography` columns, an audit UPDATE refused, an
+audit DELETE refused, the 5.1.13 unique constraint, `report.reporter_id` at ON DELETE SET NULL, and
+audit holding zero foreign keys. Restart persistence was proved with **two separate processes**
+against the live database and real NEA data: run 1 returned `SUCCESS, 15 features`; run 2, a fresh
+process, returned `UNCHANGED, 0 features` — the 1.1.20 publisher stamp survived the restart — then
+read all 15 clusters back out of Postgres and produced an identical ranking, with both runs appearing
+in one accumulated history. That is **10.2.3**. **468 tests passing across 22 files**, `npx tsc
+--noEmit` strict-clean.
+
+**Two configuration traps.** A password containing `#` must be percent-encoded as `%23` inside
+`DATABASE_URL`, since `#` starts a URL fragment; this changes only the spelling in the URL, and the
+driver sends the original password unchanged. And the connection must use the Supabase **session
+pooler** (IPv4, port 5432) — the direct connection is IPv6-only and the transaction pooler is on 6543.
+`DATABASE_URL` lives in `src/.env`, which is gitignored; only `src/.env.example` is committed.*
+
 ### US-0.3 — Configuration, logging and error handling
 **As** a developer, **I want** central configuration and logging **so that** weights, thresholds and
 failures are visible without code changes.
@@ -406,6 +470,14 @@ entire resilience path was specified and then left out of the build plan.*
 - Build the manual ingestion trigger on the Data Sources screen.
 - Test by pointing the client at an unreachable host mid-cycle.
 
+*10.2.3 delivered 2026-09-04, commit `7b7d64e` (see US-0.2 for the whole change). **This story is not
+done** — retry, last-good-snapshot serving and the manual trigger are covered elsewhere, but resuming
+after a restart previously could not be true at all, because a restarted process began with an empty
+memory and re-ingested everything as new. With clusters, rainfall, ingestion runs and priority scores
+on Postgres, two separate processes were run against the live database and real NEA data: the first
+returned `SUCCESS, 15 features`, the second `UNCHANGED, 0 features` — the 1.1.20 publisher stamp
+survived — and both runs appear in one accumulated history rather than two fresh ones.*
+
 ---
 
 # E2 — Accounts, roles and access control
@@ -565,6 +637,13 @@ now one, shared by `AccessControlService` and every controller that writes state
 **No audit-reading HTTP route was added** — no requirement in §2.4 asks for the trail to be
 displayed, and scope was not widened. The database-level deny on update and delete remains
 outstanding for the same reason as everything else: the build still runs on in-memory stores.*
+
+*Update 2026-09-04, commit `7b7d64e`: the database-level deny now exists. `audit_record` in
+`001_initial_schema.sql` carries a `BEFORE UPDATE OR DELETE` trigger raising
+`'audit records cannot be % (2.4.2)'`, and **no foreign key at all**, so a deleted account cannot
+cascade its own trail away. Both refusals are checked live by `schema-verify`. The audit **store**
+is still in-memory — the schema guarantee is real, the repository that writes into it is not yet
+written.*
 
 ---
 
