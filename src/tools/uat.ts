@@ -70,6 +70,23 @@ async function call(
 }
 
 /**
+ * The same call, returning the body as text.
+ *
+ * 7.4.3's export is `text/csv`, and `response.json()` on it throws — an earlier shape of this tool
+ * would have reported the export as an empty object rather than as a CSV, which is a passing check
+ * for a broken download.
+ */
+async function callText(
+  session: Session,
+  path: string,
+): Promise<{ status: number; text: string }> {
+  const response = await fetch(`${base}${path}`, {
+    headers: session.token === null ? {} : { Authorization: `Bearer ${session.token}` },
+  });
+  return { status: response.status, text: await response.text() };
+}
+
+/**
  * Run one step.
  *
  * `check` returns null on success or a sentence on failure, rather than throwing — a failed
@@ -113,6 +130,18 @@ function uniqueEmail(prefix: string): string {
 }
 
 const PASSWORD = 'UatPass2026';
+
+/**
+ * A fresh point for every run, about a kilometre from the last one.
+ *
+ * Before the stores moved onto Postgres this was unnecessary: every run met an empty server. Now
+ * yesterday's report is still there, and 5.1.11 refuses a second report of the same type within
+ * fifty metres for twenty-four hours — correctly. A harness that can only pass once is a harness
+ * nobody runs twice, so the site being reported moves with the run rather than the rule being
+ * weakened to accommodate the test.
+ */
+const RUN_OFFSET = ((Date.now() % 1_000) / 100_000) - 0.005;
+const SITE = { latitude: 1.3966 + RUN_OFFSET, longitude: 103.8721 + RUN_OFFSET };
 const logPath = argument('log') ?? null;
 
 /**
@@ -190,6 +219,11 @@ async function main(): Promise<void> {
   // --- Segment B: the resident journey -------------------------------------------------------
   const resident: Session = { token: null, role: null, accountId: null };
   const residentEmail = uniqueEmail('resident');
+  // Carried into segment C: a manager cannot moderate a report the resident never filed, and the
+  // point of an acceptance test is that the two journeys are the same system.
+  let reportId = '';
+  let secondReportId = '';
+  let savedLocationId = '';
 
   const registered = await step('B1', '2.1.1, 2.1.4', 'a resident can register', async () => {
     const result = await call(anonymous, 'POST', '/api/auth/register', {
@@ -248,6 +282,71 @@ async function main(): Promise<void> {
         return candidates.length > 0 ? null : 'no candidates — is ONE_MAP_TOKEN valid?';
       });
 
+      await step('B2', '3.1.4, 3.1.6', 'a confirmed candidate is saved as a location', async () => {
+        const search = await call(resident, 'POST', '/api/locations/search', { text: 'Woodlands Ring Road' });
+        const candidates = (search.body.candidates ?? []) as Array<Record<string, unknown>>;
+        const first = candidates[0];
+        if (first === undefined) {
+          return 'OneMap returned no candidate to confirm';
+        }
+        // A candidate carries a `point`, not loose coordinates — and 3.1.4 requires the saved
+        // location to come from one the search returned, so the shape is part of the rule.
+        const point = (first.point ?? {}) as Record<string, unknown>;
+        const result = await call(resident, 'POST', '/api/locations', {
+          candidate: {
+            latitude: point.latitude,
+            longitude: point.longitude,
+            address: first.address,
+            postalCode: first.postalCode ?? null,
+          },
+          label: 'Home',
+          name: 'UAT home',
+          inputText: 'Woodlands Ring Road',
+        });
+        if (result.status !== 201) {
+          return `expected 201, got ${result.status}: ${JSON.stringify(result.body)}`;
+        }
+        savedLocationId = String(result.body.id ?? '');
+        return savedLocationId === '' ? 'the saved location has no id' : null;
+      });
+
+      await step('B2', '3.1.9, 3.1.10', 'the saved location reports an exposure status', async () => {
+        const result = await call(resident, 'GET', '/api/locations');
+        if (result.status !== 200) {
+          return `expected 200, got ${result.status}`;
+        }
+        const locations = (result.body.locations ?? []) as Array<Record<string, unknown>>;
+        const saved = locations.find((l) => String(l.id) === savedLocationId);
+        if (saved === undefined) {
+          return 'the location just saved is not in the list';
+        }
+        // 3.1.10 — the three statuses are a stated set; a location with no status at all is a card
+        // the resident cannot act on, which is the failure 10.5.x exists to prevent.
+        return typeof saved.status === 'string' && saved.status !== ''
+          ? null
+          : 'the saved location carries no exposure status';
+      });
+
+      await step('B2', '3.1.13, 3.1.17', 'an unresolvable address is 404, not 503', async () => {
+        const result = await call(resident, 'POST', '/api/locations/search', {
+          text: 'Qqzzx Nonexistent Road 999',
+        });
+        // The two failures must stay distinguishable: 503 tells a resident the service is down,
+        // 404 tells them the address is wrong, and collapsing them tells someone their home does
+        // not exist every time the OneMap token lapses.
+        if (result.status === 503) {
+          return 'a nonsense address returned 503 — geocoding unavailable, or the two are collapsed';
+        }
+        if (result.status === 404) {
+          return null;
+        }
+        if (result.status !== 200) {
+          return `expected 200 with no candidates or 404, got ${result.status}`;
+        }
+        const candidates = (result.body.candidates ?? []) as unknown[];
+        return candidates.length === 0 ? null : `${candidates.length} candidate(s) for a nonsense address`;
+      });
+
       await step('B3', '9.1.1, 9.1.11', 'the map layers carry clusters with a tier label', async () => {
         const result = await call(resident, 'GET', '/api/map/layers');
         if (result.status !== 200) {
@@ -265,21 +364,41 @@ async function main(): Promise<void> {
 
       await step('B4', '5.1.1–5.1.4', 'a resident can submit a report', async () => {
         const result = await call(resident, 'POST', '/api/reports', {
-          latitude: 1.3966,
-          longitude: 103.8721,
+          latitude: SITE.latitude,
+          longitude: SITE.longitude,
           type: 'StandingWater',
           description: 'UAT — standing water in a disused pot behind the void deck.',
           photos: [],
         });
-        return result.status === 201
-          ? null
-          : `expected 201, got ${result.status}: ${JSON.stringify(result.body)}`;
+        if (result.status !== 201) {
+          return `expected 201, got ${result.status}: ${JSON.stringify(result.body)}`;
+        }
+        reportId = String(result.body.reportId ?? '');
+        return reportId === '' ? 'the submission returned no report id' : null;
+      });
+
+      // A second report, far enough away and of a different type that 5.1.11 cannot call it a
+      // duplicate. Segment C rejects this one, so that BOTH moderation outcomes are demonstrated —
+      // a queue in which nothing is ever rejected has only been half tested.
+      await step('B4', '5.1.1–5.1.4', 'a second, unrelated report is accepted', async () => {
+        const result = await call(resident, 'POST', '/api/reports', {
+          latitude: SITE.latitude - 0.04,
+          longitude: SITE.longitude - 0.05,
+          type: 'BlockedDrain',
+          description: 'UAT — drain blocked with leaf litter at the far end of the estate.',
+          photos: [],
+        });
+        if (result.status !== 201) {
+          return `expected 201, got ${result.status}: ${JSON.stringify(result.body)}`;
+        }
+        secondReportId = String(result.body.reportId ?? '');
+        return secondReportId === '' ? 'the submission returned no report id' : null;
       });
 
       await step('B4', '5.1.4', 'an over-length description is refused', async () => {
         const result = await call(resident, 'POST', '/api/reports', {
-          latitude: 1.4,
-          longitude: 103.87,
+          latitude: SITE.latitude + 0.01,
+          longitude: SITE.longitude + 0.01,
           type: 'StandingWater',
           description: 'x'.repeat(501),
           photos: [],
@@ -290,8 +409,8 @@ async function main(): Promise<void> {
       await step('B5', '5.1.11', 'a near-duplicate report within the hour is refused', async () => {
         // Twenty metres from the first report, immediately after it.
         const result = await call(resident, 'POST', '/api/reports', {
-          latitude: 1.39678,
-          longitude: 103.8721,
+          latitude: SITE.latitude + 0.00018,
+          longitude: SITE.longitude,
           type: 'StandingWater',
           description: 'UAT — the same pot, reported again.',
           photos: [],
@@ -308,6 +427,35 @@ async function main(): Promise<void> {
         }
         return /^\d{6}$/.test(String(result.body.code)) ? null : `code is ${String(result.body.code)}`;
       });
+
+      if (savedLocationId !== '') {
+        await step('B6', '6.2.1, 6.2.2', 'alerts can be switched on for one location', async () => {
+          const result = await call(resident, 'POST', `/api/locations/${savedLocationId}/alerts`, {
+            enabled: true,
+            growthThreshold: 5,
+          });
+          if (result.status !== 200) {
+            return `expected 200, got ${result.status}: ${JSON.stringify(result.body)}`;
+          }
+          return result.body.enabled === true ? null : 'the subscription came back disabled';
+        });
+
+        await step('B7', '3.1.12', 'deleting a location says what went with it', async () => {
+          const result = await call(resident, 'POST', `/api/locations/${savedLocationId}/delete`, {});
+          if (result.status !== 200) {
+            return `expected 200, got ${result.status}: ${JSON.stringify(result.body)}`;
+          }
+          // The cascade is stated, not silent: the resident just turned alerts on for this
+          // location, so exactly one subscription must be reported as removed. Zero would mean the
+          // subscription outlived the thing it points at.
+          return Number(result.body.subscriptionsRemoved) >= 1
+            ? null
+            : `the alert subscription was not reported as removed (${String(result.body.subscriptionsRemoved)})`;
+        });
+      } else {
+        skip('B6', '6.2.1', 'alerts can be switched on for one location', 'no location was saved');
+        skip('B7', '3.1.12', 'deleting a location says what went with it', 'no location was saved');
+      }
 
       await step('B', '2.3.3', 'a resident is refused the operations dashboard', async () => {
         const result = await call(resident, 'GET', '/api/ops/dashboard');
@@ -406,10 +554,137 @@ async function main(): Promise<void> {
       return Array.isArray(result.body.proposals) ? null : 'no proposals array';
     });
 
+    await step('C', '7.3.1-7.3.5', 'all five analytics charts are built, each stating its sufficiency', async () => {
+      const result = await call(manager, 'GET', '/api/ops/analytics');
+      if (result.status !== 200) {
+        return `expected 200, got ${result.status}: ${JSON.stringify(result.body)}`;
+      }
+      const charts = result.body.charts as Record<string, Record<string, unknown>> | null;
+      if (charts === null) {
+        return 'the analytics controller is not wired in';
+      }
+      const expected = ['activeCases', 'tierDistribution', 'crewWorkload', 'turnaround', 'reportsPerDay'];
+      const missing = expected.filter((name) => charts[name] === undefined);
+      if (missing.length > 0) {
+        return `missing chart(s): ${missing.join(', ')}`;
+      }
+      // 10.5.3 and 7.3.x: a chart drawn from four days of history is not wrong, it is insufficient,
+      // and it has to say which it is. A chart reporting `sufficient: false` with no reason is
+      // exactly what this check exists to catch.
+      const unexplained = expected.filter(
+        (name) => charts[name]?.sufficient === false && !charts[name]?.insufficientReason,
+      );
+      return unexplained.length === 0
+        ? null
+        : `chart(s) insufficient with no reason given: ${unexplained.join(', ')}`;
+    });
+
+    await step('C', '7.4.2, 7.4.3', 'the priority table exports as CSV with a header row', async () => {
+      const table = await call(manager, 'GET', '/api/ops/priority');
+      const rows = (table.body.rows ?? []) as unknown[];
+      const csv = await callText(manager, '/api/ops/priority.csv');
+      if (csv.status !== 200) {
+        return `expected 200, got ${csv.status}`;
+      }
+      const lines = csv.text.trim().split('\n').filter((line) => line.trim() !== '');
+      if (lines.length === 0) {
+        return 'the export is empty';
+      }
+      // Every cell is quoted, because several localities contain commas.
+      const header = String(lines[0]);
+      if (!header.includes('"rank"') || !header.includes('"locality"')) {
+        return `the first line is not a header row: ${header.slice(0, 60)}`;
+      }
+      // 7.4.3 - the export is the view, not the whole table. A count that disagrees with the
+      // screen is worse than no export, because it is taken away and used.
+      return lines.length - 1 === rows.length
+        ? null
+        : `the export has ${lines.length - 1} row(s) for a table of ${rows.length}`;
+    });
+
+    await step('C', '9.2.1, 4.1.10', 'a cluster opens with its full driver breakdown', async () => {
+      const id = await firstClusterId(manager);
+      if (id === null) {
+        return 'no clusters ingested';
+      }
+      const result = await call(manager, 'GET', `/api/map/clusters/${id}`);
+      if (result.status !== 200) {
+        return `expected 200, got ${result.status}: ${JSON.stringify(result.body)}`;
+      }
+      const contributions = (result.body.breakdown ?? []) as unknown[];
+      // 4.1.10 - a manager acting on a rank is entitled to see what produced it. An empty
+      // breakdown renders as a detail panel with a number and no argument behind it.
+      return contributions.length > 0
+        ? null
+        : 'the detail panel carries no driver contributions (4.1.10)';
+    });
+
     await step('C', '5.3.1', 'the moderation queue is readable', async () => {
       const result = await call(manager, 'GET', '/api/ops/moderation');
       return result.status === 200 ? null : `expected 200, got ${result.status}`;
     });
+
+    if (reportId !== '') {
+      await step('C', '5.3.2, 5.2.5', 'a moderator can verify a report', async () => {
+        const result = await call(manager, 'POST', `/api/ops/moderation/${reportId}/verify`, {});
+        if (result.status !== 200) {
+          return `expected 200, got ${result.status}: ${JSON.stringify(result.body)}`;
+        }
+        return result.body.status === 'Verified' ? null : `the report is ${String(result.body.status)}`;
+      });
+
+      await step('C', '7.5.3', 'the attention panel names the moderation backlog', async () => {
+        const result = await call(manager, 'GET', '/api/ops/dashboard');
+        const items = (result.body.attention ?? []) as Array<Record<string, unknown>>;
+        // The second report is still Submitted at this point. 7.5.3 asks for the count and the age
+        // of the oldest, so an item that merely says "some are waiting" is not it.
+        const backlog = items.find((i) => i.kind === 'reportAwaitingModeration');
+        if (backlog === undefined) {
+          return 'no reportAwaitingModeration item, though a report is awaiting moderation';
+        }
+        return /\d+ report\(s\)/.test(String(backlog.detail))
+          ? null
+          : `the item does not state a count: ${String(backlog.detail)}`;
+      });
+    } else {
+      skip('C', '5.3.2', 'a moderator can verify a report', 'no report was submitted');
+      skip('C', '7.5.3', 'the attention panel names the moderation backlog', 'no report was submitted');
+    }
+
+    if (secondReportId !== '') {
+      await step('C', '5.3.3, 5.3.4', 'a moderator can reject a report, with a reason', async () => {
+        const bare = await call(manager, 'POST', `/api/ops/moderation/${secondReportId}/reject`, {});
+        if (bare.status < 400) {
+          // 5.3.4 - a rejection with no reason is a decision the resident can learn nothing from,
+          // and the requirement makes the reason mandatory rather than encouraged.
+          return `a rejection with no reason was accepted (${bare.status})`;
+        }
+        const result = await call(manager, 'POST', `/api/ops/moderation/${secondReportId}/reject`, {
+          reason: 'UAT - the photograph shows a drain that is flowing normally.',
+        });
+        if (result.status !== 200) {
+          return `expected 200, got ${result.status}: ${JSON.stringify(result.body)}`;
+        }
+        return result.body.status === 'Rejected' ? null : `the report is ${String(result.body.status)}`;
+      });
+    } else {
+      skip('C', '5.3.3', 'a moderator can reject a report', 'no second report was submitted');
+    }
+
+    if (resident.token !== null && reportId !== '') {
+      await step('C', '5.2.8', 'the resident sees their own report move to Verified', async () => {
+        const result = await call(resident, 'GET', '/api/reports/mine');
+        if (result.status !== 200) {
+          return `expected 200, got ${result.status}`;
+        }
+        const mine = (result.body.reports ?? []) as Array<Record<string, unknown>>;
+        const own = mine.find((r) => String(r.id ?? r.reportId) === reportId);
+        if (own === undefined) {
+          return 'the resident cannot see the report they filed';
+        }
+        return own.status === 'Verified' ? null : `the resident still sees it as ${String(own.status)}`;
+      });
+    }
 
     // --- Segment D: the crew loop ------------------------------------------------------------
     const crewEmail = uniqueEmail('crew');
@@ -434,6 +709,31 @@ async function main(): Promise<void> {
     if (clusterId === null) {
       skip('D', '8.1.1', 'a manager can raise a work order', 'no clusters ingested');
     } else {
+      // 8.1.11 blocks a second open work order of the same type on the same cluster, and with the
+      // work orders now in Postgres an earlier run that failed halfway leaves its order open for
+      // ever — so every later run would be refused before it began. Cancelling the leftover is what
+      // a manager would actually do, and it demonstrates 8.3.18 on the way past.
+      await step('D', '8.3.18', 'a work order left open by an earlier run can be cancelled', async () => {
+        const open = await call(manager, 'GET', '/api/ops/work-orders');
+        const orders = (open.body.workOrders ?? open.body.rows ?? []) as Array<Record<string, unknown>>;
+        const stale = orders.filter(
+          (w) =>
+            String(w.clusterId) === clusterId &&
+            w.taskType === 'Fogging' &&
+            w.status !== 'Verified' &&
+            w.status !== 'Cancelled',
+        );
+        for (const order of stale) {
+          const result = await call(manager, 'POST', `/api/ops/work-orders/${String(order.id)}/cancel`, {
+            reason: 'UAT — clearing a work order left open by an earlier run.',
+          });
+          if (result.status !== 200) {
+            return `could not cancel ${String(order.id)}: ${result.status} ${JSON.stringify(result.body)}`;
+          }
+        }
+        return null;
+      });
+
       await step('D', '8.1.1–8.1.6', 'a manager can raise a work order', async () => {
         const result = await call(manager, 'POST', '/api/ops/work-orders', {
           clusterId,
@@ -463,6 +763,29 @@ async function main(): Promise<void> {
             ? 'the 409 does not carry the blocking work order (8.1.12)'
             : null;
         });
+
+        await step('D', '8.1.4', 'a work order scheduled in the past is refused', async () => {
+          const result = await call(manager, 'POST', '/api/ops/work-orders', {
+            clusterId,
+            taskType: 'Inspection',
+            scheduledDate: new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10),
+            instructions: 'UAT - should never be accepted.',
+          });
+          return result.status >= 400
+            ? null
+            : `a date three days ago was accepted (${result.status})`;
+        });
+
+        // 8.3.14 / 7.5.2 cannot be demonstrated from outside: the only way to make a work order
+        // overdue through the API is to schedule it in the past, and 8.1.4 - correctly - refuses
+        // that. Recorded as a skip with the reason rather than left out, so the gap is visible in
+        // the run and not only in someone's memory. It is covered by the unit suite instead.
+        skip(
+          'D',
+          '8.3.14, 7.5.2',
+          'an overdue work order is flagged for attention',
+          'unreachable over HTTP: 8.1.4 refuses a past scheduled date, so no overdue order can be created',
+        );
 
         await step('D', '8.2.5', 'crew workload is reported for the assignment decision', async () => {
           const result = await call(manager, 'GET', '/api/ops/work-orders/crew-workload');
