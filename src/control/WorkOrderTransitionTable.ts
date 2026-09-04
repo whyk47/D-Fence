@@ -57,6 +57,28 @@ const HAS_CANCELLATION_REASON: Guard = (wo) => wo.cancellationReason !== null &&
 const HAS_REJECTION_REASON: Guard = (_wo, evidence) =>
   evidence !== null && evidence.rejectionReason !== null && evidence.rejectionReason.trim().length > 0;
 
+/**
+ * What to tell a person when a guard refuses.
+ *
+ * A refused guard used to produce `the conditions of 8.3.6, 8.3.7 are not met` — a requirement
+ * identifier, shown to a field crew member on the single most important action they perform. The
+ * requirement number belongs in the traceability, not in the sentence someone reads standing over a
+ * drain. The moderation path already got this right ("a reason of at least ten characters is
+ * required"); this is the same sentence in the same shape.
+ *
+ * Keyed off the guard itself rather than added to every row, so a guard cannot acquire a second,
+ * differently-worded explanation by being reused on a new transition.
+ */
+const UNMET: ReadonlyMap<Guard, string> = new Map([
+  [HAS_EVIDENCE, 'a completion needs at least one photograph and a note describing what was done'],
+  [HAS_CANCELLATION_REASON, 'a cancellation needs a reason'],
+  [HAS_REJECTION_REASON, 'sending a completion back needs a reason the crew can act on'],
+]);
+
+/** ALWAYS never fails, so it has no entry; the fallback covers a guard added without a sentence. */
+export const explainUnmetGuard = (guard: Guard): string =>
+  UNMET.get(guard) ?? 'this work order is not in a state that permits the change';
+
 export class WorkOrderTransitionTable {
   private readonly permitted: TransitionRule[] = [
     // Creation is not a transition — 8.3.15 sets the initial status. It is not in this table.

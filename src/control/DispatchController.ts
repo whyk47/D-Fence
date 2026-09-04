@@ -43,6 +43,34 @@ export class DuplicateWorkOrder extends Error {
   }
 }
 
+/**
+ * A dispatch action refused on its own contents — a date in the past, an over-long instruction, an
+ * assignee who cannot hold the job (8.1.1, 8.1.4, 8.1.6, 8.2.3).
+ *
+ * These were bare `Error`s, which `WorkOrderRoutes` had no branch for, so every one of them reached
+ * the generic handler and came back as **500 "the request could not be completed / retry"**. The
+ * message the control layer had carefully written — "scheduled date 2026-09-01 is in the past" —
+ * went to the server log instead of to the manager who had just typed the date. Telling someone to
+ * retry a request that cannot ever succeed is worse than saying nothing.
+ *
+ * `ReportRejected`, `LocationRejected` and `AlertPreferenceRejected` are the same idea; this file
+ * was simply the one that never got it.
+ */
+export class WorkOrderRejected extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = 'WorkOrderRejected';
+  }
+}
+
+/** Separate from the above because the remedy differs: nothing the caller retypes will help. */
+export class WorkOrderNotFound extends Error {
+  constructor(readonly what: string) {
+    super(what);
+    this.name = 'WorkOrderNotFound';
+  }
+}
+
 export class DispatchController {
   constructor(
     private readonly ac: AccessControlService,
@@ -114,15 +142,15 @@ export class DispatchController {
 
     const cluster = await this.clusters.findById(draft.clusterId);
     if (cluster === null) {
-      throw new Error(`no cluster ${draft.clusterId}`); // 8.1.1 — against an *active* cluster
+      throw new WorkOrderNotFound(`no active cluster ${draft.clusterId}`); // 8.1.1
     }
     // 8.1.4 — a scheduled date that is not in the past. Compared as calendar dates in Singapore
     // time, because "today" is a date to a planner, not an instant.
     if (draft.scheduledDate < DispatchController.today()) {
-      throw new Error(`scheduled date ${draft.scheduledDate} is in the past (8.1.4)`);
+      throw new WorkOrderRejected(`scheduled date ${draft.scheduledDate} is in the past (8.1.4)`);
     }
     if ((draft.instructions ?? '').length > 1000) {
-      throw new Error('instructions exceed 1000 characters (8.1.6)');
+      throw new WorkOrderRejected('instructions exceed 1000 characters (8.1.6)');
     }
     const clash = (await this.workOrders.findOpenForCluster(draft.clusterId)).find(
       (w) => w.taskType === draft.taskType,
@@ -163,7 +191,7 @@ export class DispatchController {
   async assign(id: Uuid, crewId: Uuid, by: Principal, isActiveAccount = true): Promise<WorkOrder> {
     await this.ac.authorise(by, 'workOrder:write', { kind: 'workOrder', id });
     if (!isActiveAccount) {
-      throw new Error('cannot assign to a deactivated account (8.2.3)');
+      throw new WorkOrderRejected('cannot assign to a deactivated account (8.2.3)');
     }
     const workOrder = await this.requireOrder(id);
     const previous = workOrder.assigneeId;
@@ -336,7 +364,7 @@ export class DispatchController {
   private async requireOrder(id: Uuid): Promise<WorkOrder> {
     const workOrder = await this.workOrders.findById(id);
     if (workOrder === null) {
-      throw new Error(`no work order ${id}`);
+      throw new WorkOrderNotFound(`no work order ${id}`);
     }
     return workOrder;
   }

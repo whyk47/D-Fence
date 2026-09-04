@@ -21,6 +21,28 @@
  */
 import { JSDOM, VirtualConsole } from 'jsdom';
 import { Role } from '../entity/enums';
+import { ConfigLoader } from '../config/ConfigLoader';
+
+/**
+ * The seed manager's credentials, in the order the server itself resolves them.
+ *
+ * `process.env` alone was not enough. The server reads `src/.env` through ConfigLoader; these
+ * harnesses read only the environment, so once a real seed password was configured they carried on
+ * offering the published development default and the manager sign-in failed — taking most of the
+ * run down with it as skips. `npm run uat:client` failed out of the box while the application was
+ * entirely healthy, which is the worst kind of test failure: one that indicts the wrong thing.
+ */
+function seedManager(): { email: string; password: string } {
+  const config = ConfigLoader.load();
+  // `??` is wrong against ConfigSet.get, which returns '' for an absent key rather than undefined.
+  const first = (...values: Array<string | undefined>): string =>
+    values.find((v) => v !== undefined && v !== '') ?? '';
+  return {
+    email: first(process.env.DFENCE_SEED_MANAGER_EMAIL, config.get('DFENCE_SEED_MANAGER_EMAIL'), 'manager@d-fence.local'),
+    password: first(process.env.DFENCE_SEED_MANAGER_PASSWORD, config.get('DFENCE_SEED_MANAGER_PASSWORD'), 'dfence2026'),
+  };
+}
+
 
 interface Outcome {
   screen: string;
@@ -247,8 +269,7 @@ async function main(): Promise<void> {
   });
 
   // --- Signing in, as a real person would ------------------------------------------------------
-  const email = process.env.DFENCE_SEED_MANAGER_EMAIL ?? 'manager@d-fence.local';
-  const password = process.env.DFENCE_SEED_MANAGER_PASSWORD ?? 'dfence2026';
+  const { email, password } = seedManager();
 
   const signedIn = await step('SignIn', '11.2.3, 2.1.6', 'a manager can sign in through the form', async () => {
     const dom = await boot('/signin');

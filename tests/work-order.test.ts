@@ -225,7 +225,13 @@ describe('Lifecycle guards — §8.3', () => {
       expect.unreachable('a completion without a photograph must be refused');
     } catch (error) {
       expect(error).toBeInstanceOf(TransitionRefused);
-      expect((error as TransitionRefused).reason).toContain('8.3.6');
+      // 8.3.16 asks the refusal to state why — to the crew member, not to the auditor. This used
+      // to assert the string '8.3.6', which passed while the person completing the job was shown
+      // "the conditions of 8.3.6, 8.3.7 are not met". The assertion was measuring traceability and
+      // calling it a message, so a requirement about explaining yourself was met by not doing it.
+      const reason = (error as TransitionRefused).reason;
+      expect(reason).toContain('photograph');
+      expect(reason).not.toMatch(/\d+\.\d+\.\d+/);
     }
   });
 

@@ -24,7 +24,12 @@
  */
 import { RouteHandler, Request, Response } from './RouteHandler';
 import { AccessControlService } from '../../control/AccessControlService';
-import { DispatchController, DuplicateWorkOrder } from '../../control/DispatchController';
+import {
+  DispatchController,
+  DuplicateWorkOrder,
+  WorkOrderNotFound,
+  WorkOrderRejected,
+} from '../../control/DispatchController';
 import { TransitionRefused, WorkOrderLifecycleController } from '../../control/WorkOrderLifecycleController';
 import { StaffAccountController } from '../../control/StaffAccountController';
 import { TaskType, WorkOrderStatus } from '../../entity/enums';
@@ -87,10 +92,21 @@ export class WorkOrderRoutes extends RouteHandler {
           // body — the same convention `LocationRoutes` uses for `/api/locations`.
           if (req.body !== undefined && req.body !== null && Object.keys(req.body as object).length > 0) {
             const body = (req.body ?? {}) as CreateBody;
+            // 8.1.3 — the cast below is a promise to the type system that the boundary has to keep.
+            // Without this check an unknown task type travelled all the way to Postgres and came
+            // back as a check-constraint violation, which the generic handler turned into a 500
+            // telling the caller to retry. The valid values are listed, because a rejection that
+            // does not say what would have been accepted makes the caller guess.
+            const taskType = Object.values(TaskType).find((t) => t === body.taskType);
+            if (taskType === undefined) {
+              throw new WorkOrderRejected(
+                `${String(body.taskType)} is not a task type (8.1.3) — one of: ${Object.values(TaskType).join(', ')}`,
+              );
+            }
             const order = await this.dispatch.createWorkOrder(
               {
                 clusterId: body.clusterId ?? '',
-                taskType: (body.taskType ?? '') as TaskType,
+                taskType,
                 scheduledDate: body.scheduledDate ?? singaporeDate(new Date()),
                 ...(body.instructions === undefined ? {} : { instructions: body.instructions }),
                 ...(body.sourceReportId === undefined ? {} : { sourceReportId: body.sourceReportId }),
@@ -145,7 +161,29 @@ export class WorkOrderRoutes extends RouteHandler {
 
         case '/api/ops/work-orders/:id/assign': {
           const crewId = ((req.body ?? {}) as { crewId?: string }).crewId ?? '';
-          const order = await this.dispatch.assign(id, crewId, principal);
+          // 8.2.1, 8.2.3 — the assignee must be someone who can actually hold the job.
+          //
+          // `DispatchController.assign` takes an `isActiveAccount` flag that defaults to TRUE, and
+          // this route was not passing it — so the deactivation rule was enforced nowhere on the
+          // HTTP path. Nor was the role checked at all: assigning to a Resident returned 200 and
+          // set `assigneeId`, after which the order was invisible to everyone. The Resident is
+          // refused /api/crew/work-orders, so nobody could ever accept it and it would not appear
+          // on the workload screen either. It simply stopped existing operationally.
+          //
+          // Checked against `assignableCrew` rather than by re-deriving the rule here: that is the
+          // same list the UI's dropdown is built from, so the API and the form cannot disagree
+          // about who is assignable — and it already means "CleaningCrew AND active".
+          //
+          // Refused here with its own message rather than by handing `false` down as
+          // `isActiveAccount`: that would report a Resident as "a deactivated account", which is
+          // both untrue and unhelpful to whoever has to work out what went wrong.
+          const assignable = await this.staff.assignableCrew(principal);
+          if (!assignable.some((member: Account) => member.id === crewId)) {
+            throw new WorkOrderRejected(
+              'the assignee must be an active member of the cleaning crew (8.2.1, 8.2.3)',
+            );
+          }
+          const order = await this.dispatch.assign(id, crewId, principal, true);
           res.json(WorkOrderRoutes.card(order));
           return;
         }
@@ -187,6 +225,16 @@ export class WorkOrderRoutes extends RouteHandler {
       if (error instanceof TransitionRefused) {
         // 8.3.16 — say which rule refused and what state the order is actually in.
         res.status(422).json({ error: error.reason, remedy: `the work order is ${error.from}` });
+        return;
+      }
+      if (error instanceof WorkOrderRejected) {
+        // 10.5.3 — the control layer has already phrased this for the manager who typed it.
+        res.status(400).json({ error: error.reason, remedy: 'correct the details and try again' });
+        return;
+      }
+      if (error instanceof WorkOrderNotFound) {
+        // Not 400: there is nothing to correct in a request that names something which is not there.
+        res.status(404).json({ error: error.what, remedy: 'check the identifier, or reload the list' });
         return;
       }
       this.fail(res, error instanceof Error ? error : new Error(String(error)));

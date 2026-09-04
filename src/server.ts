@@ -118,6 +118,14 @@ function bindAccountStores(connectionString: string): {
   };
 }
 
+/**
+ * The first configured value. `??` is wrong against ConfigSet.get, which returns '' for an
+ * absent key rather than undefined, so a fallback chain built on `??` never falls through.
+ */
+function firstConfigured(...values: Array<string | undefined>): string {
+  return values.find((v) => v !== undefined && v !== '') ?? '';
+}
+
 async function main(): Promise<void> {
   const config = ConfigLoader.load();
   const http = new HttpClient();
@@ -386,8 +394,14 @@ async function main(): Promise<void> {
    * operational roles at all — so the first manager is seeded here, from the environment, and the
    * fact is printed rather than hidden. A real deployment does this once, from a migration.
    */
-  const seedEmail = process.env.DFENCE_SEED_MANAGER_EMAIL ?? 'manager@d-fence.local';
-  const seedPassword = process.env.DFENCE_SEED_MANAGER_PASSWORD ?? 'dfence2026';
+  // Resolved through the same precedence as every other setting — environment first, then
+  // `src/.env`, then the development default. Reading `process.env` alone made this the one
+  // credential in the system that `src/.env` could not configure: the acceptance harnesses took the
+  // configured password while the server seeded the published default, so the two disagreed and the
+  // manager sign-in failed against a completely healthy application. Env still wins, which is what
+  // App Service needs.
+  const seedEmail = firstConfigured(process.env.DFENCE_SEED_MANAGER_EMAIL, config.get('DFENCE_SEED_MANAGER_EMAIL'), 'manager@d-fence.local');
+  const seedPassword = firstConfigured(process.env.DFENCE_SEED_MANAGER_PASSWORD, config.get('DFENCE_SEED_MANAGER_PASSWORD'), 'dfence2026');
   //
   // With a database the account survives the restart but the credential does not: `LocalAuthProvider`
   // is the development stand-in for Supabase Auth and holds its scrypt hashes in memory (10.3.1 —
@@ -502,7 +516,10 @@ async function main(): Promise<void> {
   // environment is a real one, and printing it would write it into whatever collects stdout — on
   // App Service that is a log stream any co-owner can tail, which turns a well-chosen credential
   // back into a published one. Setting DFENCE_SEED_MANAGER_PASSWORD is what makes it a secret.
-  const seedIsDefault = process.env.DFENCE_SEED_MANAGER_PASSWORD === undefined;
+  // Compared against the default itself rather than against "was an environment variable set":
+  // the password now also resolves from src/.env, and the question that matters is whether this
+  // credential is already published, not which mechanism supplied it.
+  const seedIsDefault = seedPassword === 'dfence2026';
   console.log(
     seedIsDefault
       ? `  sign in as ${seedEmail} / ${seedPassword} (development seed)`

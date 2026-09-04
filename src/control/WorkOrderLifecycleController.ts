@@ -16,7 +16,7 @@ import { WorkOrder } from '../entity/WorkOrder';
 import { CompletionEvidence } from '../entity/CompletionEvidence';
 import { TreatmentRecord } from '../entity/TreatmentRecord';
 import { AuditStore, Notifier, ReportLinkage, Rescorer, TreatmentRecordStore, WorkOrderStore } from '../ports/Stores';
-import { WorkOrderTransitionTable } from './WorkOrderTransitionTable';
+import { WorkOrderTransitionTable, explainUnmetGuard } from './WorkOrderTransitionTable';
 import { Principal } from './Principal';
 
 /** Raised when a transition is refused. 8.3.16 requires the reason to be stated. */
@@ -92,7 +92,10 @@ export class WorkOrderLifecycleController {
     }
     const evidence = await this.workOrders.latestEvidence(id);
     if (!rule.guard(workOrder, evidence)) {
-      throw new TransitionRefused(from, to, `the conditions of ${rule.requirement} are not met`);
+      // The requirement number stays in the traceability and in the tests; what reaches the person
+      // is a sentence describing what is missing. A crew member completing a job saw
+      // "the conditions of 8.3.6, 8.3.7 are not met", which tells them nothing they can act on.
+      throw new TransitionRefused(from, to, explainUnmetGuard(rule.guard));
     }
 
     workOrder.applyStatus(to);
