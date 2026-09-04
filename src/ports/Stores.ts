@@ -111,6 +111,14 @@ export interface WorkOrderStore {
   /** 8.4.1 — a crew member sees only what is assigned to them. */
   findForAssignee(assigneeId: Uuid): Promise<WorkOrder[]>;
   findAllOpen(): Promise<WorkOrder[]>;
+  /**
+   * 2.3.4, 8.2.x — every work order, terminal ones included, for the manager's list.
+   *
+   * Distinct from `findAllOpen` on purpose. A manager reviewing this week's work needs to see what
+   * was cancelled and what was verified; a list of only the open ones would answer "what is
+   * outstanding", which is a different question and hides the evidence of what was done.
+   */
+  findAll(): Promise<WorkOrder[]>;
   /** 7.3.4 — work orders verified at or after a cut-off, for the turnaround median. */
   findVerifiedSince(since: Date): Promise<WorkOrder[]>;
   /** 8.2.7 — every previous assignee is retained. */

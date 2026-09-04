@@ -260,6 +260,36 @@ export class DispatchController {
     );
   }
 
+  /**
+   * 2.3.4, 8.2.x — every work order, for a manager.
+   *
+   * Deliberately NOT `crewView` with a wider permission. `crewView` reads
+   * `findForAssignee(by.accountId)`, so a manager calling it sees the orders assigned to *them* —
+   * which for a manager is none. The two views answer different questions and read different
+   * store methods; collapsing them would render an empty work-order list that looked correct.
+   */
+  async managerView(
+    by: Principal,
+    filter: { status?: WorkOrderStatus; crewId?: Uuid } = {},
+  ): Promise<WorkOrder[]> {
+    await this.ac.authorise(by, 'workOrder:readAll', { kind: 'workOrder' });
+    const tierRank: Record<PriorityTier, number> = { High: 0, Medium: 1, Low: 2 };
+    return (await this.workOrders.findAll())
+      .filter((w) => filter.status === undefined || w.currentStatus() === filter.status)
+      .filter((w) => filter.crewId === undefined || w.assigneeId === filter.crewId)
+      .sort((a, b) =>
+        a.scheduledDate === b.scheduledDate
+          ? tierRank[a.priority] - tierRank[b.priority]
+          : a.scheduledDate.localeCompare(b.scheduledDate),
+      );
+  }
+
+  /** 2.3.4 — one work order, for a manager. Null rather than a throw: 404 is the caller's word. */
+  async managerDetail(id: Uuid, by: Principal): Promise<WorkOrder | null> {
+    await this.ac.authorise(by, 'workOrder:readAll', { kind: 'workOrder', id });
+    return this.workOrders.findById(id);
+  }
+
   /** 8.3.14 — for the dashboard's attention panel (7.5.2). */
   async overdue(now = new Date()): Promise<WorkOrder[]> {
     return (await this.workOrders.findAllOpen()).filter((w) => w.isOverdue(now));

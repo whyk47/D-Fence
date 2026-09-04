@@ -19,6 +19,10 @@ export class InMemoryWorkOrderStore implements WorkOrderStore {
   private readonly history = new Map<Uuid, Array<{ assigneeId: Uuid | null; at: Date }>>();
   private readonly evidence = new Map<Uuid, CompletionEvidence[]>();
 
+  async findAll(): Promise<WorkOrder[]> {
+    return [...this.orders.values()];
+  }
+
   async findById(id: Uuid): Promise<WorkOrder | null> {
     return this.orders.get(id) ?? null;
   }

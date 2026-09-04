@@ -25,6 +25,8 @@ import { ExpressApp } from './boundary/http/ExpressApp';
 import { DashboardRoutes } from './boundary/http/DashboardRoutes';
 import { ReportRoutes } from './boundary/http/ReportRoutes';
 import { ModerationRoutes } from './boundary/http/ModerationRoutes';
+import { WorkOrderRoutes } from './boundary/http/WorkOrderRoutes';
+import { CrewRoutes } from './boundary/http/CrewRoutes';
 import { AuthRoutes } from './boundary/http/AuthRoutes';
 import { AdminRoutes } from './boundary/http/AdminRoutes';
 import { LocationRoutes } from './boundary/http/LocationRoutes';
@@ -367,6 +369,10 @@ async function main(): Promise<void> {
   app.mount(new LocationRoutes(ac, locations));
   app.mount(new AlertRoutes(ac, notifications, alertPreferences));
   app.mount(new MapRoutes(ac, mapView));
+  // §8's two halves, finally reachable over HTTP. Both were declared skeletons that threw, so the
+  // dispatch, work-order and crew screens had controllers behind them and no door to reach them by.
+  app.mount(new WorkOrderRoutes(ac, dispatch, lifecycle, staff));
+  app.mount(new CrewRoutes(ac, dispatch, lifecycle));
   // 10.4.3, 10.4.4 — deletion, and the attribution every government source obliges us to show.
   app.mount(
     new PrivacyRoutes(

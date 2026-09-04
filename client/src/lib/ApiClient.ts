@@ -17,6 +17,15 @@ export interface ApiFailure {
   remedy: string;
   /** 10.6.4 — quoted to the user so a support request can be matched to a log line. */
   correlationId: string | null;
+  /**
+   * The whole response body.
+   *
+   * Kept because some refusals carry data the screen must act on rather than merely display —
+   * 8.1.12 returns the work order that blocked a duplicate, so the manager can be offered a link
+   * to it instead of being told to go and find it. Discarding the body would make that refusal
+   * strictly less useful than the server intended it to be.
+   */
+  body: Record<string, unknown>;
 }
 
 export class ApiError extends Error {
@@ -69,6 +78,7 @@ export class ApiClient {
         error: 'could not reach D-Fence',
         remedy: 'check your connection and try again',
         correlationId: null,
+        body: {},
       });
     }
 
@@ -76,12 +86,13 @@ export class ApiClient {
       this.onForbidden();
     }
     if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as Partial<ApiFailure>;
+      const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
       throw new ApiError({
         status: response.status,
-        error: body.error ?? 'the request could not be completed',
-        remedy: body.remedy ?? 'try again shortly',
-        correlationId: body.correlationId ?? null,
+        error: (body.error as string | undefined) ?? 'the request could not be completed',
+        remedy: (body.remedy as string | undefined) ?? 'try again shortly',
+        correlationId: (body.correlationId as string | undefined) ?? null,
+        body,
       });
     }
     return (await response.json()) as T;
