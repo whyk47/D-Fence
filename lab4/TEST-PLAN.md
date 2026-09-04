@@ -18,7 +18,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 |---|---|
 | §3.2.1 Equivalence-class and boundary-value cases for **1 key control class** | **Done.** `PriorityScoringEngine`, 27 cases — `tests/priority-scoring.test.ts` |
 | §3.2.1 (extension) EC/BV cases for the feed parser and driver bindings | **Done 2026-09-03.** `ClusterFeedParser` and `NormalisationFactory`, 32 cases — `tests/cluster-feed.test.ts`, designed in §2.5 |
-| §3.2 (extension) Ingestion template + full scoring cycle, no network, no database | **Done 2026-09-03.** 15 cases — `tests/ingestion.test.ts`, designed in §2.6 |
+| §3.2 (extension) Ingestion template + full scoring cycle, no network, no database | **Done 2026-09-03.** 20 cases — `tests/ingestion.test.ts`, designed in §2.6. Five added 2026-09-04 for 1.1.18's manual trigger |
 | §3.2 (extension) The rainfall path — parsing, station assignment, accumulation, staleness | **Done 2026-09-03.** 18 cases — `tests/rainfall.test.ts`, designed in §2.7 |
 | §3.2 (extension) The work-order lifecycle driven end to end | **Done 2026-09-03.** 27 cases — `tests/work-order.test.ts`, designed in §2.8 |
 | §3.2 (extension) Community reporting, its boundaries and its join to §8 | **Done 2026-09-03.** 42 cases — `tests/report.test.ts`, designed in §2.9 |
@@ -35,10 +35,13 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | US-6.1 (§6.1.6, §6.1.7) Linking a Telegram chat, and real delivery | **Done 2026-09-04.** 10 cases — `tests/telegram-link.test.ts`, designed in §2.20 |
 | Regression (§8.3.14, §4.1.15) The Singapore calendar date, found by the clock | **Done 2026-09-04.** 7 cases — `tests/singapore-date.test.ts`, designed in §2.21 |
 | US-0.4 (§10.3, §10.4) Deletion, the personal-data inventory and attribution | **Partly done 2026-09-04.** 16 cases — `tests/privacy.test.ts`, designed in §2.22 |
+| US-10.x (§11) The twenty-seven screens, by audience | **Done 2026-09-04.** 64 cases — `tests/client-screens-{shared,resident,ops}.test.tsx`, designed in §2.23 |
+| §3.2 (extension) The four Postgres repositories, against live PostGIS | **Done 2026-09-04.** 11 cases — `tests/repository.test.ts`, designed in §2.24 |
+| §3.2.4 (extension) Acceptance runs over HTTP and through the served bundle | **Done 2026-09-04.** 49 + 9 checks — `src/tools/uat.ts`, `src/tools/client-uat.ts`, designed in §2.25 |
 | §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
-| Integration and end-to-end tests | **Partly done.** The §2.6, §2.8 and §2.9 suites are integration tests in all but name — several controllers, real stores, no fakes below the gateway. A browser-level end-to-end test still needs the client |
+| Integration and end-to-end tests | **Done 2026-09-04.** The §2.6, §2.8 and §2.9 suites are integration tests in all but name — several controllers, real stores, no fakes below the gateway. Above them, §2.25's two harnesses run against a live server and a live database: the API path end to end, and the served bundle driven in jsdom. What remains untested is rendering, which needs a real browser and a human — see §5 |
 
 **Why these two subjects.** `PriorityScoringEngine` is the computational core — the class the
 module's "data processing" criterion is judged on — and requirement 4.1.8 states its thresholds
@@ -259,6 +262,32 @@ grouped the newest cycle by `computedAt` equality; two cycles that run inside th
 share a timestamp, so it returned both and the dashboard would have shown every cluster twice. The
 store now keeps scores **by cycle**. The note matters beyond the fake: the Postgres implementation
 must key on a cycle id for the same reason, not on `MAX(computed_at)`.
+
+#### 2.6.1 The manual ingestion trigger (added 2026-09-04)
+
+1.1.18 was traced by US-1.6 and implemented by nothing: there was no endpoint, and the Data Sources
+screen had no controls. `IngestionController` had been a `not implemented` skeleton since Lab 3.
+
+The five cases use a fake job rather than a real one, because what is under test is the
+controller's contract — who may run it, what trigger it records, that scoring follows, and that a
+second concurrent run is refused — none of which depend on any source's parsing.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| M1 | Every source runs, recorded as **MANUAL**, and scoring follows **once** — not once per source | 1.1.18 | ✓ |
+| **M2** | A Resident is refused, and **no source is touched** — the refusal precedes the work | 2.3.4, 2.3.7 | ✓ |
+| M3 | One named source runs alone, so checking a recovering feed costs only that feed | 1.1.18 | ✓ |
+| **M4** | A failed rainfall run marks its drivers stale rather than scoring them as zero | 10.2.2, 4.1.12 | ✓ |
+| M5 | A second run started while the first is in flight is refused, not queued — and the guard clears | 1.1.18 | ✓ |
+
+**M2 is the case that would be easy to write backwards.** Authorising *after* doing the work still
+returns a refusal to the caller, and still spends the department's quota against three public APIs
+on behalf of someone who was not allowed to ask. The assertion is therefore on the jobs, not only
+on the exception.
+
+**M5's second half matters as much as its first.** The guard is released in a `finally`, so a job
+that throws past its own catch does not jam the trigger for the life of the process; the case runs
+a third time after the first completes to prove it.
 
 ### 2.8 Fourth subject - the work-order lifecycle (`tests/work-order.test.ts`)
 
@@ -976,6 +1005,138 @@ implemented here is the redirect, HSTS and the header policy, which is the half 
 
 ---
 
+### 2.23 Nineteenth subject - the twenty-seven screens (`tests/client-screens-*.test.tsx`)
+
+Added 2026-09-04 with E10. Sixty-four cases across three files, split by audience rather than by
+component, because the audiences are what the requirements are written about: `-shared` (17) covers
+the screens every visitor can reach, `-resident` (21) the resident's own, `-ops` (26) the manager's
+and the crew's.
+
+**What a screen test here is, and is not.** Every case renders a real screen component against a
+stub `Fetcher` and asserts on the rendered output. None of them assert on a snapshot of the markup:
+a snapshot test fails when a class name changes and passes when a refusal stops being shown, which
+is exactly backwards. What is asserted is the **rule the screen is obliged to obey** - and the
+recurring rule across §11 is that the interface *displays* and the server *decides*.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| S1-S5 | Sign-in: the token is kept in memory, the email is trimmed and the password is not, an invalid form never reaches the network | 11.1.10, 11.5.7 | OK |
+| **S3, L3** | A refusal shows the server's sentence and **nothing more** - Not Authorised names neither the screen nor the role that would have worked | 2.3.7 | OK |
+| **P1, P2** | Password reset confirms **conditionally**, and a server failure is made to look identical to a success | 2.3.7 | OK |
+| R1-R3 | Registration states the password rules before enforcing them; success does not sign the user in | 2.1.4, 11.5.1 | OK |
+| M1-M5 | Saved locations: inside a cluster is distinguished from near one, exposure always carries its timestamp, removal is confirmed and reports what it took with it | 3.1.14, 10.5.7, 11.4.6 | OK |
+| A1-A3 | Geocoding: the resident chooses among candidates, no match and an unwell geocoder are different states with different remedies | 3.1.4, 3.1.5, 3.1.17 | OK |
+| **R1, R3, R6** | Boundary values in the interface: the counter uses the **server's** constant, 500 characters is accepted, the fourth photograph is refused and the third is not | 5.1.4, 5.1.5 | OK |
+| D1-D4 | Photographs are withheld until triage; a corroboration count is re-read from the server, never incremented locally | 5.2.x, 5.1.13 | OK |
+| O1-O4 | An uncountable figure renders as an em dash and never as zero; a degraded row **names** its excluded drivers | 7.1.x, 7.2.8, 7.2.9 | OK |
+| Q1-Q3, W1-W5 | Moderation and dispatch: filters are query parameters so the server filters, the dispatch list proposes and creates nothing, a duplicate refusal offers the order that blocked it | 5.3.x, 8.1.8, 8.1.12 | OK |
+| S1-S5 (ops) | Staff and sources: deactivation warns then reports, a warning and a stale marker are distinct sentences, the manual run reports each source and a 409 states cause and remedy | 2.2.5, 1.4.3, 1.4.4, 1.1.18 | OK |
+| C1-C6 | The crew screens: the server filters and orders, the action offered follows the status, the task performed is not editable | 8.3.x, 8.4.1, 8.4.2 | OK |
+| **X1-X3** | The route table itself: the literal path is registered before the `:id` pattern, every route has a component and every component a route | 11.3.1 | OK |
+| M6, S5 (shared) | Tier and error state survive without colour - a label and a sentence, not a hue | 9.1.11, 11.7.5 | OK |
+
+**X1 is a test about Express, not about React,** and it is here because the defect it guards against
+is invisible in both. Route matching is registration-order dependent, so `/api/ops/work-orders/:id`
+registered before `/api/ops/work-orders/crew-workload` silently swallows the literal path and
+answers it as a work order whose id is "crew-workload". Nothing type-checks it and no screen test
+would have caught it.
+
+**What these tests cannot do, stated so it is not assumed away.** jsdom renders no pixels. Contrast
+ratios, tap-target sizes and legibility in daylight (11.7.1, 11.7.4, 11.7.7) are untested here and
+untestable here; §5 records them as needing a human with a phone.
+
+---
+
+### 2.24 Twentieth subject - the four Postgres repositories (`tests/repository.test.ts`)
+
+Added 2026-09-04, closing the row that stood at the top of §5 from the first version of this plan:
+*"Repository spatial queries - blocked on a live PostGIS instance"*. There is now a live PostGIS
+instance, so the block is gone.
+
+**These are the only tests in the suite that are not offline.** The file skips itself entirely when
+`DATABASE_URL` is unset, so `npm test` still runs with no network by default; when the variable is
+present the cases run against the real database, create their own account and their own cluster in
+an empty patch of the Straits, and delete both in `afterAll`. Verified by querying for leftovers
+after a run: none.
+
+**Why an in-memory double cannot stand in for these four.** Each case below is a property of
+Postgres or of the mapping to it, not of the `Stores` interface - the in-memory fake passes all of
+them by construction and would go on passing if the SQL were wrong.
+
+| # | Behaviour under test | Requirement | Result |
+|---|---|---|---|
+| **R1** | Latitude and longitude survive the round trip the right way round | 5.1.1 | OK |
+| **R2** | The **private** `status` is rehydrated through `applyStatus`, not left at its default | 5.2.1 | OK |
+| **R3** | `ST_DWithin` on `geography`: 50 m is inside, 51 m is outside - the boundary case | 5.1.11, BV | OK |
+| R4 | A settled report at the same spot is not a duplicate - "an existing **open** report" | 5.1.11 | OK |
+| R5 | A different report type at the same spot is not a duplicate | 5.1.11 | OK |
+| R6 | A report older than the window is not a duplicate | 5.1.11, BV | OK |
+| **R7** | Containment uses `ST_Covers`, so a point **on** the boundary is inside it | 5.1.7, 3.1.8 | OK |
+| **R8** | A scheduled date is a calendar date and does not shift a day in Singapore | 8.1.3 | OK |
+| R9 | An untreated cluster is 90 days since treatment; a treated one is measured | 4.1.15, 4.1.16 | OK |
+| R10 | The lock-out state survives a restart as three values that must agree | 2.1.10 | OK |
+| R11 | Touching a session **updates** it rather than inserting a second row | 2.1.9 | OK |
+
+**R1 is the cheapest bug in this system to write and the most expensive to notice.** GeoJSON orders
+coordinates `[longitude, latitude]`; the entity is `(latitude, longitude)`. A swap produces a
+perfectly plausible coordinate, passes every unit test, and puts a Woodlands report in the Java Sea.
+
+**R3 is the case the requirement actually turns on.** `geography` measures metres on the spheroid;
+`geometry` measures **degrees**, and the same query written against `geometry` would have matched
+most of Southeast Asia while looking correct. `ST_DWithin` is inclusive, which is what 5.1.11's
+"within 50 m" means, and REQUIREMENTS.md §13 records that reading.
+
+**R8 is the trap that survives every test written in UTC.** `pg` returns a `date` column as a
+JavaScript `Date` at *local* midnight. `toISOString()` on it is 16:00 the previous day, so the
+naive conversion reports work scheduled for the third as the fourth's - or the fourth's as the
+third's, depending on which side of midnight the reader is on.
+
+**Nothing failed on the first run except one case that was wrong about itself:** R6 initially
+searched a 10 m radius around a point five metres from the fixtures the earlier cases had already
+written, so it matched them and proved nothing about the time window. Moved half a kilometre away.
+Worth recording because it is the failure mode of every test that shares a live database with its
+own siblings.
+
+---
+
+### 2.25 Twenty-first subject - the two acceptance harnesses (`src/tools/uat.ts`, `client-uat.ts`)
+
+Not unit tests, and listed separately for that reason: these run against a **running server and a
+live database**, over HTTP, in the order a person would. They are how §3.2.4's "execute the tests
+and record the results" is answered for the paths no unit test reaches - the ones where the defect
+is in the wiring rather than in any one class.
+
+**`uat.ts` - 49 checks, executed 2026-09-04: 48 passed, 0 failed, 1 skipped.** Organised as beats:
+A (the system is up and credits its sources publicly), B (a resident registers, verifies, saves a
+location, submits a report), C (a manager reads the dashboard, the priority table, source health,
+the analytics, the CSV export, and moderates), D (dispatch, assignment, the crew's day, verification
+and the treatment record). Each check states its requirement, and a failure is a sentence rather
+than a stack trace.
+
+The one skip is documented rather than hidden: **8.3.14/7.5.2's overdue work order is unreachable
+over HTTP**, because 8.1.4 refuses a scheduled date in the past. The rule is covered by unit tests
+(§2.8); the point is that the acceptance path cannot construct the state without breaking another
+requirement, and saying so is more honest than deleting the check.
+
+**`client-uat.ts` - 9 checks, executed 2026-09-04: 9 passed, 0 failed.** Loads the **served bundle**
+- the same `/app.js` a browser gets - into jsdom, points it at the running server and clicks
+through: the landing screen credits its sources, a signed-out visitor is offered sign in rather than
+staff navigation, a protected URL redirects and remembers where it was going, an unknown URL renders
+Not Found, the manager signs in through the form and lands on a dashboard of real numbers, every
+navigation item leads to a screen rather than a refusal, and the manager triggers an ingestion run
+by clicking the button (1.1.18) against the live NEA and rainfall feeds.
+
+**Both harnesses have themselves been defective, and that is the finding worth recording.** The
+first version of `uat.ts` called `response.json()` on the `text/csv` export, which throws - so a
+broken download would have been reported as a passing check against an empty object. The second
+defect was worse: both tools parsed only `--base <url>` and silently ignored `--base=<url>`, so a
+run aimed at one port went to whatever was listening on the default port. On 2026-09-04 that
+produced fourteen plausible passes and five 404s against a **stale server from earlier in the
+session**, and the first instinct was to look for a regression in code that was fine. A harness that
+fails loudly is safe; one that passes against the wrong target is not.
+
+---
+
 ## 3. Basis-path design
 
 ### 3.1 `WorkOrderLifecycleController.isTransitionPermitted` (8.3.2, 8.3.3)
@@ -1075,12 +1236,14 @@ Four rules were applied, and each one removed cases:
 
 | Area | Blocked on |
 |---|---|
-| Repository spatial queries (1.2.5, 3.1.8, 5.1.7) | A live PostGIS instance. The **rule** is now tested through the `ClusterLocator` port (§2.9, L1–L3); what remains untested is the PostGIS implementation of it |
+| ~~Repository spatial queries (1.2.5, 3.1.8, 5.1.7)~~ | **Done 2026-09-04** — §2.24. The block was a live PostGIS instance; there is one, and the eleven cases run against it |
 | ~~`AbstractIngestionJob.run` template~~ | **Done 2026-09-03** — §2.6, cases I1–I5 |
 | ~~`AccessControlService.authorise` — every §2.3 rule~~ | **Done** — the ownership-scoped check is covered in §2.9 (V4) and the role rules in §2.10 (T2) and §2.8 |
 | ~~`WorkOrderLifecycleController.transition` end to end~~ | **Done 2026-09-03** — §2.8 |
 | ~~Dialog map ↔ router agreement (11.3.2)~~ | **Done 2026-09-03** — §2.14, case D2. The diagram is parsed and the route table checked against it in both directions |
-| One end-to-end path (Playwright) | A running stack |
+| One end-to-end path (Playwright) | **Largely answered 2026-09-04** — §2.25. `uat.ts` walks the whole API path over HTTP and `client-uat.ts` drives the served bundle in jsdom. What a real browser would still add is rendering: layout, contrast and tap targets, which is the same gap as the row below |
+| **Contrast, tap-target size, sunlight legibility (11.7.1, 11.7.4, 11.7.7)** | A human with a phone, outdoors. jsdom renders no pixels, and no test in this suite can substitute — recorded here rather than left implied by the screen tests' green results |
+| The manual run's `1.1.12` ingestion-failure **event** | Implementation. `DomainEventPublisher` is still a `not implemented` skeleton; the failure is recorded as a FAILED run and surfaces on the health and attention panels, but no event is raised, so there is nothing to test yet |
 | `NEAFeedGateway.fetchLastUpdatedAt` / `fetchClusters` against a fixture | Implementation. The two-hop download (poll-download → signed S3 URL) is the part worth a test, since the signed URL expires |
 
 **The last row is the one to protect.** 11.3.2 says no transition exists that is not in the dialog

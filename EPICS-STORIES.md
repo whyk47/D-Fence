@@ -482,6 +482,31 @@ on Postgres, two separate processes were run against the live database and real 
 returned `SUCCESS, 15 features`, the second `UNCHANGED, 0 features` — the 1.1.20 publisher stamp
 survived — and both runs appear in one accumulated history rather than two fresh ones.*
 
+*1.1.18 delivered 2026-09-04, commit `cb9076c`. The 2026-09-04 audit found the manual trigger was
+**not** in fact "covered elsewhere" as the note above claimed: there was no endpoint and the Data
+Sources screen had no controls at all. `IngestionController` is now implemented (it was a Lab-3
+skeleton), `POST /api/ops/sources/refresh` authorises as manager-only, runs the same
+`AbstractIngestionJob.run` path the scheduler runs with the MANUAL trigger, rescores through the
+same `scoreAndAlert` the scheduled cycle uses, and refuses a concurrent run with 409. The screen has
+the button. Proven by five controller tests, two screen tests, an API UAT check and a browser UAT
+check that clicks the button against the live NEA and rainfall feeds.
+
+**The story is still not closed, and the audit that found the trigger missing found two more gaps in
+the same note.** Checking the other clauses rather than trusting the earlier claim that they were
+"covered elsewhere":
+
+- **1.1.11 — three retries "at five-minute intervals".** Three attempts exist in `HttpClient`, but
+  the spacing is exponential backoff from 500 ms, not five minutes. The deviation is defensible — a
+  request thread held for fifteen minutes is worse than a failed cycle that the five-minute rainfall
+  schedule will retry anyway — but it is a deviation, and either the code or the requirement should
+  be changed deliberately rather than left to differ quietly.
+- **1.1.12 — raise an ingestion-failure event when all retries fail.** No event is raised.
+  `DomainEventPublisher` is still a `not implemented` skeleton. The failure *is* recorded as a FAILED
+  `IngestionRun` and surfaces on the health panel (1.4.3) and the attention panel (7.5.3), which is
+  what the requirement is for; but "raise an event" is not what happens, and §1.1.12 traces to a
+  class that throws.
+- 1.1.13, 10.2.1–10.2.4 and 1.1.18 are met and evidenced.*
+
 ---
 
 # E2 — Accounts, roles and access control
