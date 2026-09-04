@@ -183,31 +183,43 @@ describe('10.1.2 — 95% of read requests within one second', () => {
   });
 });
 
-describe('10.1.1, 10.1.5 — what is NOT measured here, and why', () => {
-  it('P5 — the unmeasured obligations are recorded rather than assumed', () => {
-    const unmeasured = [
+describe('10.1.1, 10.1.4, 10.1.5 — where each is measured, and what remains unmeasured', () => {
+  it('P5 — every §10.1 obligation names where its number comes from, or why it has none', () => {
+    // Updated 2026-09-04. All three items on this list were "not measured here" and two of the
+    // three blocks are gone: the screens exist and are served, and there is a live database to
+    // put under load. What is left is genuinely not measurable from a process — and saying which
+    // is which is the whole purpose of this case.
+    const obligations = [
       {
         requirement: '10.1.1',
         claim: 'dashboard first render within 3 s on 10 Mbit/s',
-        needs: 'the React screens (E10, gated on mockups B3-B12) and a throttled browser profile',
+        measuredBy: 'tests/performance-client.test.tsx P9 (mount) and P10 (transfer at 10 Mbit/s, ' +
+          'from the real bundle size)',
+        stillUnmeasured: 'layout, paint and compositing on a real device',
       },
       {
         requirement: '10.1.4',
         claim: 'map renders 300 polygons within 3 s',
-        needs: 'the map screen in a browser; the server half is measured in P4',
+        measuredBy: 'P4 here (server assembly) and performance-client P7 (300 clusters mounted)',
+        stillUnmeasured: 'the drawing itself — no mapping SDK is bundled, by the stated decision ' +
+          'in ResidentMapScreen',
       },
       {
         requirement: '10.1.5',
         claim: '50 concurrent authenticated users hold the 10.1.2 latency',
-        needs: 'a deployed instance and a load generator; in-memory stores on one process would ' +
-          'measure the machine rather than the system',
+        measuredBy: 'src/tools/load-check.ts, against a running server and the live database',
+        // Measured 2026-09-04 and NOT HELD: p95 2125 ms against a 1000 ms budget, localised to
+        // /api/ops/dashboard (p50 1475 ms under load, 179 ms unloaded). Recorded here so the
+        // suite cannot read as though §10.1 were fully satisfied.
+        stillUnmeasured: 'a deployed instance measured across a real network rather than localhost',
       },
     ];
-    // The point of this case is that the list exists and is honest. A suite that silently omitted
-    // these would let §10.1 read as fully verified, which is the thing US-0.5 was written against.
-    expect(unmeasured).toHaveLength(3);
-    for (const item of unmeasured) {
-      expect(item.needs).not.toBe('');
+    expect(obligations).toHaveLength(3);
+    for (const item of obligations) {
+      // Both fields, always: an obligation with no measurement is a gap, and one with no stated
+      // residue is a claim that a partial number closed it.
+      expect(item.measuredBy).not.toBe('');
+      expect(item.stillUnmeasured).not.toBe('');
     }
   });
 });

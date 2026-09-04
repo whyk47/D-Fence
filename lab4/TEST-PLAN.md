@@ -27,7 +27,7 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | §3.2 (extension) Resident alerts: triggers, the daily cap, delivery and retries | **Done 2026-09-03.** 29 cases — `tests/alert.test.ts`, designed in §2.12 |
 | §3.2 (extension) Map layers as an access surface, and the trend classification | **Done 2026-09-03.** 24 cases — `tests/map-trend.test.ts`, designed in §2.13 |
 | §3.2 (extension) Dialog-map conformance, the route guard, navigation and field rules | **Done 2026-09-03.** 31 cases — `tests/client-navigation.test.ts`, designed in §2.14 |
-| US-0.5 (§10.1) Performance obligations measured rather than asserted | **Done 2026-09-03.** 6 cases — `tests/performance.test.ts`, designed in §2.15 |
+| US-0.5 (§10.1) Performance obligations measured rather than asserted | **Done 2026-09-04.** 6 cases — `tests/performance.test.ts`, designed in §2.15; 4 more in `tests/performance-client.test.tsx` and a load run in `src/tools/load-check.ts`, designed in §2.26. **10.1.5 does not hold** — see §2.26 |
 | US-1.4 (§1.3) The 24-hour forecast, region mapping and the heavy-rain flag | **Done 2026-09-03.** 26 cases — `tests/forecast.test.ts`, designed in §2.16 |
 | US-1.5 (§1.4) Source health: the three-interval rule and the staleness marker | **Done 2026-09-03.** 17 cases — `tests/source-health.test.ts`, designed in §2.17 |
 | US-2.5 (§2.4) The audit trail across the operational write paths | **Done 2026-09-03.** 10 cases — `tests/audit.test.ts`, designed in §2.18 |
@@ -1137,6 +1137,82 @@ fails loudly is safe; one that passes against the wrong target is not.
 
 ---
 
+### 2.26 Twenty-second subject - the two §10.1 numbers the client unblocked, and the one that failed
+
+Added 2026-09-04. §2.15 recorded 10.1.1, 10.1.4 and 10.1.5 as **not measured here**, each with what
+it would need. Two of those three blocks are now gone - the screens exist and are served, and there
+is a live database to put under load - so this section is what happened when they were measured.
+
+#### Measured in `tests/performance-client.test.tsx` (jsdom, in the suite)
+
+| # | Measurement | Requirement | Result |
+|---|---|---|---|
+| P7 | 300 clusters mounted and readable: **78.5 ms** (budget 3 s) | 10.1.4 | OK |
+| P8 | The tier arrives as a label on every one of 300 rows, so nothing is derived per row | 9.1.11 | OK |
+| P9 | Dashboard mounted with its figures: **12.3 ms** | 10.1.1 | OK |
+| P10 | The served bundle is **215 KB**, transferring in **0.18 s** at 10 Mbit/s | 10.1.1 | OK |
+
+**What these numbers exclude, stated so they are not over-read.** jsdom builds a DOM and runs React;
+it performs no layout and paints nothing. P7 and P9 bound *mount and reconciliation* - the part that
+grows with the data and the part a careless render turns quadratic - and they are asserted against a
+**third** of the requirement's budget precisely because the two thirds they cannot see belong to the
+browser. P10 is the one part of 10.1.1 that can be computed rather than sampled, and it is also the
+part most likely to rot: one charting library added without thought takes the bundle past a
+megabyte, and P10 says so.
+
+P10 also recorded a fact worth knowing: **nothing compresses that response.** No `compression`
+middleware is mounted, so 215 KB is what a real client transfers, not a pessimistic figure. The
+budget is met without it; it is free headroom whenever it is wanted.
+
+#### Measured by `src/tools/load-check.ts` (a running server, the live database)
+
+Fifty *sessions*, not fifty sockets - each virtual user signs in for real and carries its own bearer
+token, because session resolution runs on every authenticated request (2.1.9 extends the session on
+use) and a load test sharing one token would skip the part most likely to be the bottleneck. Sign-in
+is performed serially: it is deliberately expensive by 10.3.1, and fifty concurrent scrypt hashes
+would measure the KDF rather than the read path 10.1.2 is about.
+
+**Executed 2026-09-04, 50 users x 10 reads = 500 requests, 0 non-200:**
+
+| Measure | Result |
+|---|---|
+| median | 495 ms |
+| **p95** | **2125 ms** — against 10.1.2's 1000 ms budget |
+| worst | 2151 ms |
+| throughput | 63 requests/s |
+
+**10.1.5 DOES NOT HOLD, and the per-path breakdown says exactly where.**
+
+| Path | p50 under load | p95 under load |
+|---|---|---|
+| **`/api/ops/dashboard`** | **1475 ms** | **2139 ms** |
+| `/api/ops/priority` | 480 ms | 665 ms |
+| `/api/map/layers` | 578 ms | 605 ms |
+| `/api/ops/sources` | 265 ms | 381 ms |
+| `/api/ops/work-orders` | 231 ms | 243 ms |
+| `/api/ops/moderation` | 200 ms | 207 ms |
+
+Every endpoint except the dashboard is comfortably inside budget. A control run at **one** user put
+the dashboard at 179 ms and the aggregate p95 at 181 ms, so this is **contention, not an endpoint
+that is slow on its own** - roughly an eightfold degradation at fifty-way concurrency.
+
+**The diagnosis, from reading the code the measurement pointed at.** `GET /api/ops/dashboard` calls
+`buildOverview` and then `buildAttentionPanel`, and both are strictly serial chains of round trips
+to Supabase. Between them, **`reportSourceHealth()` is computed twice and `findAllOpen()` is queried
+twice** in the course of answering one request; add `weekOverWeek`, the score read, the cluster read
+and the report count, and one dashboard response is on the order of fifteen sequential round trips
+over an internet link. At one user that is 179 ms and invisible. At fifty, against a ten-connection
+pool, the requests queue behind each other and it is 1475 ms.
+
+**Not fixed here, deliberately.** The remedy is contained and obvious - stop computing the same two
+things twice per request, and run the independent reads concurrently - but it is a change to a
+control class's behaviour, and this section's job was to measure. It is recorded as a batched
+decision rather than made silently, and the duplication is worth noting as more than a performance
+defect: two halves of one response computing source health separately could in principle disagree
+with each other.
+
+---
+
 ## 3. Basis-path design
 
 ### 3.1 `WorkOrderLifecycleController.isTransitionPermitted` (8.3.2, 8.3.3)
@@ -1243,6 +1319,7 @@ Four rules were applied, and each one removed cases:
 | ~~Dialog map ↔ router agreement (11.3.2)~~ | **Done 2026-09-03** — §2.14, case D2. The diagram is parsed and the route table checked against it in both directions |
 | One end-to-end path (Playwright) | **Largely answered 2026-09-04** — §2.25. `uat.ts` walks the whole API path over HTTP and `client-uat.ts` drives the served bundle in jsdom. What a real browser would still add is rendering: layout, contrast and tap targets, which is the same gap as the row below |
 | **Contrast, tap-target size, sunlight legibility (11.7.1, 11.7.4, 11.7.7)** | A human with a phone, outdoors. jsdom renders no pixels, and no test in this suite can substitute — recorded here rather than left implied by the screen tests' green results |
+| **10.1.5 does not hold: p95 2125 ms against a 1000 ms budget** | Nothing — it is measured (§2.26). What it needs is a *fix*: `/api/ops/dashboard` computes `reportSourceHealth()` and `findAllOpen()` twice per request across its two halves, in fifteen-odd serial round trips. Awaiting a decision rather than blocked |
 | The manual run's `1.1.12` ingestion-failure **event** | Implementation. `DomainEventPublisher` is still a `not implemented` skeleton; the failure is recorded as a FAILED run and surfaces on the health and attention panels, but no event is raised, so there is nothing to test yet |
 | `NEAFeedGateway.fetchLastUpdatedAt` / `fetchClusters` against a fixture | Implementation. The two-hop download (poll-download → signed S3 URL) is the part worth a test, since the signed URL expires |
 

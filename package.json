@@ -16,7 +16,8 @@
     "build:client": "node client/build.mjs",
     "watch:client": "node client/build.mjs --watch",
     "uat": "tsx src/tools/uat.ts",
-    "uat:client": "tsx src/tools/client-uat.ts"
+    "uat:client": "tsx src/tools/client-uat.ts",
+    "load:check": "tsx src/tools/load-check.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
