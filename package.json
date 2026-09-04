@@ -2,7 +2,7 @@
   "name": "d-fence",
   "version": "0.1.0",
   "private": true,
-  "description": "D-Fence â€” dengue sanitisation prioritiser (SC2006/CZ2006)",
+  "description": "D-Fence \u00e2\u20ac\u201d dengue sanitisation prioritiser (SC2006/CZ2006)",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "ingest": "tsx src/tools/ingest-once.ts",
-    "serve": "tsx src/server.ts"
+    "serve": "tsx src/server.ts",
+    "uat": "tsx src/tools/uat.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

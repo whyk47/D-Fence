@@ -15,8 +15,14 @@ import { link } from '../../components/Link';
 import { homeFor } from '../../app/RouteGuard';
 import { ScreenProps } from '../ScreenProps';
 
+/**
+ * The server's shape, matched exactly. An earlier version of this file invented `sources` with a
+ * `name` and a `publisher`; the endpoint returns `attributions` with `source` and `text`, so the
+ * credits list rendered empty — a 10.4.5 obligation silently unmet on the one screen that carries
+ * it. Found by the UAT harness, which is the only thing that talks to the real endpoint.
+ */
 interface Attribution {
-  sources: Array<{ name: string; publisher: string; licence: string; url: string }>;
+  attributions: Array<{ source: string; text: string; licence: string; url: string }>;
 }
 
 export function LandingScreen(props: ScreenProps): JSX.Element {
@@ -54,9 +60,11 @@ export function LandingScreen(props: ScreenProps): JSX.Element {
         <h2>Data sources</h2>
         <StateView state={state} onRetry={retry}>
           <ul>
-            {(value?.sources ?? []).map((source) => (
-              <li key={source.name}>
-                <a href={source.url}>{source.name}</a> — {source.publisher}, {source.licence}
+            {(value?.attributions ?? []).map((attribution) => (
+              <li key={attribution.source}>
+                {/* The publisher's own wording, not a paraphrase — the licence obliges the text. */}
+                <a href={attribution.url}>{attribution.text}</a>
+                {attribution.licence === '' ? '' : ` — ${attribution.licence}`}
               </li>
             ))}
           </ul>
