@@ -497,7 +497,17 @@ async function main(): Promise<void> {
   }
 
   app.listen(Number(process.env.PORT ?? 3000));
-  console.log(`  sign in as ${seedEmail} / ${seedPassword} (development seed)`);
+  // The password is printed ONLY when it is the published development default, where printing it
+  // costs nothing and saves a reader a trip to the source. A password supplied through the
+  // environment is a real one, and printing it would write it into whatever collects stdout — on
+  // App Service that is a log stream any co-owner can tail, which turns a well-chosen credential
+  // back into a published one. Setting DFENCE_SEED_MANAGER_PASSWORD is what makes it a secret.
+  const seedIsDefault = process.env.DFENCE_SEED_MANAGER_PASSWORD === undefined;
+  console.log(
+    seedIsDefault
+      ? `  sign in as ${seedEmail} / ${seedPassword} (development seed)`
+      : `  sign in as ${seedEmail} (password from DFENCE_SEED_MANAGER_PASSWORD, not printed)`,
+  );
 
   // Awaited *after* listening, so the log still reports the first cycle's outcome in order and a
   // failure is still visible — the point of deferring it was reachability, not silence.
