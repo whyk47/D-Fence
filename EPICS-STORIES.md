@@ -280,6 +280,22 @@ passing across 22 files** (was 452 across 21), `npx tsc --noEmit` strict-clean.*
 - Run the concurrency check and record the result.
 - Add the control-class unit-test coverage check to the pull-request checks.
 
+*Measured 2026-09-04, commit `0d5b2bc`. The two obligations that were blocked on the client existing
+are now measured: **10.1.1** — the dashboard mounts with its figures in 12.3 ms and the served bundle
+is 215 KB, transferring in 0.18 s at the stated 10 Mbit/s; **10.1.4** — 300 clusters mount and become
+readable in 78.5 ms. Both are asserted against a third of their budget, because jsdom performs no
+layout and paints nothing; the remainder belongs to a real device and is recorded as still needing
+one.*
+
+***10.1.5 was measured and does not hold.*** *Fifty real sessions, ten reads each, against the running
+server and the live database: **p95 2125 ms against 10.1.2's 1000 ms budget**, with no failed
+requests. It localises to `/api/ops/dashboard` — 1475 ms median under load against 179 ms at a single
+user, so it is contention rather than a slow endpoint. The cause is in `DashboardController`:
+`buildOverview` and `buildAttentionPanel` each compute `reportSourceHealth()` and query
+`findAllOpen()`, so one response does both twice across roughly fifteen serial round trips. The fix
+is contained and is **batched for Yen Kit** rather than made silently, because it changes a control
+class's behaviour. **This story stays open on that one number.***
+
 ---
 
 # E1 — Live data acquisition
