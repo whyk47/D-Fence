@@ -134,6 +134,16 @@ export interface TreatmentRecordStore {
   save(record: TreatmentRecord): Promise<TreatmentRecord>;
   latestForCluster(clusterId: Uuid): Promise<TreatmentRecord | null>;
   allForCluster(clusterId: Uuid): Promise<TreatmentRecord[]>;
+  /**
+   * 4.1.15, 4.1.16 — days since the most recent verified treatment, or 90 when there has never
+   * been one.
+   *
+   * On the port rather than on one implementation, because the 90-day default IS the requirement:
+   * an untreated cluster enters the driver saturated, and a store that answered 0 would make a
+   * cluster nobody has ever visited look freshly treated. Leaving it off the port let `server.ts`
+   * call it on the concrete in-memory class, which is what a swap to Postgres would have broken.
+   */
+  daysSinceLastTreatment(clusterId: Uuid, now: Date): Promise<number>;
 }
 
 /**

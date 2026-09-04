@@ -81,6 +81,34 @@ export class Account {
   }
 
   /** A successful authentication ends the run: "consecutive" means consecutive. */
+  /**
+   * The 2.1.10 counter as three values, for persistence only.
+   *
+   * The three are private because nothing in the application may set them directly — a counter a
+   * controller can write is a lock-out a controller can skip. Rehydration is the one legitimate
+   * exception, and it is expressed as a matched pair of methods on the entity rather than by
+   * making the fields public, so the exception has exactly two call sites and both are in a
+   * repository.
+   */
+  lockState(): { failedAttempts: number; firstFailureAt: Date | null; lockedUntil: Date | null } {
+    return {
+      failedAttempts: this.failedAttempts,
+      firstFailureAt: this.firstFailureAt,
+      lockedUntil: this.lockedUntil,
+    };
+  }
+
+  /** Called only when reading a stored account back. See `lockState`. */
+  restoreLockState(state: {
+    failedAttempts: number;
+    firstFailureAt: Date | null;
+    lockedUntil: Date | null;
+  }): void {
+    this.failedAttempts = state.failedAttempts;
+    this.firstFailureAt = state.firstFailureAt;
+    this.lockedUntil = state.lockedUntil;
+  }
+
   clearFailedAttempts(): void {
     this.failedAttempts = 0;
     this.firstFailureAt = null;

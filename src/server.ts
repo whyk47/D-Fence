@@ -43,6 +43,12 @@ import {
 } from './persistence/memory/InMemoryStores';
 import { InMemoryTreatmentRecordStore, InMemoryWorkOrderStore, RecordingNotifier } from './persistence/memory/InMemoryWorkOrderStores';
 import { InMemoryClusterLocator, InMemoryReportStore } from './persistence/memory/InMemoryReportStores';
+import { AccountStore, SessionStore } from './ports/Stores';
+import { Account } from './entity/Account';
+import { Uuid } from './entity/valueTypes';
+import { AccountRepository, SessionRepository } from './persistence/AccountRepository';
+import { ReportRepository } from './persistence/ReportRepository';
+import { TreatmentRecordRepository, WorkOrderRepository } from './persistence/WorkOrderRepository';
 import { ReportTransitionTable } from './control/ReportTransitionTable';
 import { ReportLifecycleController } from './control/ReportLifecycleController';
 import { ReportController } from './control/ReportController';
@@ -88,14 +94,38 @@ import { PriorityScoringEngine, DriverInputs } from './control/PriorityScoringEn
 import { ChangeClass, Driver, Role, SourceKind } from './entity/enums';
 import { renderOpsDashboard } from './boundary/http/OpsDashboardPage';
 
+/**
+ * One decision, made once: is there a database, and therefore which stores does this process run on?
+ *
+ * It lives in a function above `main` because the authentication controllers are built at the top of
+ * `main`, before the persistence block, and reading `DATABASE_URL` twice in two places is how the
+ * two halves of a process end up disagreeing about whether they are persistent.
+ */
+function bindAccountStores(connectionString: string): {
+  database: Database | null;
+  accounts: AccountStore;
+  sessions: SessionStore;
+} {
+  const database = connectionString === '' ? null : new Database(connectionString);
+  return {
+    database,
+    accounts: database === null ? new InMemoryAccountStore() : new AccountRepository(database),
+    sessions: database === null ? new InMemorySessionStore() : new SessionRepository(database),
+  };
+}
+
 async function main(): Promise<void> {
   const config = ConfigLoader.load();
   const http = new HttpClient();
 
   const auditStore = new InMemoryAuditStore();
   const ac0 = new AccessControlService(new AccessPolicy(), auditStore);
-  const accounts = new InMemoryAccountStore();
-  const sessions = new InMemorySessionStore();
+  // Bound below, once `database` is known — declared here because the authentication controllers
+  // are constructed before the persistence choice is made.
+  const accountsAndSessions = bindAccountStores(config.get('DATABASE_URL'));
+  const accounts = accountsAndSessions.accounts;
+  const sessions = accountsAndSessions.sessions;
+  const database = accountsAndSessions.database;
   // Supabase Auth is the decision; the project does not exist yet, so §2 runs on the local
   // provider (real salted scrypt hashes, no email). Swapping is one line — see AuthProvider.
   const authProvider = new LocalAuthProvider();
@@ -134,11 +164,10 @@ async function main(): Promise<void> {
    * show more than today. Without it, the in-memory stores keep the whole system runnable, which
    * is how every epic before this one was built and demonstrated.
    *
-   * The stores NOT yet migrated (reports, work orders, accounts, locations, alerts, forecasts) stay
-   * in memory in both modes. That is stated rather than hidden: a half-migrated system that looked
+   * The stores NOT yet migrated (accounts, sessions, locations, alerts, forecasts, audit) stay in
+   * memory in both modes. That is stated rather than hidden: a half-migrated system that looked
    * fully persistent would be a worse claim than an honestly mixed one.
    */
-  const database = config.get('DATABASE_URL') === '' ? null : new Database(config.get('DATABASE_URL'));
   const clusters = database === null ? new InMemoryClusterStore() : new ClusterRepository(database);
   const rainfall = database === null ? new InMemoryRainfallStore() : new RainfallRepository(database);
   const runs = database === null ? new InMemoryIngestionRunStore() : new IngestionRunRepository(database);
@@ -147,12 +176,18 @@ async function main(): Promise<void> {
   console.log(
     database === null
       ? 'Persistence: in-memory (no DATABASE_URL) — a restart loses cluster history.'
-      : 'Persistence: Postgres for clusters, rainfall, runs and scores; in-memory for the rest.',
+      : 'Persistence: Postgres for accounts, sessions, clusters, rainfall, runs, scores, reports, '
+        + 'work orders and treatments; in-memory for saved locations, alerts, forecasts and audit. '
+        + 'Credentials live in the development auth provider and do NOT survive a restart.',
   );
-  const workOrders = new InMemoryWorkOrderStore();
-  const treatments = new InMemoryTreatmentRecordStore();
+  // Reports and work orders were the two that mattered most after the ingestion path: without
+  // them a restart forgets every report a resident filed and every job a crew did, which makes
+  // 7.3.4 and 7.3.5's thirty-day charts incapable of ever showing more than today.
+  const workOrders = database === null ? new InMemoryWorkOrderStore() : new WorkOrderRepository(database);
+  const treatments =
+    database === null ? new InMemoryTreatmentRecordStore() : new TreatmentRecordRepository(database);
   const notifier = new RecordingNotifier();
-  const reports = new InMemoryReportStore();
+  const reports = database === null ? new InMemoryReportStore() : new ReportRepository(database);
   // 3.1.8, 5.1.7 — exactly ONE containment implementation is bound per process. With a
   // database, PostGIS answers it; without one, the development locator does. Binding both
   // would be the second answer the warning on Polygon.contains exists to forbid.
@@ -325,15 +360,36 @@ async function main(): Promise<void> {
    */
   const seedEmail = process.env.DFENCE_SEED_MANAGER_EMAIL ?? 'manager@d-fence.local';
   const seedPassword = process.env.DFENCE_SEED_MANAGER_PASSWORD ?? 'dfence2026';
-  const seeded = await staff.createStaffAccount(
-    seedEmail,
-    Role.OperationsManager,
-    seedPassword,
-    // The seed has no manager to authorise it, so it is performed as the system. This is the only
-    // call in the codebase that constructs a principal rather than resolving one.
-    principalFor(Role.OperationsManager, 'system-seed'),
-  );
-  const seededManagerId = seeded.id;
+  //
+  // With a database the account survives the restart but the credential does not: `LocalAuthProvider`
+  // is the development stand-in for Supabase Auth and holds its scrypt hashes in memory (10.3.1 —
+  // the provider owns the credential, and there is deliberately no password column in this schema).
+  // So a second boot re-binds the stored account to a fresh provider identity rather than creating a
+  // second account and failing 2.1.4. Re-seeding blindly would abort startup on every restart after
+  // the first, which is the sort of breakage that only appears in the demonstration.
+  const existingSeed = await accounts.findByEmail(seedEmail);
+  const seededManagerId =
+    existingSeed === null
+      ? (
+          await staff.createStaffAccount(
+            seedEmail,
+            Role.OperationsManager,
+            seedPassword,
+            // The seed has no manager to authorise it, so it is performed as the system. This is the
+            // only call in the codebase that constructs a principal rather than resolving one.
+            principalFor(Role.OperationsManager, 'system-seed'),
+          )
+        ).id
+      : await rebindSeed(existingSeed);
+
+  async function rebindSeed(account: Account): Promise<Uuid> {
+    account.authUserId = await authProvider.createUser({ email: seedEmail, password: seedPassword });
+    account.emailVerified = true;
+    account.isActive = true;
+    account.clearFailedAttempts();
+    await accounts.save(account);
+    return account.id;
+  }
   // 1.4.1-1.4.4 — all four sources, with the intervals 1.4.3 counts taken from configuration
   // (10.6.2) rather than from constants, and the geocoder reporting for itself (3.1.16).
   const sourceHealth = new SourceHealthController(runs, config.ingestionIntervals, geocoding);
