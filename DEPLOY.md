@@ -65,6 +65,24 @@ comfortably past the semester.
 
 ## 3. Create the app
 
+### 3.0 The `az` command itself
+
+Checked on this machine on 2026-09-05: **the Azure CLI was not installed**, and neither was
+`zip`, which §5 used to call. Install the CLI with:
+
+```powershell
+winget install -e --id Microsoft.AzureCLI --source winget
+```
+
+`--source winget` is not optional here: without it winget also searches the Microsoft Store
+source, which on this machine fails its certificate check and aborts the whole command before
+installing anything.
+
+Then **open a new terminal.** The installer extends `PATH`, and an already-running shell keeps
+the old one — which makes a successful install look like a failed one.
+
+### 3.1 The resources
+
 ```bash
 az login
 az group create --name dfence --location southeastasia
@@ -130,17 +148,25 @@ run its own build, which avoids the one failure mode of the alternative: Azure's
 `devDependencies` and then failing because esbuild — the thing that does the building — was one of
 them.
 
-```bash
+```powershell
 npm ci
 npm run build          # client bundle + server bundle into dist/
 npm prune --omit=dev   # ship only what runs
 
-zip -r deploy.zip dist node_modules package.json
-az webapp deploy --name dfence-sc2006 --resource-group dfence \
+# `zip` does not exist on Windows, and was in the first draft of this file by
+# habit. Windows 10+ ships bsdtar as tar.exe, and `-a` infers the format from
+# the extension, so this writes a real zip. Compress-Archive also works but
+# takes minutes over a node_modules tree and trips on long paths.
+tar -a -c -f deploy.zip dist node_modules package.json
+
+az webapp deploy --name dfence-sc2006 --resource-group dfence `
   --src-path deploy.zip --type zip
 
 npm install            # put the dev dependencies back locally
 ```
+
+`node_modules` travels in the archive on purpose: `SCM_DO_BUILD_DURING_DEPLOYMENT=false` means
+Azure installs nothing, so what is shipped is exactly what runs.
 
 ---
 
