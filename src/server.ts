@@ -351,8 +351,17 @@ async function main(): Promise<void> {
     console.log('Telegram: no TELEGRAM_BOT_TOKEN — alerts will be recorded rather than sent (6.1.6).');
   }
 
-  console.log('Priming the first cycle…');
-  await cycle('MANUAL');
+  // **Not awaited, and the ordering matters.** This used to run to completion before `listen()`,
+  // which made the server unreachable for the thirty-odd seconds it takes to fetch three public
+  // APIs and score. On a laptop that is a nuisance; on a host it is a failed deployment, because a
+  // platform health check against a port nothing is listening on concludes the container is broken
+  // and restarts it — forever, since every restart begins with the same thirty seconds.
+  //
+  // Deferring it is safe in a way it would not have been before the database: the stores are
+  // populated from the previous run, so a request arriving during the first cycle is answered from
+  // persisted data rather than from an empty Map. It is served slightly stale, which 10.2.2 already
+  // requires the system to do gracefully and 1.4.4 already marks on the screen.
+  const primed = cycle('MANUAL').catch((e: unknown) => console.error('first cycle failed:', e));
 
   // 1.1.1 and 1.2.1 intervals come from configuration, not from constants here (10.6.2).
   const clusterInterval = (config.ingestionIntervals.get(SourceKind.Clusters) ?? 3600) * 1000;
@@ -489,6 +498,11 @@ async function main(): Promise<void> {
 
   app.listen(Number(process.env.PORT ?? 3000));
   console.log(`  sign in as ${seedEmail} / ${seedPassword} (development seed)`);
+
+  // Awaited *after* listening, so the log still reports the first cycle's outcome in order and a
+  // failure is still visible — the point of deferring it was reachability, not silence.
+  console.log('Priming the first cycle in the background…');
+  await primed;
 }
 
 void main().catch((error: unknown) => {

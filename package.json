@@ -4,8 +4,13 @@
   "private": true,
   "description": "D-Fence â€” dengue sanitisation prioritiser (SC2006/CZ2006)",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "npm run build:client && node tools/build-server.mjs",
+    "build:server": "node tools/build-server.mjs",
+    "start": "node dist/src/server.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev:server": "tsx watch src/server.ts",
     "dev:scheduler": "tsx watch src/scheduler.ts",

@@ -51,6 +51,20 @@ export class ExpressApp {
       res.setHeader('Referrer-Policy', 'no-referrer');
       next();
     });
+
+    /**
+     * A liveness probe, registered in the constructor so it exists before any handler and cannot be
+     * shadowed by the client's catch-all.
+     *
+     * **Deliberately does not touch the database.** A hosting platform restarts a container whose
+     * health check fails, so a probe that queried Postgres would turn a transient database blip into
+     * a restart loop — and a restart cannot fix somebody else's database. It answers the question
+     * the platform is actually asking: is this process alive and serving. It is also unauthenticated
+     * and says nothing about the system beyond its own uptime, so it is not an intelligence source.
+     */
+    this.app.get('/api/health', (_req: ExRequest, res: ExResponse) => {
+      res.status(200).json({ status: 'ok', uptimeSeconds: Math.floor(process.uptime()) });
+    });
   }
 
   /** 10.3.2 — exposed so a test can assert the policy without standing up a TLS listener. */
