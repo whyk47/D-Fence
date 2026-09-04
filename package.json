@@ -2,7 +2,7 @@
   "name": "d-fence",
   "version": "0.1.0",
   "private": true,
-  "description": "D-Fence \u00e2\u20ac\u201d dengue sanitisation prioritiser (SC2006/CZ2006)",
+  "description": "D-Fence â€” dengue sanitisation prioritiser (SC2006/CZ2006)",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -12,8 +12,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "ingest": "tsx src/tools/ingest-once.ts",
-    "serve": "tsx src/server.ts",
-    "uat": "tsx src/tools/uat.ts"
+    "serve": "npm run build:client && tsx src/server.ts",
+    "build:client": "node client/build.mjs",
+    "watch:client": "node client/build.mjs --watch",
+    "uat": "tsx src/tools/uat.ts",
+    "uat:client": "tsx src/tools/client-uat.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
@@ -27,10 +30,12 @@
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.3",
     "@types/express": "^4.17.21",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^20.14.0",
     "@types/pg": "^8.11.6",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
+    "esbuild": "^0.28.2",
     "jsdom": "^25.0.1",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0",

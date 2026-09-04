@@ -1,0 +1,337 @@
+/*
+ * D-Fence — presentation.
+ * Traces: 11.6.x, 11.7.1–11.7.7, 10.6.x.
+ *
+ * The design tokens are the ones fixed in `lab1/FIGMA-PROMPTS.md` before any screen was drawn, so
+ * the build and the mockups agree by construction rather than by somebody remembering.
+ *
+ * Three rules here are requirements rather than taste:
+ *   - **A tier is never colour alone** (11.7.5). Every tier is rendered as a word by the screens;
+ *     the colours below sit behind that word, they do not replace it.
+ *   - **Focus is always visible** (11.7.2). The outline is not removed anywhere in this file.
+ *   - **Touch targets are 44px** on controls (11.7.7), because the crew screens are used one-handed
+ *     outdoors, and a 32px button is a button that gets pressed twice.
+ */
+
+:root {
+  --ground: #fbfbf9;
+  --ink: #1a1a18;
+  --ink-quiet: #55554e;
+  --line: #dcdcd4;
+  --accent: #1b5e56;
+  --accent-quiet: #e8f0ee;
+
+  /* The three priority tiers, and one for a refusal. */
+  --tier-high: #a4342b;
+  --tier-medium: #b8763a;
+  --tier-low: #4a7c59;
+  --refusal: #a4342b;
+
+  /* An 8px grid, named so that a screen never writes a raw pixel value. */
+  --s1: 8px;
+  --s2: 16px;
+  --s3: 24px;
+  --s4: 32px;
+  --s5: 48px;
+
+  --font: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font);
+  /* 11.7.7 — legible in bright sun means 16px minimum and real contrast, not thin grey text. */
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip-link:focus {
+  left: var(--s2);
+  top: var(--s2);
+  z-index: 10;
+  background: var(--accent);
+  color: #fff;
+  padding: var(--s1) var(--s2);
+  border-radius: 4px;
+}
+
+/* --- the shell ------------------------------------------------------------------------------ */
+
+[data-component='shell'] > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+}
+
+[data-part='brand'] {
+  font-weight: 600;
+  font-size: 1.125rem;
+  color: var(--accent);
+  text-decoration: none;
+  letter-spacing: 0.01em;
+}
+
+[data-component='shell'] nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  flex: 1;
+}
+
+[data-component='shell'] nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--s2);
+  border-radius: 4px;
+  color: var(--ink-quiet);
+  text-decoration: none;
+}
+
+[data-component='shell'] nav a:hover {
+  background: var(--accent-quiet);
+  color: var(--accent);
+}
+
+/* 11.1.4 — the current screen is indicated by weight and a rule, not by colour alone. */
+[data-component='shell'] nav a[aria-current='page'] {
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+[data-part='account'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+[data-part='role'] {
+  color: var(--ink-quiet);
+  font-size: 0.875rem;
+}
+
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--s4) var(--s3) var(--s5);
+}
+
+h1 {
+  font-size: 1.75rem;
+  line-height: 1.25;
+  margin: 0 0 var(--s2);
+}
+
+h2 {
+  font-size: 1.25rem;
+  margin: var(--s4) 0 var(--s2);
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- controls ------------------------------------------------------------------------------- */
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  min-height: 44px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+button[data-variant='quiet'],
+button[type='button']:not([data-variant='primary']) {
+  background: #fff;
+  color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: var(--s1) var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+}
+
+textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+/* 11.7.5 — an invalid field is marked by a border AND by the message below it. */
+[aria-invalid='true'] {
+  border-color: var(--refusal);
+}
+
+[data-component='field'] {
+  margin-bottom: var(--s3);
+}
+
+[data-component='field'] label {
+  display: block;
+  margin-bottom: var(--s1);
+  font-weight: 500;
+}
+
+[data-part='error'] {
+  display: block;
+  margin-top: var(--s1);
+  color: var(--refusal);
+}
+
+[data-part='counter'] {
+  display: block;
+  margin-top: var(--s1);
+  color: var(--ink-quiet);
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+}
+
+/* --- states (10.5.x) ------------------------------------------------------------------------ */
+
+[data-state] {
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink-quiet);
+}
+
+[data-state='error'] {
+  border-color: var(--refusal);
+  color: var(--ink);
+}
+
+/* --- data presentation (11.6.x) ------------------------------------------------------------- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+th,
+td {
+  text-align: left;
+  padding: var(--s1) var(--s2);
+  border-bottom: 1px solid var(--line);
+}
+
+/* 11.6.3 — numbers align on their digits, so two scores can be compared down a column. */
+td.num,
+th.num {
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.unit {
+  color: var(--ink-quiet);
+  font-size: 0.8125rem;
+}
+
+[data-tier='High'] {
+  color: var(--tier-high);
+  font-weight: 600;
+}
+
+[data-tier='Medium'] {
+  color: var(--tier-medium);
+  font-weight: 600;
+}
+
+[data-tier='Low'] {
+  color: var(--tier-low);
+  font-weight: 600;
+}
+
+ul[data-part='list'] {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s2);
+}
+
+ul[data-part='list'] > li {
+  padding: var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+/* --- narrow screens: the crew screens are the reason (11.7.7) -------------------------------- */
+
+@media (max-width: 600px) {
+  main {
+    padding: var(--s3) var(--s2) var(--s5);
+  }
+
+  [data-component='shell'] > header {
+    padding: var(--s2);
+  }
+
+  table,
+  thead,
+  tbody,
+  tr,
+  th,
+  td {
+    display: block;
+  }
+
+  th {
+    display: none;
+  }
+
+  td {
+    border: none;
+  }
+
+  tr {
+    border-bottom: 1px solid var(--line);
+    padding: var(--s1) 0;
+  }
+}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en-SG">
+  <head>
+    <meta charset="utf-8" />
+    <!-- 11.7.7 — the crew screens are used on a phone, held at arm's length, outdoors. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>D-Fence — dengue sanitisation prioritiser</title>
+    <meta
+      name="description"
+      content="Ranks Singapore's active dengue clusters by how urgently they need sanitisation, from live NEA cluster data, rainfall and resident reports."
+    />
+    <!-- No CDN. A demonstration on conference wifi should not depend on a third party being up,
+         and 10.4.5 is about the data sources being public, not about the stylesheet being remote. -->
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <!-- 11.7.2 — a keyboard user should not tab through the whole navigation on every screen. -->
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div id="root"></div>
+    <noscript>
+      D-Fence needs JavaScript. The data it presents changes hourly, and a static rendering of it
+      would be wrong within the hour.
+    </noscript>
+    <!-- `defer`, not `type=module`: see the note in client/build.mjs. -->
+    <script defer src="/app.js"></script>
+  </body>
+</html>

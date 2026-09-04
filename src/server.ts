@@ -92,7 +92,9 @@ import { RainfallAccumulator } from './control/RainfallAccumulator';
 import { NormalisationFactory } from './control/normalisation/NormalisationFactory';
 import { PriorityScoringEngine, DriverInputs } from './control/PriorityScoringEngine';
 import { ChangeClass, Driver, Role, SourceKind } from './entity/enums';
-import { renderOpsDashboard } from './boundary/http/OpsDashboardPage';
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * One decision, made once: is there a database, and therefore which stores does this process run on?
@@ -436,18 +438,24 @@ async function main(): Promise<void> {
       new PrivacyController(ac, accounts, savedLocations, reports, subscriptions, authProvider, auditStore),
     ),
   );
-  // The stand-in dashboard page renders for the seeded manager. It is a **development page**, not
-  // the graded screen (E10), and it is the one place left that does not resolve a session — an
-  // HTML page cannot carry a bearer token. Every JSON route above does resolve one.
-  app.page('/ops', async () => {
-    const manager = principalFor(Role.OperationsManager, seededManagerId);
-    return renderOpsDashboard(
-      await dashboard.buildOverview(manager),
-      await dashboard.buildPriorityTable(manager),
-      await dashboard.buildAttentionPanel(manager),
-    );
-  });
-  app.page('/', async () => Promise.resolve('<meta http-equiv="refresh" content="0; url=/ops">'));
+  /**
+   * The React client, and the end of the server-rendered stand-in.
+   *
+   * `/ops` used to be a development page rendered for the seeded manager without resolving a
+   * session — an HTML page cannot carry a bearer token. It is **deleted** rather than kept
+   * alongside, because `/ops` is now a real client route (11.2.12) and two implementations of one
+   * screen is the drift every review of this project has found. It also could not have coexisted:
+   * the server route would have shadowed the client's.
+   *
+   * Mounted last, deliberately. The catch-all inside `serveClient` answers everything unmatched, so
+   * registered any earlier it would swallow the API.
+   */
+  const clientDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'client', 'dist');
+  if (existsSync(join(clientDir, 'index.html'))) {
+    app.serveClient(clientDir);
+  } else {
+    console.log('Client bundle not found — run `npm run build:client`. The API still works.');
+  }
 
   app.listen(Number(process.env.PORT ?? 3000));
   console.log(`  sign in as ${seedEmail} / ${seedPassword} (development seed)`);

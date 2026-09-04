@@ -49,6 +49,17 @@ export class OneMapGateway implements GeocodingSource {
   private token: string | null;
   private tokenExpiry: Date | null;
 
+  /**
+   * When the held token expires, or null before one has been obtained.
+   *
+   * The expiry, deliberately, and never the token itself: 3.1.16's source-health panel and the
+   * renewal check both need to say how long is left, and neither needs the credential. A getter
+   * that returned the token would put it one careless `console.log` away from a shared screen.
+   */
+  tokenExpiresAt(): Date | null {
+    return this.tokenExpiry;
+  }
+
   sourceKind(): SourceKind {
     return SourceKind.Geocoding;
   }

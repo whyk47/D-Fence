@@ -9,7 +9,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { AccessControlService, NotAuthorised } from '../src/control/AccessControlService';
 import { AccessPolicy } from '../src/control/AccessPolicy';
 import { DashboardController, principalFor, PriorityRow } from '../src/control/DashboardController';
-import { formatSgt } from '../src/boundary/http/OpsDashboardPage';
+import { formatSgt } from '../src/boundary/http/formatSgt';
 import {
   InMemoryAuditStore,
   InMemoryClusterStore,

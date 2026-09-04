@@ -84,6 +84,44 @@ export class ExpressApp {
     });
   }
 
+  /**
+   * Serve the built client, and hand every unmatched non-API path to it.
+   *
+   * **Call this last.** Express matches in registration order, and the fallback below answers
+   * anything left over — registered before the API it would swallow every route in the system and
+   * return the shell's HTML where JSON was expected, which presents as a client that has gone mad
+   * rather than as a misordered server.
+   *
+   * The fallback is what makes a deep link work. `/ops/work-orders/abc` is a client-side route: the
+   * server has never heard of it, but a manager who bookmarks it, or refreshes on it, must not get
+   * a 404 — 11.3.2's dialog map has no state called "you reloaded the page".
+   *
+   * An unmatched **`/api/`** path deliberately falls through to a JSON 404 instead. Returning HTML
+   * to a `fetch` would surface as a parse error in the client, and the developer would go looking
+   * in the wrong place entirely.
+   */
+  serveClient(directory: string): void {
+    this.app.use(
+      express.static(directory, {
+        // The bundle's name is fixed, so it must not be cached across a deployment; the index is
+        // small and is always revalidated. Correctness over cleverness — a stale bundle served to
+        // a marker is not a trade worth making for a few kilobytes.
+        etag: true,
+        maxAge: 0,
+      }),
+    );
+    this.app.get('*', (req: ExRequest, res: ExResponse) => {
+      if (req.path.startsWith('/api/')) {
+        res.status(404).json({ error: 'no such route', remedy: 'check the path' });
+        return;
+      }
+      res.sendFile('index.html', { root: directory });
+    });
+    this.clientDirectory = directory;
+  }
+
+  private clientDirectory: string | null = null;
+
   listen(port: number): void {
     this.app.listen(port, () => {
       console.log(`D-Fence listening on http://localhost:${port}`);
@@ -92,6 +130,11 @@ export class ExpressApp {
       if (writes.length > 0) {
         console.log(`  POST: ${writes.join(', ')}`);
       }
+      console.log(
+        this.clientDirectory === null
+          ? '  Client: NOT served — run `npm run build:client` and restart.'
+          : '  Client: served from the built bundle; open the address above in a browser.',
+      );
     });
   }
 
