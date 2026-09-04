@@ -47,12 +47,20 @@ roughly thirty before.
 
 ## 2. The two settings that are not free choices
 
-**Region: Southeast Asia.** Not a preference. Supabase is in `ap-southeast-1` (Singapore), and a
-single dashboard response makes roughly fifteen *sequential* round trips to it. At Singapore-to-
-Singapore latency that is the 179 ms measured locally. From, say, East US, the same fifteen trips
-cross the Pacific and back fifteen times, and the dashboard becomes slow enough to notice **with one
-user** — which would turn the performance finding from "does not affect your demo" into one that
-does.
+**Region: East Asia, and only because Southeast Asia was refused.** The requirement is to be as
+close to Supabase as possible. Supabase is in `ap-southeast-1` (Singapore), and a single dashboard
+response makes roughly fifteen *sequential* round trips to it, so every millisecond of distance is
+multiplied fifteenfold. At Singapore-to-Singapore latency that is the 179 ms measured locally;
+from East US the same fifteen trips cross the Pacific and back and the dashboard is slow enough to
+notice **with one user**.
+
+Southeast Asia is not available on this subscription. Attempting it returns
+`RequestDisallowedByAzure` — Azure for Students carries a region policy restricting the
+subscription to a subset of regions, and Singapore is not in it. This is *not* SKU availability:
+`az appservice list-locations --sku B1 --linux-workers-enabled` lists Southeast Asia happily, and
+the refusal still comes. Probed in order of nearness on 2026-09-05; **East Asia (Hong Kong) is
+allowed**, roughly 30 ms from Singapore, so expect on the order of half a second added to a
+dashboard load against the local figure. `tools/azure-provision.ps1` defaults to it.
 
 **Plan: B1 Basic, not F1 Free.** F1 is capped at 60 CPU-minutes a day and does not support Always
 On, so the process is evicted when idle. D-Fence is not a request/response app only — it runs
@@ -89,7 +97,7 @@ az group create --name dfence --location southeastasia
 az appservice plan create --name dfence-plan --resource-group dfence \
   --location southeastasia --sku B1 --is-linux
 az webapp create --name dfence-sc2006 --resource-group dfence \
-  --plan dfence-plan --runtime "NODE:20-lts"
+  --plan dfence-plan --runtime "NODE:24-lts"
 
 # Always On keeps the ingestion timers alive; the health path stops a database
 # blip from being mistaken for a dead container.

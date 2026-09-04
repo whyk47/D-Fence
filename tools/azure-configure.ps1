@@ -1,4 +1,4 @@
-<#
+﻿<#
 D-Fence - push the local configuration into Azure App Settings.
 
     pwsh tools/azure-configure.ps1 -App dfence-sc2006 -ResourceGroup dfence
@@ -15,10 +15,16 @@ It prints key NAMES and never key VALUES. If you see a secret in this output, th
 param(
     [Parameter(Mandatory = $true)] [string] $App,
     [Parameter(Mandatory = $true)] [string] $ResourceGroup,
-    [string] $EnvFile = "$PSScriptRoot\..\src\.env"
+    [string] $EnvFile
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Resolved here, not as a param default: $PSScriptRoot is empty inside the param block under
+# `powershell -File`, which produced a lookup for a path beginning with a bare backslash.
+if ([string]::IsNullOrWhiteSpace($EnvFile)) {
+    $EnvFile = Join-Path $PSScriptRoot '..\src\.env'
+}
 
 if (-not (Test-Path $EnvFile)) {
     throw "No env file at $EnvFile. Copy src/.env.example to src/.env and fill it in first."
@@ -58,22 +64,36 @@ if ($missing.Count -gt 0) {
     Write-Host "  not present locally, so not forwarded: $($missing -join ', ')"
 }
 
-# The seed manager. Asked for here rather than defaulted, because the development default
-# (manager@d-fence.local / dfence2026) is printed in the start-up log, and on a public URL that is
-# an Operations Manager account with a published password. The account is created on FIRST boot, so
-# this has to be set before the first deployment, not after.
-Write-Host ''
-Write-Host 'Seed Operations Manager account for the deployed instance.'
-$seedEmail = Read-Host '  email'
-$seedSecret = Read-Host '  password' -AsSecureString
-$seedPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($seedSecret))
+# The seed manager. NOT defaulted: the development default (manager@d-fence.local / dfence2026) is
+# in the repository and printed in the start-up log, and on a public URL that is an Operations
+# Manager account with a published password. The account is created on FIRST boot, so this has to
+# be right before the first deployment, not after.
+#
+# Taken from src/.env when it is there - which is where a generated one is written, so an
+# unattended run has something better than the default to use - and asked for otherwise.
+$seedEmail = $env_values['DFENCE_SEED_MANAGER_EMAIL']
+$seedPassword = $env_values['DFENCE_SEED_MANAGER_PASSWORD']
+
+if ([string]::IsNullOrWhiteSpace($seedPassword)) {
+    Write-Host ''
+    Write-Host 'Seed Operations Manager account for the deployed instance.'
+    $seedEmail = Read-Host '  email'
+    $seedSecret = Read-Host '  password' -AsSecureString
+    $seedPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($seedSecret))
+} else {
+    Write-Host '  seed manager credentials taken from src/.env'
+}
 
 if ([string]::IsNullOrWhiteSpace($seedEmail) -or [string]::IsNullOrWhiteSpace($seedPassword)) {
     throw 'Both are required. Leaving them blank would seed the published default.'
 }
 if ($seedPassword -eq 'dfence2026') {
     throw 'That is the development default, and it is in the repository. Choose another.'
+}
+# 2.1.2's floor. A deployed admin account should clear it by a wide margin, not scrape past it.
+if ($seedPassword.Length -lt 12) {
+    throw 'Too short for an internet-facing admin account. Use at least 12 characters.'
 }
 
 $settings = @()
@@ -96,7 +116,11 @@ Write-Host "Setting $($settings.Count) app settings on $App (names only):"
 foreach ($s in $settings) { Write-Host "  $($s.Split('=')[0])" }
 
 # --output none matters: without it `az` echoes the full settings list, secrets included, to stdout.
-az webapp config appsettings set --name $App --resource-group $ResourceGroup --settings @settings --output none
+# Called by full path, not as bare `az`: the installer extends PATH, and any shell that was
+# already open - which is most of them, right after installing - does not have it yet.
+$az = Join-Path $env:ProgramFiles 'Microsoft SDKs\Azure\CLI2\wbin\az.cmd'
+if (-not (Test-Path $az)) { $az = 'az' }
+& $az webapp config appsettings set --name $App --resource-group $ResourceGroup --settings @settings --output none
 if ($LASTEXITCODE -ne 0) { throw "az failed with exit code $LASTEXITCODE" }
 
 Write-Host ''
