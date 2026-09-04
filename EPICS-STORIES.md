@@ -439,6 +439,10 @@ applying the staleness banner to affected views — are E10 work and stay gated 
 like every other screen.** The shared stale-state component already exists in
 `client/src/components/States.tsx`.*
 
+*Superseded 2026-09-04, commit `5d92138`: the **Data Sources screen is built** — the mockup gate was
+lifted by Yen Kit ("just proceed without the design"). Applying the staleness banner to every
+affected view remains outstanding, and is now US-10.5 work rather than a blocked item.*
+
 ### US-1.6 — Survive a feed outage without losing the application
 **As** an Operations Manager, **I want** the system to keep working when a source fails **so that** an
 NEA outage does not take the dashboard down with it.
@@ -1013,6 +1017,10 @@ B3-B12 like every other screen. And the one path no test can close — a residen
 issued code into the chat — needs a human at the other end, which is exactly the point of a single-use
 code; that end-to-end run is Yen Kit's to close, with the server running.*
 
+*Superseded in part 2026-09-04, commit `790ae61`: trace 11.2.11, the **Alert Settings screen, is
+built** — the mockup gate was lifted. The harness confirms the link code is issued over HTTP. What is
+still Yen Kit's to close is unchanged: a resident typing a freshly issued code into the chat.*
+
 ### US-6.2 — Choose which locations alert me
 **As** a Resident, **I want** alerts per location **so that** I am not notified about places I no
 longer care about.
@@ -1288,6 +1296,22 @@ that** the work is tracked rather than remembered.
 - Implement automatic linking of verified reports.
 - Test past-date rejection and duplicate refusal.
 
+*HTTP surface delivered 2026-09-04, commit `5d92138` on `dev`. `src/boundary/http/WorkOrderRoutes.ts`
+was a **declared skeleton that threw `not implemented`** — the work-order controllers existed and
+there was no HTTP door to reach them by, which blocked seven of the thirteen operations and crew
+screens. It is now implemented and mounted in `src/server.ts`; verified live, in that every new path
+answers **403 from access control rather than 404**, which is the difference between a route that
+exists and refuses and a route that is not there. Two corrections fell out of wiring it. (1)
+`DispatchController.crewView` reads `findForAssignee(by.accountId)` and is therefore **scoped to the
+caller** — the obvious wiring, reusing it behind a wider permission, would have shown a manager the
+orders assigned to *them*, i.e. none, rendering an empty work-order list that looked entirely
+correct. `managerView(by, filter)` and `managerDetail(id, by)` are new, authorise `workOrder:readAll`,
+and read a new `findAll()` added to the `WorkOrderStore` port and to `InMemoryWorkOrderStore`. (2)
+The client's `ApiFailure` now carries the whole response **body**: 8.1.12 returns the work order that
+blocked a duplicate, and discarding it made the refusal less useful than the server intended — the
+manager is now handed a link to the blocking order, which is what "the existing one is offered"
+means.*
+
 ### US-8.3 — Assign and reassign crews
 **As** an Operations Manager, **I want** to assign a job to a named crew member with their load visible
 **so that** work is distributed sensibly.
@@ -1347,6 +1371,15 @@ I can work from the app rather than a printed list.
 - Implement Accept and In Progress transitions with timestamps.
 - Implement progress notes.
 - Verify the layout and touch targets on a 360 px viewport.
+
+*HTTP surface delivered 2026-09-04, commit `5d92138` on `dev`, together with the My Jobs, Job Detail
+and Job Completion screens. `src/boundary/http/CrewRoutes.ts` was, like `WorkOrderRoutes.ts`, a
+**declared skeleton that threw `not implemented`** — the crew screens had controllers behind them and
+no way to reach them. It is now implemented and mounted in `src/server.ts`, and verified live in that
+its paths answer 403 from access control rather than 404. The end-to-end crew path — a crew member
+seeing only their own job, being refused a manager screen, accepting, starting, being refused a
+completion with no photograph, and completing — is exercised over real HTTP by the UAT harness (see
+US-8.8).*
 
 ### US-8.5 — Record completion with evidence
 **As** a Cleaning Crew Member, **I want** to close a job with a photo and notes **so that** the work is
@@ -1448,6 +1481,25 @@ one continuous chain **so that** the demo can show the whole system in ninety se
 - Build the before/after score display in the Cluster Detail screen.
 - Write and rehearse the end-to-end demo script against this chain.
 
+*The chain is now driven automatically, 2026-09-04, commit `3a92978` on `dev`. `src/tools/uat.ts`
+(`npm run uat -- --base <url> --log <server log>`) drives the **running** server over real HTTP as
+four real accounts through the four segments of `lab4/DEMO-SCRIPT.md`: **31 checks, all passing**,
+against live Supabase, live NEA cluster data and live OneMap. Segment D walks the whole loop —
+create a crew account, raise a work order, see 8.1.12 refuse a duplicate **naming the blocker**, read
+crew workload, assign, sign in as the crew member, confirm they see only their own job and are
+refused a manager screen, accept and start, have a completion with no photograph refused, record the
+completion, and have the manager verify it into a `TreatmentRecord`. Three design points worth
+keeping. (1) 2.1.4 will not let a new account sign in unverified, and the verification token stands
+in for an email: it is printed to the **server console** and deliberately **not** returned from
+`/api/auth/register`, because returning it would make verification decorative — so the harness reads
+the server log, which is exactly what a human tester does with an inbox. (2) Without `--log`, segment
+B reports **SKIPPED with the reason**, not FAILED. (3) A step blocked by an earlier failure is
+SKIPPED rather than failed — one broken sign-in should not present as fourteen broken features. The
+harness found a real defect no unit test could: `LandingScreen` read `sources[].name/publisher` while
+`/api/attribution` returns `attributions[].source/text`, so the credits list rendered **empty** — a
+10.4.5 obligation silently unmet on the one screen an unauthenticated visitor sees. The screen test
+and the route test each agreed with themselves; only the seam between them was wrong.*
+
 ---
 
 # E9 — Map, trend and history
@@ -1524,6 +1576,26 @@ see direction, not just level.
 patterns they share, and the two graded artefacts that describe them — the Lab 1 UI mockups and the
 Lab 2/3 dialog map.*
 
+*All 27 §11.2 screens built 2026-09-04, commits `790ae61` (shared components and the seven
+shared/auth plus seven resident screens) and `5d92138` (the ten operations and three crew screens),
+on `dev`. **Built without Figma mockups, on Yen Kit's explicit authorisation** — "The figma will not
+be in for awhile. can just proceed without the design" — so US-10.1 is no longer a gate on anything
+downstream, and every earlier note saying a screen "stays gated on mockups B3-B12" is superseded.
+What was built is structure and behaviour only: no visual or CSS layer exists on any screen, and a
+visual layer can be laid over these without changing what they do. shared/auth (7): Landing,
+Register, SignIn, PasswordResetRequest, PasswordReset, NotAuthorised, NotFound. resident (7):
+ResidentMap, MyLocations, AddLocation, ReportSite, MyReports, ReportDetail, AlertSettings.
+operations (10): OperationsDashboard, ClusterDetail, ModerationQueue, ReportReview,
+DispatchProposal, WorkOrderCreate, WorkOrderList, WorkOrderDetail, StaffAccounts, DataSources.
+crew (3): MyJobs, JobDetail, JobCompletion. `ResidentMapScreen` bundles **no map library** and
+renders the layer data as an accessible list — a declared limitation stated in the file itself,
+defensible because 9.1.11 requires the priority tier as a **label**, not as a colour. New render
+tests: `tests/client-screens-shared.test.tsx` (17), `tests/client-screens-resident.test.tsx` (21),
+`tests/client-screens-ops.test.tsx` (24). React render testing is new to this project —
+`@testing-library/react` ^16, `@testing-library/dom` ^10 and `jsdom` ^25 were added as
+devDependencies, and each test file carries a `@vitest-environment jsdom` docblock rather than a
+vitest config file being introduced. **530 tests across 25 files**, `npx tsc --noEmit` strict-clean.*
+
 ### US-10.1 — Mock up every screen before building it
 **As** the team, **we need** a mockup of each screen with HCI principles applied **so that** Lab 1 has
 its deliverable and we design the interface before we code it.
@@ -1544,6 +1616,12 @@ its deliverable and we design the interface before we code it.
 - Annotate each with HCI principles and requirement numbers.
 - Review as a team against §11.2 for missing screens.
 - Commit to `lab1/mockups/` with an author per file.
+
+*Not delivered, and no longer blocking. On 2026-09-04 Yen Kit authorised building the 27 screens
+without the mockups ("The figma will not be in for awhile. can just proceed without the design"), so
+this story now owes only its **graded artefact** — the annotated mockups for Lab 1 — and not the
+design input the build was waiting on. The built screens can serve as the reference the mockups are
+drawn against, which reverses the intended order and should be said plainly rather than hidden.*
 
 ### US-10.2 — Build the shared component library
 **As** a developer, **I want** one set of components for tables, forms, states and tiles **so that**
@@ -1574,6 +1652,24 @@ the interface is consistent and the boundary layer is not rewritten per screen.
 - Build the empty, loading and error state components with a retry control.
 - Build the confirmation dialog and the toast.
 - Document each component with an example.
+
+*Delivered 2026-09-04, commit `790ae61` on `dev`. `client/src/components/Field.tsx` is the field
+component this story names, and it is where the acceptance criterion "field validation and character
+counting are handled by the field component, not per screen" is actually enforced — the screens have
+no validation code of their own. Two accessibility obligations are carried centrally by the same
+component for the same reason: a real `<label htmlFor>` (11.7.2 — a placeholder is not a label, and
+disappears exactly when the user needs it), and errors rendered as text inside `role="alert"` with
+`aria-invalid` (11.7.5 — never colour alone). It validates only **after first blur** (11.5.3), so a
+half-typed email is not marked wrong while it is still being typed. `client/src/lib/useLoad.ts` turns
+a GET into a `LoadState` and owns three things no screen should re-decide: the initial loading render,
+the 11.4.4 retry, and a guard against a late response landing in a screen the user has already left.
+`client/src/components/Link.tsx` renders a real `<a href>` and calls `preventDefault` — middle-click,
+copy-link and the browser status bar all keep working, which they do not with a `<div onClick>`.
+`client/src/screens/ScreenProps.ts` is the single props shape for all 27 screens and deliberately
+carries **no permission booleans**: a screen branching on a client-side permission is a screen
+deciding, and 2.3.6 puts that decision on the server. `client/src/app/ScreenRegistry.tsx` maps a
+route's `screenId` to its component — before it existed, `AppShell` took `renderScreen` from "the
+router" and no router had ever been written, so the screens existed and nothing rendered them.*
 
 ### US-10.3 — Navigate by role without dead ends
 **As** any signed-in user, **I want** navigation that shows only what I can use **so that** I never
@@ -1632,6 +1728,16 @@ rather than accumulated, and Lab 2 and Lab 3 have their artefact.
 - Implement the router to match the map.
 - Implement the unsaved-changes guard and the modal input preservation.
 - Review the implemented routes against the map before Lab 3.
+
+*Partly delivered 2026-09-04, commits `790ae61` and `5d92138`. `client/src/app/ScreenRegistry.tsx`
+is what makes "the implemented routes match the map" checkable at all, and two invariants are now
+**asserted in tests** rather than reviewed by eye, because both fail silently. (1)
+`screensWithoutComponent()` — a route the map draws and the router serves, with no component behind
+it, renders a **blank page** (11.3.1); its only symptom is empty space, which no error surfaces. (2)
+**Route registration order** — Express matches in registration order, so
+`/api/ops/work-orders/crew-workload` registered after `/api/ops/work-orders/:id` is swallowed by it
+and answers "no such work order" forever. **This story is not done:** the unsaved-changes guard and
+the modal input preservation are still outstanding.*
 
 ### US-10.5 — Never show a blank or silent screen
 **As** any user, **I want** the interface to tell me what is happening **so that** I can tell waiting
