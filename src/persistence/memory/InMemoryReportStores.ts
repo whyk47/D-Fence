@@ -7,7 +7,7 @@
  * driven to 49 and 51 metres without a database.
  */
 import { randomUUID } from 'node:crypto';
-import { ClusterLocator, ReportStore } from '../../ports/Stores';
+import { ClusterLocator, ClusterStore, ReportStore } from '../../ports/Stores';
 import { GeoPoint, Uuid } from '../../entity/valueTypes';
 import { ReportStatus, ReportType } from '../../entity/enums';
 import { Report } from '../../entity/Report';
@@ -125,7 +125,10 @@ export class InMemoryReportStore implements ReportStore {
  * That method is still unimplemented and stays that way.
  */
 export class InMemoryClusterLocator implements ClusterLocator {
-  constructor(private readonly clusters: InMemoryClusterStore) {}
+  // Typed to the PORT, not to the in-memory implementation: this class only ever calls
+  // findActive(), and narrowing it to one store would stop the development locator working
+  // against a Postgres-backed cluster store in a mixed deployment.
+  constructor(private readonly clusters: ClusterStore) {}
 
   /** 5.1.7 — the first active cluster whose outer ring contains the point. */
   async containing(point: GeoPoint): Promise<Cluster | null> {

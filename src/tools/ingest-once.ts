@@ -7,10 +7,13 @@
  *     npm run ingest -- --geocode "Ho Ching Road"     # also exercise OneMap
  *
  * The smallest honest end-to-end proof: real NEA and Meteorological Service data in, a ranked
- * priority table out, through the same control classes the server will use. It runs against the
- * in-memory stores, so it needs no database — which is the point, because Supabase does not exist
- * yet and cluster history has to start accumulating now for the trend view to have anything to show
- * in week 11.
+ * priority table out, through the same control classes the server will use.
+ *
+ * It picks its stores the same way the server does — Postgres when DATABASE_URL is set, in-memory
+ * otherwise — so this tool is also how 10.2.3 gets demonstrated: run it twice and the second run
+ * reports UNCHANGED against clusters the first run left behind in a database, rather than
+ * re-ingesting them into a fresh process's memory. Without a database it still runs end to end,
+ * which is how every epic before Supabase existed was built.
  */
 import { ConfigLoader } from '../config/ConfigLoader';
 import { HttpClient } from '../boundary/gateways/HttpClient';
@@ -23,12 +26,20 @@ import {
   InMemoryPriorityScoreStore,
   InMemoryRainfallStore,
 } from '../persistence/memory/InMemoryStores';
+import { Database } from '../persistence/Database';
+import { ClusterRepository } from '../persistence/ClusterRepository';
+import { IngestionRunRepository } from '../persistence/IngestionRunRepository';
+import { PriorityScoreRepository } from '../persistence/PriorityScoreRepository';
+import { RainfallRepository } from '../persistence/RainfallRepository';
 import { ClusterIngestionJob } from '../control/ingestion/ClusterIngestionJob';
 import { RainfallIngestionJob } from '../control/ingestion/RainfallIngestionJob';
 import { RainfallAccumulator } from '../control/RainfallAccumulator';
 import { NormalisationFactory } from '../control/normalisation/NormalisationFactory';
 import { PriorityScoringEngine, DriverInputs } from '../control/PriorityScoringEngine';
-import { Driver } from '../entity/enums';
+import { Driver, SourceKind } from '../entity/enums';
+
+/** Module-scope so the exit path can close it whichever branch `main` leaves by. */
+let openDatabase: Database | null = null;
 
 function flag(name: string): boolean {
   return process.argv.includes(`--${name}`);
@@ -44,10 +55,13 @@ async function main(): Promise<void> {
   const http = new HttpClient();
   const now = new Date();
 
-  const clusters = new InMemoryClusterStore();
-  const rainfallStore = new InMemoryRainfallStore();
-  const runs = new InMemoryIngestionRunStore();
-  const scores = new InMemoryPriorityScoreStore();
+  const database = config.get('DATABASE_URL') === '' ? null : new Database(config.get('DATABASE_URL'));
+  openDatabase = database;
+  const clusters = database === null ? new InMemoryClusterStore() : new ClusterRepository(database);
+  const rainfallStore = database === null ? new InMemoryRainfallStore() : new RainfallRepository(database);
+  const runs = database === null ? new InMemoryIngestionRunStore() : new IngestionRunRepository(database);
+  const scores = database === null ? new InMemoryPriorityScoreStore() : new PriorityScoreRepository(database);
+  console.log(database === null ? 'Store: in-memory (no DATABASE_URL)' : 'Store: Postgres');
 
   // --- clusters (1.1.x) ---------------------------------------------------------------------
   const feed = new NEAFeedGateway(
@@ -69,6 +83,7 @@ async function main(): Promise<void> {
   const active = await clusters.findActive();
   if (active.length === 0) {
     console.log('No active clusters stored — nothing to score.');
+    await report(clusters, runs, database);
     return;
   }
 
@@ -153,6 +168,8 @@ async function main(): Promise<void> {
     console.log(`\n  Top cluster: ${leader.explain()}`);
   }
 
+  await report(clusters, runs, database);
+
   const address = option('geocode');
   if (address !== undefined) {
     const onemap = new OneMapGateway(
@@ -171,7 +188,33 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((error: unknown) => {
-  console.error('ingest failed:', error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+/**
+ * 10.2.3, stated rather than assumed. Prints what the STORE holds, not what this run put there —
+ * with a database those two differ, and the difference is the whole claim.
+ */
+async function report(
+  clusters: { findActive(): Promise<unknown[]> },
+  runs: IngestionRunRepository | InMemoryIngestionRunStore,
+  database: Database | null,
+): Promise<void> {
+  if (database === null) {
+    return;
+  }
+  const stored = await clusters.findActive();
+  const history = await runs.recentRuns(SourceKind.Clusters, 5);
+  console.log(`
+  Stored: ${stored.length} active clusters, ${history.length} recent NEA run(s):`);
+  for (const run of history) {
+    console.log(
+      `    ${run.startedAt.toISOString()}  ${run.outcome.padEnd(9)} ${String(run.featureCount).padStart(4)} features`,
+    );
+  }
+}
+
+void main()
+  .catch((error: unknown) => {
+    console.error('ingest failed:', error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  })
+  // The pool holds the process open otherwise; without this the tool prints its table and hangs.
+  .finally(() => openDatabase?.close());

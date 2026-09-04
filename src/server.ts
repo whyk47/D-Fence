@@ -12,6 +12,11 @@
  * The cost is honest and stated: restarting the process loses the history.
  */
 import { ConfigLoader } from './config/ConfigLoader';
+import { Database } from './persistence/Database';
+import { ClusterRepository, PostgresClusterLocator } from './persistence/ClusterRepository';
+import { IngestionRunRepository } from './persistence/IngestionRunRepository';
+import { PriorityScoreRepository } from './persistence/PriorityScoreRepository';
+import { RainfallRepository } from './persistence/RainfallRepository';
 import { HttpClient } from './boundary/gateways/HttpClient';
 import { NEAFeedGateway } from './boundary/gateways/NEAFeedGateway';
 import { RainfallGateway } from './boundary/gateways/RainfallGateway';
@@ -119,16 +124,40 @@ async function main(): Promise<void> {
   // 6.1.7's inbound half. Without it a code can be issued and typed into Telegram and nothing
   // happens — the claim route exists, but the bot is the only caller and it was not listening.
   const telegramLink = telegram === null ? null : new TelegramLinkController(telegram, notifications);
-  const clusters = new InMemoryClusterStore();
-  const rainfall = new InMemoryRainfallStore();
+  /**
+   * The ports layer earning its keep, in four lines rather than in an argument.
+   *
+   * With DATABASE_URL set, the ingestion and scoring path runs on Postgres and history survives a
+   * restart — which is what 10.2.3 asks for and what 7.3.1's 30-day chart needs in order to ever
+   * show more than today. Without it, the in-memory stores keep the whole system runnable, which
+   * is how every epic before this one was built and demonstrated.
+   *
+   * The stores NOT yet migrated (reports, work orders, accounts, locations, alerts, forecasts) stay
+   * in memory in both modes. That is stated rather than hidden: a half-migrated system that looked
+   * fully persistent would be a worse claim than an honestly mixed one.
+   */
+  const database = config.get('DATABASE_URL') === '' ? null : new Database(config.get('DATABASE_URL'));
+  const clusters = database === null ? new InMemoryClusterStore() : new ClusterRepository(database);
+  const rainfall = database === null ? new InMemoryRainfallStore() : new RainfallRepository(database);
+  const runs = database === null ? new InMemoryIngestionRunStore() : new IngestionRunRepository(database);
+  const scores = database === null ? new InMemoryPriorityScoreStore() : new PriorityScoreRepository(database);
   const forecasts = new InMemoryForecastStore();
-  const runs = new InMemoryIngestionRunStore();
-  const scores = new InMemoryPriorityScoreStore();
+  console.log(
+    database === null
+      ? 'Persistence: in-memory (no DATABASE_URL) — a restart loses cluster history.'
+      : 'Persistence: Postgres for clusters, rainfall, runs and scores; in-memory for the rest.',
+  );
   const workOrders = new InMemoryWorkOrderStore();
   const treatments = new InMemoryTreatmentRecordStore();
   const notifier = new RecordingNotifier();
   const reports = new InMemoryReportStore();
-  const locator = new InMemoryClusterLocator(clusters);
+  // 3.1.8, 5.1.7 — exactly ONE containment implementation is bound per process. With a
+  // database, PostGIS answers it; without one, the development locator does. Binding both
+  // would be the second answer the warning on Polygon.contains exists to forbid.
+  const locator =
+    database === null
+      ? new InMemoryClusterLocator(clusters)
+      : new PostgresClusterLocator(clusters as ClusterRepository);
   // 2.4.1 — every controller that writes state gets the SAME audit store the access-control
   // service denies into, so a refusal and the change it would have made sit in one log.
   const reportLifecycle = new ReportLifecycleController(new ReportTransitionTable(), reports, notifier, auditStore);
