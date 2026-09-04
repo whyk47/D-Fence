@@ -367,6 +367,54 @@ describe('Staff and sources — §11.2.22, §11.2.23, §2.2.5, §1.4.3, §1.4.4'
     // 1.4.1 — "never" is not rendered as a very old date.
     expect(screen.getByText('Never')).toBeTruthy();
   });
+
+  it('S4 — Refresh now runs every source and reloads the panel (1.1.18)', async () => {
+    const { fetcher, calls } = router({
+      '/api/ops/sources': {
+        body: { sources: [{ source: 'Clusters', lastSuccessAt: null, isWarning: true, isStale: true }] },
+      },
+      '/api/ops/sources/refresh': {
+        body: {
+          runs: [
+            { source: 'Clusters', outcome: 'SUCCESS', featureCount: 12 },
+            { source: 'Rainfall', outcome: 'UNCHANGED', featureCount: 0 },
+          ],
+          sources: [],
+        },
+      },
+    });
+    render(<DataSourcesScreen {...props({}, fetcher)} />);
+    await waitFor(() => expect(screen.getByText('Failing — this source has never succeeded.')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh now' }));
+
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/ops/sources/refresh' && c.method === 'POST')).toBe(true));
+    // 1.1.21 — UNCHANGED is a source that answered and had nothing new, and must not read as a
+    // failure to a manager deciding whether the feed is back.
+    await waitFor(() => expect(screen.getByText(/Clusters: 12 record\(s\).*Rainfall: no change published/)).toBeTruthy());
+    // The table is reloaded rather than patched from the response, so one place owns this data.
+    expect(calls.filter((c) => c.url === '/api/ops/sources').length).toBe(2);
+  });
+
+  it('S5 — a run already in progress states the server’s cause and remedy, not a spinner (10.5.3)', async () => {
+    const { fetcher } = router({
+      '/api/ops/sources': { body: { sources: [{ source: 'Clusters', lastSuccessAt: null, isWarning: false, isStale: false }] } },
+      '/api/ops/sources/refresh': {
+        status: 409,
+        body: { error: 'an ingestion run is already in progress', remedy: 'wait for the run in progress to finish' },
+      },
+    });
+    render(<DataSourcesScreen {...props({}, fetcher)} />);
+    await waitFor(() => expect(screen.getByText('Healthy.')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh now' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('an ingestion run is already in progress — wait for the run in progress to finish')).toBeTruthy(),
+    );
+    // The button comes back: a refused run is not a dead screen.
+    expect(screen.getByRole('button', { name: 'Refresh now' })).toBeTruthy();
+  });
 });
 
 describe('Crew screens — §11.2.19–11.2.21, §8.3.x, §8.4.1', () => {

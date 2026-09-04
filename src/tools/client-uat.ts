@@ -32,9 +32,19 @@ interface Outcome {
 
 const outcomes: Outcome[] = [];
 
+/**
+ * `--name value` or `--name=value`. Both, because accepting only the first form made this tool
+ * silently ignore `--base=http://localhost:3140` and run the whole acceptance suite against
+ * whatever happened to be listening on the default port — a set of plausible passes against the
+ * wrong process, which is worse than a failure.
+ */
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
-  return index === -1 ? undefined : process.argv[index + 1];
+  if (index !== -1) {
+    return process.argv[index + 1];
+  }
+  const inline = process.argv.find((a) => a.startsWith(`--${name}=`));
+  return inline === undefined ? undefined : inline.slice(name.length + 3);
 }
 
 const base = argument('base') ?? 'http://localhost:3000';
@@ -118,8 +128,14 @@ async function boot(path: string): Promise<JSDOM> {
  * Polls for content rather than sleeping a fixed time: a fixed wait is either too short on a slow
  * network — making a working screen look broken — or too long on every run.
  */
-async function settle(dom: JSDOM, until: (dom: JSDOM) => boolean = hasContent): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+async function settle(
+  dom: JSDOM,
+  until: (dom: JSDOM) => boolean = hasContent,
+  /** Three seconds suits a screen load. A manual ingestion run fetches three public APIs and
+   *  legitimately takes longer, so it says so rather than being declared broken at three. */
+  timeoutMs = 3_000,
+): Promise<void> {
+  for (let attempt = 0; attempt < timeoutMs / 50; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
     if (until(dom)) {
       return;
@@ -313,10 +329,36 @@ async function main(): Promise<void> {
       }
       return broken.length === 0 ? null : `navigation leads to a dead end: ${broken.join(', ')}`;
     });
+
+    await step('DataSources', '1.1.18, 11.2.23', 'the manager can trigger an ingestion run from the screen', async () => {
+      const dom = await boot('/ops/sources');
+      fill(dom, 'email', email);
+      fill(dom, 'password', password);
+      clickText(dom, 'button', 'sign in');
+      // The guard sends an unauthenticated visitor to /signin and returns them here afterwards
+      // (11.1.10), so this also exercises that path rather than navigating twice.
+      await settle(dom, (d) => d.window.document.querySelector('[data-action="refresh"]') !== null);
+
+      const button = dom.window.document.querySelector('[data-action="refresh"]') as HTMLElement | null;
+      if (button === null) {
+        return `no refresh control on ${screenOf(dom)}`;
+      }
+      button.click();
+      // The real thing: three public APIs are actually called on the other side of this click.
+      await settle(dom, (d) => d.window.document.querySelector('[data-part="refresh-outcome"]') !== null, 30_000);
+      const outcome = dom.window.document.querySelector('[data-part="refresh-outcome"]')?.textContent ?? '';
+      if (outcome === '') {
+        return 'the run reported nothing back';
+      }
+      // A source may genuinely be down, and that is a real answer — but the panel must name a
+      // source either way, rather than showing a bare apology.
+      return /Clusters|Rainfall|Forecast/.test(outcome) ? null : `unexpected outcome: ${outcome}`;
+    });
   } else {
     skip('OpsDashboard', '11.2.12', 'the dashboard shows real counts', 'the manager could not sign in');
     skip('OpsDashboard', '11.1.4', 'the shell shows the role', 'the manager could not sign in');
     skip('Navigation', '11.3.2', 'every navigation item leads to a screen', 'the manager could not sign in');
+    skip('DataSources', '1.1.18', 'the manager can trigger an ingestion run', 'the manager could not sign in');
   }
 
   report();

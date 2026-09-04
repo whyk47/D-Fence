@@ -57,6 +57,11 @@ export class AccessPolicy {
         'staff:manage',
         'dashboard:read',
         'sourceHealth:read',
+        // 1.1.18 — a manual ingestion run spends the department's quota against three public APIs
+        // and rewrites the scores every screen reads. 2.3.4 gives it to the manager and nobody else;
+        // it is listed here rather than checked inside IngestionController for the same reason as
+        // every other role rule.
+        'ingestion:trigger',
       ]),
     ],
     // 2.3.5: only work orders assigned to that member — hence workOrder:readAssigned, not readAll.

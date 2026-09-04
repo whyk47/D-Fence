@@ -39,9 +39,19 @@ interface Outcome {
 const outcomes: Outcome[] = [];
 const base = argument('base') ?? 'http://localhost:3000';
 
+/**
+ * `--name value` or `--name=value`. Both, because accepting only the first form made this tool
+ * silently ignore `--base=http://localhost:3140` and run the whole acceptance suite against
+ * whatever happened to be listening on the default port — a set of plausible passes against the
+ * wrong process, which is worse than a failure.
+ */
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
-  return index === -1 ? undefined : process.argv[index + 1];
+  if (index !== -1) {
+    return process.argv[index + 1];
+  }
+  const inline = process.argv.find((a) => a.startsWith(`--${name}=`));
+  return inline === undefined ? undefined : inline.slice(name.length + 3);
 }
 
 /** A session: a bearer token and the role it was issued for. */
@@ -544,6 +554,27 @@ async function main(): Promise<void> {
       return sources.every((s) => 'lastSuccessAt' in s && 'isWarning' in s)
         ? null
         : 'a source is missing lastSuccessAt or isWarning';
+    });
+
+    await step('C', '1.1.18', 'a manager can trigger an ingestion run and gets its outcome back', async () => {
+      // The Rainfall source alone: it is the five-minute feed, so a manual run costs the least
+      // against 10.4.6's courtesy budget while still exercising the whole path.
+      const result = await call(manager, 'POST', '/api/ops/sources/refresh', { source: 'Rainfall' });
+      if (result.status !== 200) {
+        return `expected 200, got ${result.status}: ${JSON.stringify(result.body)}`;
+      }
+      const runs = (result.body.runs ?? []) as Array<Record<string, unknown>>;
+      if (runs.length !== 1 || runs[0]?.source !== 'Rainfall') {
+        return `expected one Rainfall run, got ${JSON.stringify(runs)}`;
+      }
+      // A FAILED outcome is a real answer here — the feed may genuinely be down — but the run must
+      // have been recorded and the panel must come back with it, or the screen has nothing to show.
+      return Array.isArray(result.body.sources) ? null : 'the health panel did not come back with the run';
+    });
+
+    await step('D', '1.1.18, 2.3.4', 'a resident cannot trigger an ingestion run', async () => {
+      const result = await call(resident, 'POST', '/api/ops/sources/refresh', {});
+      return result.status === 403 ? null : `expected 403, got ${result.status}`;
     });
 
     await step('C', '8.1.7, 8.1.8', 'a daily dispatch list is proposed', async () => {

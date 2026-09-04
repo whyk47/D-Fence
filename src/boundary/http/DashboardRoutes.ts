@@ -6,7 +6,8 @@
  *   GET /api/ops/dashboard          overview + attention panel (7.1, 7.5)
  *   GET /api/ops/priority           the priority table, with tier/sort query parameters (7.2)
  *   GET /api/ops/priority.csv       the current filtered view as CSV (7.4.2, 7.4.3)
- *   GET /api/ops/sources            source health (7.5.1)
+ *   GET  /api/ops/sources           source health (7.5.1)
+ *   POST /api/ops/sources/refresh   run every source now, then rescore (1.1.18)
  *
  * **No business rule lives in this file.** A boundary class translates HTTP into a control call and
  * a result into JSON; it does not decide. The only judgement here is which query parameters are
@@ -16,7 +17,8 @@ import { RouteHandler, Request, Response } from './RouteHandler';
 import { AccessControlService } from '../../control/AccessControlService';
 import { DashboardController, TableQuery, SortColumn } from '../../control/DashboardController';
 import { AnalyticsController } from '../../control/AnalyticsController';
-import { PriorityTier } from '../../entity/enums';
+import { IngestionController, IngestionAlreadyRunning } from '../../control/IngestionController';
+import { PriorityTier, SourceKind } from '../../entity/enums';
 
 export class DashboardRoutes extends RouteHandler {
   constructor(
@@ -25,6 +27,9 @@ export class DashboardRoutes extends RouteHandler {
     /** 7.3.x. Optional so the dashboard routes predate the charts rather than being blocked
      *  by them; the route answers `null` rather than 404 when it is absent. */
     private readonly analytics: AnalyticsController | null = null,
+    /** 1.1.18. Optional for the same reason as `analytics`: a handler unit test that only reads
+     *  the dashboard should not have to construct three ingestion jobs to do it. */
+    private readonly ingestion: IngestionController | null = null,
   ) {
     super(ac);
   }
@@ -37,6 +42,15 @@ export class DashboardRoutes extends RouteHandler {
       '/api/ops/analytics',
       '/api/ops/sources',
     ];
+  }
+
+  /**
+   * The one path in this file that changes anything. Registered before `/api/ops/sources` in the
+   * list above would make no difference to Express — they are distinct literal paths — but the
+   * separation into `writeRoutes` is what marks it as state-changing, and 10.3.6 applies to it.
+   */
+  override writeRoutes(): string[] {
+    return ['/api/ops/sources/refresh'];
   }
 
   async handle(req: Request, res: Response): Promise<void> {
@@ -68,10 +82,33 @@ export class DashboardRoutes extends RouteHandler {
         case '/api/ops/sources':
           res.json({ sources: await this.dashboard.reportSourceHealth() });
           return;
+        case '/api/ops/sources/refresh': {
+          if (this.ingestion === null) {
+            // Stated rather than 404'd: the screen asked a reasonable question and deserves to
+            // know the answer is "this deployment has no ingestion wired", not "no such route".
+            res.status(503).json({
+              error: 'manual ingestion is not available in this deployment',
+              remedy: 'start the server with its ingestion jobs configured',
+            });
+            return;
+          }
+          // An unrecognised source name is ignored, as elsewhere in this file: refreshing
+          // everything is the sane reading of a stale bookmark, and refusing is not.
+          const requested = (req.body as { source?: string } | undefined)?.source;
+          const source = Object.values(SourceKind).find((k) => k === requested);
+          res.json(await this.ingestion.runManual(principal, source));
+          return;
+        }
         default:
           res.status(404).json({ error: 'no such route', remedy: 'check the path' });
       }
     } catch (error) {
+      if (error instanceof IngestionAlreadyRunning) {
+        // 409, not 500: nothing is broken. The second click arrived while the first was still
+        // fetching, and saying so is more useful than a spinner that never resolves.
+        res.status(409).json({ error: error.message, remedy: 'wait for the run in progress to finish' });
+        return;
+      }
       this.fail(res, error instanceof Error ? error : new Error(String(error)));
     }
   }

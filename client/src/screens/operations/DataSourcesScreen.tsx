@@ -1,6 +1,6 @@
 /**
  * D-Fence — Data Sources (REQUIREMENTS.md 11.2.23).
- * Stereotype: <<boundary>>. Traces: 11.2.23, 1.4.1–1.4.4, 10.2.2, 10.5.7, 11.7.5.
+ * Stereotype: <<boundary>>. Traces: 11.2.23, 1.1.18, 1.4.1–1.4.4, 10.2.2, 10.5.7, 11.7.5.
  *
  * The screen that says whether the numbers on every other screen can be trusted today.
  *
@@ -12,10 +12,21 @@
  *
  * "Never succeeded" is rendered as its own sentence rather than as a very old timestamp: 1.4.1
  * distinguishes them, and "last success: never" is a different problem from "last success: Tuesday".
+ *
+ * 1.1.18's manual run lives here rather than on the dashboard because this is the screen a manager
+ * is already on when they want it: a source has just been reported as failing, and the question
+ * "is it back?" should be answerable without waiting an hour for the next scheduled cycle.
  */
+import { useState } from 'react';
 import { useLoad } from '../../lib/useLoad';
 import { StateView } from '../../components/States';
+import { ApiError } from '../../lib/ApiClient';
 import { ScreenProps } from '../ScreenProps';
+
+/** What POST /api/ops/sources/refresh answers with (1.1.18). */
+interface RefreshResult {
+  runs: Array<{ source: string; outcome: string; featureCount: number }>;
+}
 
 interface SourcesPayload {
   sources: Array<{
@@ -33,9 +44,62 @@ export function DataSourcesScreen(props: ScreenProps): JSX.Element {
     emptyMessage: 'No sources are registered.',
   });
 
+  // Deliberately not a `LoadState`: this is an action's outcome, not the screen's data. Folding it
+  // into the table's state would blank the table while the run is in flight, and the previous
+  // reading is exactly what the manager wants to compare the new one against.
+  const [running, setRunning] = useState(false);
+  const [outcome, setOutcome] = useState<string | null>(null);
+
+  async function refresh(): Promise<void> {
+    setRunning(true);
+    setOutcome(null);
+    try {
+      const result = await props.api.post<RefreshResult>('/api/ops/sources/refresh', {});
+      setOutcome(
+        result.runs.length === 0
+          ? 'The run completed, but no source reported back.'
+          : result.runs.map((r) => `${r.source}: ${describeOutcome(r)}`).join(' · '),
+      );
+      // The table is reloaded rather than replaced from the response body: `useLoad` owns this
+      // screen's data, and writing to it from two places is how the two disagree.
+      retry();
+    } catch (error) {
+      // 10.5.3 — the server's own cause and remedy, not a generic apology. A 409 here means
+      // somebody (or the previous click) is already running one, and saying so is the answer.
+      const failure = error instanceof ApiError ? error.failure : null;
+      setOutcome(
+        failure === null
+          ? 'The run could not be started. Try again shortly.'
+          : `${failure.error} — ${failure.remedy}`,
+      );
+    } finally {
+      setRunning(false);
+    }
+  }
+
   return (
     <section data-screen="DataSources" data-requirement="11.2.23">
       <h1>Data sources</h1>
+
+      {/* 1.1.18 — outside StateView on purpose: a source health request that failed is one of the
+          moments the manager most wants this button, and hiding it behind its own error would
+          leave them with a retry and no way to make the thing they are retrying succeed. */}
+      <p data-part="refresh">
+        <button type="button" onClick={() => void refresh()} disabled={running} data-action="refresh">
+          {running ? 'Refreshing…' : 'Refresh now'}
+        </button>{' '}
+        <span data-part="refresh-note">
+          Fetches every source immediately and rescores. Sources are refreshed on their own
+          schedule regardless.
+        </span>
+      </p>
+      {/* 11.7.5, 11.4.x — the result in words, and announced: a manager who has just pressed a
+          button that takes seconds needs to be told it finished. */}
+      {outcome === null ? null : (
+        <p data-part="refresh-outcome" role="status">
+          {outcome}
+        </p>
+      )}
 
       <StateView state={state} onRetry={retry}>
         <table>
@@ -66,6 +130,17 @@ export function DataSourcesScreen(props: ScreenProps): JSX.Element {
       </StateView>
     </section>
   );
+}
+
+/** 1.1.21 — UNCHANGED is a successful run that found nothing new, and must not read as a failure. */
+function describeOutcome(run: { outcome: string; featureCount: number }): string {
+  if (run.outcome === 'UNCHANGED') {
+    return 'no change published';
+  }
+  if (run.outcome === 'FAILED') {
+    return 'failed';
+  }
+  return `${run.featureCount} record(s)`;
 }
 
 /**

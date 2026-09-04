@@ -83,6 +83,8 @@ import { AccessControlService } from './control/AccessControlService';
 import { AccessPolicy } from './control/AccessPolicy';
 import { DashboardController, principalFor } from './control/DashboardController';
 import { SourceHealthController } from './control/SourceHealthController';
+import { IngestionController } from './control/IngestionController';
+import { AbstractIngestionJob } from './control/ingestion/AbstractIngestionJob';
 import { AnalyticsController } from './control/AnalyticsController';
 import { PrivacyController } from './control/PrivacyController';
 import { ClusterIngestionJob } from './control/ingestion/ClusterIngestionJob';
@@ -252,6 +254,25 @@ async function main(): Promise<void> {
     // the five-minute rainfall beat — 288 requests a day for a payload that changes four times is
     // exactly the discourtesy 10.4.6 asks us not to commit against a free public API.
     const forecastRun = await forecastCycle(trigger);
+    await scoreAndAlert(rainRun.outcome === 'FAILED');
+    console.log(
+      `cycle: clusters ${clusterRun.outcome} (${clusterRun.featureCount}), ` +
+        `rainfall ${rainRun.outcome} (${rainRun.featureCount}), ` +
+        `forecast ${forecastRun ?? 'SKIPPED'}`,
+    );
+  }
+
+  /**
+   * The half of a cycle that follows ingestion: score, re-evaluate exposure, evaluate and deliver
+   * alerts. Split out so 1.1.18's manual trigger runs *this* rather than a second copy of it —
+   * `IngestionController` runs the jobs itself and then calls in here, and the two paths cannot
+   * drift because there is only one.
+   *
+   * @param rainfallFailed the rainfall drivers are marked stale rather than treated as zero
+   *   (10.2.2). Missing is not the same as none, and scoring them as none would quietly rank a
+   *   drenched cluster as dry.
+   */
+  async function scoreAndAlert(rainfallFailed: boolean): Promise<void> {
     const active = await clusters.findActive();
     if (active.length === 0) {
       return;
@@ -260,7 +281,7 @@ async function main(): Promise<void> {
     // 4.1.3 is no longer degraded: reports exist, and a cluster with none genuinely has zero
     // (5.2.5). Only rainfall can still go missing, and missing is not the same as zero.
     const stale: Driver[] = [];
-    if (rainRun.outcome === 'FAILED') {
+    if (rainfallFailed) {
       stale.push(Driver.Rainfall24h, Driver.Rainfall72h);
     }
     engine.markStale(stale);
@@ -299,11 +320,7 @@ async function main(): Promise<void> {
       const tally = await notifications.deliverAll(due, now);
       console.log(`  alerts: ${tally.Sent} sent, ${tally.Failed} failed, ${tally.Suppressed} suppressed`);
     }
-    console.log(
-      `cycle: clusters ${clusterRun.outcome} (${clusterRun.featureCount}), ` +
-        `rainfall ${rainRun.outcome} (${rainRun.featureCount}), ` +
-        `forecast ${forecastRun ?? 'SKIPPED'}, scored ${active.length}`,
-    );
+    console.log(`  scored ${active.length} active cluster(s)`);
   }
 
   /**
@@ -396,6 +413,19 @@ async function main(): Promise<void> {
   // (10.6.2) rather than from constants, and the geocoder reporting for itself (3.1.16).
   const sourceHealth = new SourceHealthController(runs, config.ingestionIntervals, geocoding);
   const dashboard = new DashboardController(ac, clusters, scores, runs, workOrders, reports, sourceHealth);
+  // 1.1.18 — the manual trigger runs the same three jobs the scheduler runs, then the same
+  // scoring half, and answers with the health panel as it stands afterwards. The geocoder is
+  // absent on purpose: it has no ingestion job (3.1.16).
+  const ingestion = new IngestionController(
+    ac,
+    new Map<SourceKind, AbstractIngestionJob>([
+      [SourceKind.Clusters, clusterJob],
+      [SourceKind.Rainfall, rainJob],
+      [SourceKind.Forecast, forecastJob],
+    ]),
+    sourceHealth,
+    { rescore: (rainfallFailed: boolean) => scoreAndAlert(rainfallFailed) },
+  );
   const lifecycle = new WorkOrderLifecycleController(
     new WorkOrderTransitionTable(),
     workOrders,
@@ -419,7 +449,7 @@ async function main(): Promise<void> {
   const app = new ExpressApp(authentication, process.env.DFENCE_REQUIRE_HTTPS === 'true');
   // 7.3.1-7.3.5 — the five charts, over the same stores everything else reads.
   const analytics = new AnalyticsController(ac, clusters, scores, workOrders, reports);
-  app.mount(new DashboardRoutes(ac, dashboard, analytics));
+  app.mount(new DashboardRoutes(ac, dashboard, analytics, ingestion));
   app.mount(new ReportRoutes(ac, residentReports));
   app.mount(new ModerationRoutes(ac, moderation));
   app.mount(new AuthRoutes(ac, authentication));

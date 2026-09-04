@@ -8,7 +8,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ClusterIngestionJob } from '../src/control/ingestion/ClusterIngestionJob';
-import { RunOutcome } from '../src/control/ingestion/AbstractIngestionJob';
+import { AbstractIngestionJob, RunOutcome } from '../src/control/ingestion/AbstractIngestionJob';
+import { IngestionController, IngestionAlreadyRunning } from '../src/control/IngestionController';
+import { SourceHealthController } from '../src/control/SourceHealthController';
+import { AccessControlService } from '../src/control/AccessControlService';
+import { AccessPolicy } from '../src/control/AccessPolicy';
+import { Principal } from '../src/control/Principal';
+import { IngestionRun } from '../src/entity/IngestionRun';
+import { Role } from '../src/entity/enums';
 import { PriorityScoringEngine } from '../src/control/PriorityScoringEngine';
 import { NormalisationFactory } from '../src/control/normalisation/NormalisationFactory';
 import { ConfigSet } from '../src/config/ConfigSet';
@@ -17,6 +24,7 @@ import {
   InMemoryClusterStore,
   InMemoryIngestionRunStore,
   InMemoryPriorityScoreStore,
+  InMemoryAuditStore,
 } from '../src/persistence/memory/InMemoryStores';
 import { Driver, PriorityTier, SourceKind, ChangeClass } from '../src/entity/enums';
 import { RawPayload } from '../src/ports/types';
@@ -279,6 +287,141 @@ describe('A full scoring cycle over ingested clusters', () => {
     const score = engine.scoreOne(punggol!, { rainfall24h: 0, rainfall72h: 0, verifiedOpenReports: 0, daysSinceLastTreatment: 0 });
     expect(score.isDegraded).toBe(false);
     expect(score.tier).toBe(PriorityTier.Low);
+  });
+});
+
+/**
+ * Lab 4 §2.23 — 1.1.18's manual ingestion trigger.
+ *
+ * A fake job rather than a real one: what is under test is the controller's contract — who may
+ * run it, what trigger it records, that scoring follows, and that a second concurrent run is
+ * refused — none of which depend on any particular source's parsing.
+ */
+class FakeJob extends AbstractIngestionJob {
+  triggers: string[] = [];
+  constructor(
+    private readonly kind: SourceKind,
+    runs: InMemoryIngestionRunStore,
+    private readonly fails = false,
+  ) {
+    // The gateway is never reached: `fetch` is overridden below.
+    super(undefined as unknown as never, runs);
+  }
+  protected override sourceKind(): SourceKind {
+    return this.kind;
+  }
+  protected override fetch(): Promise<RawPayload> {
+    if (this.fails) {
+      throw new Error('the source is down');
+    }
+    return Promise.resolve({} as RawPayload);
+  }
+  protected override parse(): Promise<never> {
+    return Promise.resolve([] as unknown as never);
+  }
+  protected override persist(): Promise<number> {
+    return Promise.resolve(1);
+  }
+  override run(trigger: 'SCHEDULED' | 'MANUAL' = 'SCHEDULED'): Promise<IngestionRun> {
+    this.triggers.push(trigger);
+    return super.run(trigger);
+  }
+}
+
+describe('Manual ingestion trigger — §1.1.18, §2.3.4', () => {
+  function build(failRainfall = false): {
+    controller: IngestionController;
+    jobs: Map<SourceKind, FakeJob>;
+    rescores: boolean[];
+  } {
+    const runStore = new InMemoryIngestionRunStore();
+    const jobs = new Map<SourceKind, FakeJob>([
+      [SourceKind.Clusters, new FakeJob(SourceKind.Clusters, runStore)],
+      [SourceKind.Rainfall, new FakeJob(SourceKind.Rainfall, runStore, failRainfall)],
+    ]);
+    const rescores: boolean[] = [];
+    const controller = new IngestionController(
+      new AccessControlService(new AccessPolicy(), new InMemoryAuditStore()),
+      jobs as Map<SourceKind, AbstractIngestionJob>,
+      new SourceHealthController(runStore),
+      { rescore: (rainfallFailed) => { rescores.push(rainfallFailed); return Promise.resolve(); } },
+    );
+    return { controller, jobs, rescores };
+  }
+
+  const manager = new Principal('mgr-1', Role.OperationsManager, 's1');
+
+  it('M1 — every source runs, recorded as MANUAL, and scoring follows once (1.1.18)', async () => {
+    const { controller, jobs, rescores } = build();
+
+    const result = await controller.runManual(manager);
+
+    expect(jobs.get(SourceKind.Clusters)!.triggers).toEqual(['MANUAL']);
+    expect(jobs.get(SourceKind.Rainfall)!.triggers).toEqual(['MANUAL']);
+    expect(result.runs.map((r) => r.outcome)).toEqual([RunOutcome.Success, RunOutcome.Success]);
+    // Once, after both sources — not once per source. Scoring between two sources would score
+    // against a half-updated picture.
+    expect(rescores).toEqual([false]);
+    // The panel comes back with the run, so the screen needs no second request.
+    expect(result.sources.length).toBeGreaterThan(0);
+  });
+
+  it('M2 — a Resident is refused, and no source is touched (2.3.4, 2.3.7)', async () => {
+    const { controller, jobs, rescores } = build();
+
+    await expect(controller.runManual(new Principal('r-1', Role.Resident, 's2'))).rejects.toThrow(/not authorised/);
+
+    // The refusal must come before the work, not after it: a refused caller must not be able to
+    // spend the department's API quota anyway.
+    expect(jobs.get(SourceKind.Clusters)!.triggers).toEqual([]);
+    expect(rescores).toEqual([]);
+  });
+
+  it('M3 — one named source runs alone, so checking a recovering feed costs only that feed', async () => {
+    const { controller, jobs } = build();
+
+    const result = await controller.runManual(manager, SourceKind.Rainfall);
+
+    expect(jobs.get(SourceKind.Rainfall)!.triggers).toEqual(['MANUAL']);
+    expect(jobs.get(SourceKind.Clusters)!.triggers).toEqual([]);
+    expect(result.runs).toHaveLength(1);
+  });
+
+  it('M4 — a failed rainfall run marks its drivers stale rather than scoring them as zero (10.2.2)', async () => {
+    const { controller, rescores } = build(true);
+
+    const result = await controller.runManual(manager);
+
+    expect(result.runs.find((r) => r.source === SourceKind.Rainfall)?.outcome).toBe(RunOutcome.Failed);
+    // The failure is carried into scoring. Missing rainfall is not zero rainfall, and treating it
+    // as zero would quietly rank a drenched cluster as dry.
+    expect(rescores).toEqual([true]);
+    // 10.2.4 — the other source still ran and still counted.
+    expect(result.runs.find((r) => r.source === SourceKind.Clusters)?.outcome).toBe(RunOutcome.Success);
+  });
+
+  it('M5 — a second run started while the first is in flight is refused, not queued', async () => {
+    const { controller } = build();
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Hold the first run open inside the rescore step, which is the longest part of a real one.
+    const slow = new IngestionController(
+      new AccessControlService(new AccessPolicy(), new InMemoryAuditStore()),
+      new Map<SourceKind, AbstractIngestionJob>(),
+      new SourceHealthController(new InMemoryIngestionRunStore()),
+      { rescore: () => gate },
+    );
+
+    const first = slow.runManual(manager);
+    await expect(slow.runManual(manager)).rejects.toThrow(IngestionAlreadyRunning);
+
+    release();
+    await first;
+    // And the guard clears: the trigger is not jammed for the life of the process.
+    await expect(slow.runManual(manager)).resolves.toBeTruthy();
+    void controller;
   });
 });
 
