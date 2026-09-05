@@ -269,3 +269,72 @@ describe('Uploading a photograph over HTTP — §5.1.5, §8.3.6, §10.3.6', () =
     expect(response.status).toBe(403);
   });
 });
+
+/**
+ * §11.8's server side: three files whose *headers* decide whether the application is installable at
+ * all, and which `express.static` would get wrong.
+ *
+ * Every one of these fails silently. A manifest served as `application/json` is ignored by Chrome
+ * and the install prompt never appears — with no error anywhere. A cached `sw.js` is a worker that
+ * can never be replaced, which outlives every subsequent deployment. There is nothing to see in a
+ * browser until the day someone tries to install it.
+ */
+describe('Serving an installable application — §11.8.1, §11.8.7, §11.8.11', () => {
+  let mobileBase = '';
+  let mobileServer: Server;
+
+  beforeAll(async () => {
+    const app = new ExpressApp(null, false);
+    // `client/public` rather than the build output: these three files are committed, so the test
+    // does not depend on a build having been run first.
+    app.serveClient(new URL('../client/public/', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+    const express = (app as unknown as { app: { listen: (p: number, cb: () => void) => Server } }).app;
+    mobileServer = await new Promise<Server>((resolve) => {
+      const listening = express.listen(0, () => {
+        mobileBase = `http://127.0.0.1:${(listening.address() as AddressInfo).port}`;
+        resolve(listening);
+      });
+    });
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => mobileServer.close(() => resolve()));
+  });
+
+  it('H14 — the manifest is served as application/manifest+json (11.8.1)', async () => {
+    const response = await fetch(`${mobileBase}/manifest.webmanifest`);
+    expect(response.status).toBe(200);
+    // As `application/json` Chrome ignores the file and never offers installation, silently.
+    expect(response.headers.get('content-type')).toContain('application/manifest+json');
+    const manifest = (await response.json()) as { display: string; icons: unknown[] };
+    expect(manifest.display).toBe('standalone');
+    expect(manifest.icons.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('H15 — the service worker is served, uncached, and allowed root scope (11.8.7, 11.8.11)', async () => {
+    const response = await fetch(`${mobileBase}/sw.js`);
+    expect(response.status).toBe(200);
+    // A cached service worker is one that can never be replaced — the single failure mode here
+    // that survives a deployment and cannot be fixed from the server afterwards.
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    expect(response.headers.get('service-worker-allowed')).toBe('/');
+  });
+
+  it('H16 — the icons are served as PNGs (11.8.3)', async () => {
+    for (const icon of ['/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png']) {
+      const response = await fetch(`${mobileBase}${icon}`);
+      expect(response.status, icon).toBe(200);
+      expect(response.headers.get('content-type'), icon).toContain('image/png');
+    }
+  });
+
+  it('H17 — the policy permits the worker and the manifest, and still nothing inline (11.8.7)', async () => {
+    const csp = (await fetch(`${mobileBase}/manifest.webmanifest`)).headers.get('content-security-policy') ?? '';
+    // `worker-src` does not fall back to `default-src` everywhere; without it Safari refuses the
+    // registration, and Chrome checks `manifest-src` before offering installation at all.
+    expect(csp).toContain("worker-src 'self'");
+    expect(csp).toContain("manifest-src 'self'");
+    expect(csp).not.toContain('unsafe-inline');
+  });
+});
+

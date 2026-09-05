@@ -10,6 +10,7 @@
  * lacks permission — the server concluded that (2.3.6) — it is the client showing the answer.
  */
 import { LoadState } from './LoadState';
+import { OFFLINE_CAUSE, OFFLINE_REMEDY } from './InstallableApp';
 
 export interface ApiFailure {
   status: number;
@@ -86,10 +87,16 @@ export class ApiClient {
     } catch (cause) {
       // The network, not the server. 10.5.3 wants a cause and a remedy, and "check your
       // connection" is the only honest remedy here.
+      //
+      // 11.8.9 — when the device itself reports no network, say so plainly. This is the one place
+      // the distinction can be made once for every screen: "could not reach D-Fence" sends a user
+      // on a train into a tunnel looking for a fault in the application, and the retry control
+      // they need is already on the screen either way.
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
       throw new ApiError({
         status: 0,
-        error: 'could not reach D-Fence',
-        remedy: 'check your connection and try again',
+        error: offline ? OFFLINE_CAUSE : 'could not reach D-Fence',
+        remedy: offline ? OFFLINE_REMEDY : 'check your connection and try again',
         correlationId: null,
         body: {},
       });

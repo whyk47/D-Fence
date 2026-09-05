@@ -90,6 +90,11 @@ export class ExpressApp {
           "img-src 'self' data:",
           "connect-src 'self'",
           "font-src 'self'",
+          // 11.8.7 — the service worker is same-origin, and `worker-src` does not fall back to
+          // `default-src` in every browser; without it Safari refuses the registration.
+          "worker-src 'self'",
+          // 11.8.1 — Chrome checks `manifest-src` before it will offer installation at all.
+          "manifest-src 'self'",
           "object-src 'none'",
           "base-uri 'self'",
           "form-action 'self'",
@@ -166,6 +171,27 @@ export class ExpressApp {
    * in the wrong place entirely.
    */
   serveClient(directory: string): void {
+    /**
+     * 11.8.1, 11.8.7, 11.8.11 — three files that `express.static` would serve with the wrong
+     * headers, registered before it so they win.
+     *
+     * The manifest needs `application/manifest+json`; served as `application/json` Chrome ignores
+     * it and never offers installation. The service worker must not be cached — a cached `sw.js`
+     * is a worker that can never be replaced, which is the one failure mode that outlives a
+     * deployment and cannot be fixed from the server side.
+     */
+    this.app.get('/manifest.webmanifest', (_req: ExRequest, res: ExResponse) => {
+      res.type('application/manifest+json');
+      res.sendFile('manifest.webmanifest', { root: directory });
+    });
+    this.app.get('/sw.js', (_req: ExRequest, res: ExResponse) => {
+      res.type('application/javascript');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      // A worker's scope cannot rise above the path it is served from; this header is what lets a
+      // root-scoped worker be served from anywhere, and it is free insurance if the path moves.
+      res.setHeader('Service-Worker-Allowed', '/');
+      res.sendFile('sw.js', { root: directory });
+    });
     this.app.use(
       express.static(directory, {
         // The bundle's name is fixed, so it must not be cached across a deployment; the index is

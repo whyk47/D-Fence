@@ -1,6 +1,6 @@
 # D-Fence — Atomised Software Requirements
 
-Version 0.5 · drafted 2026-09-02, revised 2026-09-03 · status: DRAFT for team review
+Version 0.6 · drafted 2026-09-02, revised 2026-09-05 · status: DRAFT for team review
 Revised after adversarial review; findings and dispositions are recorded in §14.
 Project: NTU SC2006/CZ2006 team project (dengue sanitisation prioritiser)
 Working product name is a placeholder.
@@ -645,6 +645,50 @@ the list the Lab 1 UI mockups must cover.*
 - **11.7.8** The system shall use the terms defined in the data dictionary consistently across every screen.
 - **11.7.9** The system shall provide a page title distinct to each screen in 11.2.
 
+## 11.8 Mobile application
+
+*Added in v0.6, 2026-09-05. §11 assumed a browser on a laptop. Two of the three roles do not work
+that way: 8.4.x has a Cleaning Crew Member reading their jobs and photographing a drain in the
+field, and §5–§6 have a Resident reporting a site where they are standing and receiving an alert
+about where they live. Those are phone tasks, and the requirements did not say so anywhere a test
+could reach.*
+
+*The obligations below are written against an **installable web application** — one codebase,
+launched from the device home screen, running without browser chrome. See §13 for why that reading
+was taken rather than a second, native codebase, and what would have to change if the team decides
+otherwise.*
+
+- **11.8.1** The system shall serve a web application manifest at `/manifest.webmanifest` with the
+  media type `application/manifest+json`.
+- **11.8.2** The manifest shall declare `name`, `short_name`, `start_url`, `scope`, a `display`
+  value of `standalone`, `theme_color` and `background_color`.
+- **11.8.3** The system shall provide application icons of 192×192 and 512×512 pixels in PNG format.
+- **11.8.4** The system shall declare at least one icon with a `purpose` of `maskable`, so an
+  Android launcher can crop it to the device's icon shape without clipping content.
+- **11.8.5** The system shall declare a viewport that adapts to the device width at an initial scale
+  of 1.
+- **11.8.6** The system shall permit the user to zoom the page. *(Stated as a requirement because
+  the usual way to make a web page "feel native" is `user-scalable=no`, which would contradict
+  §11.7's accessibility obligations. The prohibition is therefore explicit rather than implied.)*
+- **11.8.7** The system shall register a service worker scoped to the whole application.
+- **11.8.8** The system shall serve the application shell from the service worker's cache when the
+  device has no network connection.
+- **11.8.9** The system shall present the message "You are offline" and the screen's own retry
+  control, rather than the browser's network error page, when a data request fails while the device
+  reports itself offline.
+- **11.8.10** The system shall not serve a cached response to a request under `/api/`. *(A stale
+  cluster count presented as current is worse than no cluster count: §7.1.9 requires the age of the
+  data to be shown, and a cached answer would make that statement false.)*
+- **11.8.11** The system shall replace a cached application shell when a deployment changes it,
+  without the user clearing site data.
+- **11.8.12** The system shall present an install control on a device whose browser offers
+  installation, and shall not present it once the application is running installed.
+- **11.8.13** The system shall offer the device camera as a capture source for a photograph on the
+  Report a Site screen and on the Job Completion screen.
+- **11.8.14** The system shall declare an `apple-touch-icon` and `apple-mobile-web-app-capable`, so
+  the application launches full-screen when added to the home screen on iOS. *(iOS ignores the
+  manifest for both.)*
+
 ---
 
 # 12. Traceability
@@ -678,6 +722,7 @@ reader of this document alone can tell assumption from requirement.*
 | 4.1.4 | The normalisation method chosen per driver | Judgement, argued from the live payload | A driver saturates too early or too late and stops discriminating |
 | 1.2.6 | Inverse-distance weighting over the three nearest stations | Judgement | A cluster's rainfall is over- or under-stated where stations are sparse |
 | 1.2.5 | Three stations is the right number | Judgement | Too few is noisy, too many washes out local rain |
+| 11.8.x | "Accessible from a mobile app" means an **installable web application**, not a second native codebase | Judgement, recorded 2026-09-05 when the requirement was raised. `lab2/AI-TECH-STACK.md` had already decided against a native app — the crew journey is three screens and a camera upload — and that decision is not reversed here so much as *satisfied differently*: an installable web application is launched from the home screen, runs without browser chrome and works offline, which is what "from a mobile app" asks for in every respect a user can observe. A native build would duplicate every screen in a second language for the same three journeys, and could not be delivered before the demonstration | If the module requires a **native** artefact — an APK, or a React Native/Flutter project — this does not satisfy it, and the gap is one deliverable rather than one feature. Nothing built for 11.8 is wasted in that case: the API, the roles and the journeys are unchanged, and only the presentation layer would be rebuilt |
 | 9.1.10 | A ±10% change over the fortnight separates Growing and Receding from Stable | Judgement, added 2026-09-03 with the implementation. 9.1.10 names three classes and does not say where the lines fall; below 10% a single late-reported case would flip the label on a small cluster every other day | The trend column flickers, or a real escalation reads as Stable |
 
 **The polling question is now answered, and the answer shaped the design.** A live pull on

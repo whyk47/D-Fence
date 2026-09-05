@@ -1,0 +1,24 @@
+{
+  "$comment": "REQUIREMENTS.md 11.8.1-11.8.4. Served with the application/manifest+json media type by ExpressApp.",
+  "name": "D-Fence — dengue sanitisation prioritiser",
+  "short_name": "D-Fence",
+  "description": "Ranks Singapore's active dengue clusters by how urgently they need sanitisation, and dispatches the crews that clear them.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#1b5e56",
+  "background_color": "#ffffff",
+  "lang": "en-SG",
+  "categories": ["government", "health", "utilities"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Report a site", "short_name": "Report", "url": "/reports/new", "description": "Report standing water or a breeding site where you are standing" },
+    { "name": "My jobs", "short_name": "Jobs", "url": "/crew/jobs", "description": "The jobs assigned to you today" }
+  ]
+}

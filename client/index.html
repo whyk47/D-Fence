@@ -2,8 +2,12 @@
 <html lang="en-SG">
   <head>
     <meta charset="utf-8" />
-    <!-- 11.7.7 — the crew screens are used on a phone, held at arm's length, outdoors. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- 11.7.7, 11.8.5 — the crew screens are used on a phone, held at arm's length, outdoors.
+         11.8.6: zoom is deliberately left enabled. Turning it off is the usual way to make a web
+         page feel native, and it takes away the one adjustment a person with poor eyesight can
+         make for themselves. §11.7 would not survive it, and a test asserts the opt-out does not
+         appear anywhere in this file. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>D-Fence — dengue sanitisation prioritiser</title>
     <meta
       name="description"
@@ -12,6 +16,18 @@
     <!-- No CDN. A demonstration on conference wifi should not depend on a third party being up,
          and 10.4.5 is about the data sources being public, not about the stylesheet being remote. -->
     <link rel="stylesheet" href="/styles.css" />
+
+    <!-- 11.8.1-11.8.4 — installable from the home screen, launching without browser chrome.
+         The manifest is the whole declaration; the service worker registered in main.tsx is what
+         makes it work offline. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1b5e56" />
+    <!-- 11.8.14 — iOS reads neither the manifest's icons nor its display mode. These two tags are
+         the only way an installed D-Fence launches full-screen on an iPhone. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="D-Fence" />
   </head>
   <body>
     <!-- 11.7.2 — a keyboard user should not tab through the whole navigation on every screen. -->

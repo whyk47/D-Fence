@@ -5,8 +5,16 @@
  * The shell owns three things and no more: the chrome around a screen, the guard decision for the
  * current URL, and the sign-out control. It renders **no domain content** — every screen does its
  * own fetching — so that adding a screen never means editing this file.
+ *
+ * It also carries the two application-wide mobile affordances (§11.8), for the same reason it
+ * carries the navigation: they belong to the application rather than to any screen. The install
+ * control appears only while installation is possible and disappears once it has happened; the
+ * offline banner appears only while the device says it is offline. Neither is a screen, and
+ * neither may push a screen's content down when it is absent — so both render nothing at all
+ * rather than an empty element.
  */
 import { Role } from '../../../src/entity/enums';
+import { useInstallPrompt, useOnline } from '../lib/InstallableApp';
 import { chromeFor, isCurrent, NavItem, navigationFor } from './Navigation';
 import { ClientPrincipal, guard } from './RouteGuard';
 import { RouteDefinition } from './routes';
@@ -26,6 +34,8 @@ export interface AppShellProps {
 export function AppShell(props: AppShellProps): JSX.Element {
   const decision = guard(props.url, props.principal);
   const chrome = chromeFor(props.principal?.role ?? null);
+  const install = useInstallPrompt();
+  const online = useOnline();
 
   // 11.1.10 — a guard that redirects is not a screen. Rendering the redirect as content would
   // leave the URL saying one thing and the page showing another, which breaks the back button.
@@ -57,6 +67,13 @@ export function AppShell(props: AppShellProps): JSX.Element {
             </a>
           ))}
         </nav>
+        {/* 11.8.12 — offered only when the browser says installation is possible, which means it
+            never appears on a desktop browser that cannot, or inside the installed application. */}
+        {install.canInstall ? (
+          <button type="button" data-part="install" onClick={() => void install.install()}>
+            Install app
+          </button>
+        ) : null}
         {chrome.showSignOut ? (
           <div data-part="account">
             {/* 11.1.6 — the signed-in user's role, in the data dictionary's words. */}
@@ -67,6 +84,16 @@ export function AppShell(props: AppShellProps): JSX.Element {
           </div>
         ) : null}
       </header>
+
+      {/* 11.8.9 — stated once, at the top of the application, rather than by each screen guessing.
+          `role="status"` and not `role="alert"`: being offline is a condition to be aware of, not
+          an error that has just interrupted something. */}
+      {online ? null : (
+        <p data-part="offline" role="status">
+          You are offline. Screens you have already opened still work; new data will arrive when
+          you reconnect.
+        </p>
+      )}
 
       <main>{renderDecision(decision, props)}</main>
     </div>

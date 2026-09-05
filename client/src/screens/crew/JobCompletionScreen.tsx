@@ -104,6 +104,11 @@ export function JobCompletionScreen(props: ScreenProps): JSX.Element {
                 id="photo"
                 type="file"
                 accept="image/jpeg,image/png"
+            // 11.8.13 — on a phone this opens the rear camera directly instead of the photo
+            // library. A resident is standing at the drain and a crew member is standing in it;
+            // the photograph they need does not exist yet, so offering a gallery first is one tap
+            // in the wrong direction. Desktop browsers ignore the attribute.
+            capture="environment"
                 disabled={uploading}
                 onChange={(event) => {
                   const file = event.target.files?.[0];

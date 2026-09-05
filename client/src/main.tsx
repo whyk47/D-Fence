@@ -28,6 +28,7 @@ import { ClientPrincipal } from './app/RouteGuard';
 import { renderScreen, screensWithoutComponent } from './app/ScreenRegistry';
 import { ApiClient } from './lib/ApiClient';
 import { browserStorage, rememberToken, restoreSession } from './lib/SessionPersistence';
+import { registerServiceWorker } from './lib/InstallableApp';
 
 function App(): JSX.Element {
   const [url, setUrl] = useState(() => window.location.pathname + window.location.search);
@@ -185,6 +186,12 @@ const missing = screensWithoutComponent();
 if (missing.length > 0) {
   console.error(`Routes with no screen component: ${missing.join(', ')}`);
 }
+
+/**
+ * 11.8.7 — the service worker, registered before the application mounts but doing its work after
+ * `load`. It is what makes the installed application open offline; nothing here waits for it.
+ */
+registerServiceWorker();
 
 const container = document.getElementById('root');
 if (container === null) {
