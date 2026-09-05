@@ -195,6 +195,33 @@ textarea {
   color: var(--ink);
 }
 
+/*
+ * Checkboxes and radios are not text fields, and the rule above was making them one: `width: 100%`
+ * and a 44px minimum turned every tick box into a stretched blue slab that pushed its own label
+ * off the line. The 44px target (11.7.7) belongs on the *label*, which is what a finger aims at
+ * and what the pointer already activates — so the box goes back to being a box and the label
+ * carries the target.
+ */
+input[type='checkbox'],
+input[type='radio'] {
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+label:has(> input[type='checkbox']),
+label:has(> input[type='radio']) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  min-height: 44px;
+  cursor: pointer;
+}
+
 textarea {
   min-height: 120px;
   resize: vertical;
@@ -334,4 +361,407 @@ ul[data-part='list'] > li {
     border-bottom: 1px solid var(--line);
     padding: var(--s1) 0;
   }
+}
+
+/*
+ * ─── The map (9.1.x) ────────────────────────────────────────────────────────────────────────────
+ *
+ * Every colour here comes from the tokens above, so the map and the rest of the application agree
+ * by construction. The tier swatches in particular MUST match the polygon fills in
+ * `SingaporeMap.tsx` — Leaflet paints to a canvas and cannot be given a class, so those three hex
+ * values exist in both places and are the one duplication in this file.
+ *
+ * Note what is not here: no `style` attribute anywhere in the component. The CSP forbids inline
+ * styles and the answer is a class, which is what these are.
+ */
+.map {
+  margin: var(--s2) 0 var(--s3);
+}
+
+.map-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s1);
+}
+
+.map-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  /* 11.7.7 — a 44px target, because this control is also used on a phone in the field. */
+  min-height: 44px;
+  font-size: 0.95rem;
+  color: var(--ink-quiet);
+}
+
+.map-toolbar button {
+  min-height: 44px;
+}
+
+.map-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgb(0 0 0 / 0.25);
+  background: var(--line);
+}
+
+.map-swatch[data-tier='High'] {
+  background: var(--tier-high);
+}
+.map-swatch[data-tier='Medium'] {
+  background: var(--tier-medium);
+}
+.map-swatch[data-tier='Low'] {
+  background: var(--tier-low);
+}
+.map-swatch[data-kind='report'] {
+  background: #1b5e56;
+}
+.map-swatch[data-kind='workOrder'] {
+  background: #2f5d8a;
+}
+.map-swatch[data-kind='savedLocation'] {
+  background: #6b3fa0;
+}
+
+.map-canvas {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  /* Grey rather than white while the tiles load, so an empty frame does not read as a blank page. */
+  background: #e9e9e4;
+}
+
+.map-canvas[data-size='tall'] {
+  height: 480px;
+}
+.map-canvas[data-size='short'] {
+  height: 380px;
+}
+
+/* 11.7.2 — the map is focusable and pans with the arrow keys; the focus ring must show it. */
+.map-canvas:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  align-items: center;
+  margin: var(--s1) 0 0;
+  font-size: 0.9rem;
+  color: var(--ink-quiet);
+}
+
+.map-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.map-attribution {
+  margin-left: auto;
+  font-size: 0.82rem;
+}
+
+/*
+ * Leaflet's own chrome, brought into the palette. Its defaults are a blue-linked, 26px-target
+ * control set that looks like a different product and fails 11.7.7 on a phone.
+ */
+.leaflet-container {
+  font-family: var(--font);
+  background: #e9e9e4;
+}
+
+.leaflet-bar a,
+.leaflet-bar a:hover {
+  width: 44px;
+  height: 44px;
+  line-height: 44px;
+  color: var(--ink);
+  border-bottom-color: var(--line);
+}
+
+.leaflet-bar a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.leaflet-control-attribution {
+  background: rgb(255 255 255 / 0.85);
+  color: var(--ink-quiet);
+  font-size: 0.72rem;
+}
+
+.leaflet-control-attribution a {
+  color: var(--accent);
+}
+
+.leaflet-popup-content {
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+@media (max-width: 640px) {
+  .map-canvas[data-size='tall'] {
+    height: 360px;
+  }
+  .map-canvas[data-size='short'] {
+    height: 300px;
+  }
+  .map-attribution {
+    margin-left: 0;
+  }
+}
+
+/*
+ * ─── Dashboard furniture ────────────────────────────────────────────────────────────────────────
+ *
+ * These are the parts the screens had already marked up with `data-part` and that nothing had ever
+ * styled: six statistics rendered as a bare vertical column of numbers and words, a freshness line
+ * indistinguishable from body text, and an attention panel that reads like a bullet list rather
+ * than like a queue of decisions. The markup was right; only the presentation was missing.
+ */
+[data-part='stats'] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--s2);
+  margin: var(--s3) 0;
+}
+
+[data-component='stat'] {
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+[data-component='stat'] [data-part='value'] {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.9rem;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+[data-component='stat'] [data-part='label'] {
+  margin-top: 2px;
+  font-size: 0.875rem;
+  color: var(--ink-quiet);
+}
+
+/* 7.1.9 — the age of the data, set apart so it is read rather than skimmed past. */
+[data-part='as-of'] {
+  display: inline-block;
+  margin: 0 0 var(--s2);
+  padding: 4px var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.875rem;
+  color: var(--ink-quiet);
+}
+
+/* 1.4.4, 10.5.7 — a stale source is a warning, and must not look like a caption. */
+[data-part='stale'] {
+  margin: 0 0 var(--s2);
+  padding: var(--s2);
+  border: 1px solid var(--tier-medium);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #fdf6ee;
+  color: var(--ink);
+}
+
+[data-part='attention-list'] {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s1);
+}
+
+[data-part='attention-list'] > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s2);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  background: #fff;
+}
+
+[data-part='attention-list'] > li[data-kind='overdueWorkOrder'],
+[data-part='attention-list'] > li[data-kind='workOrderIssue'] {
+  border-left-color: var(--tier-high);
+}
+
+[data-part='attention-list'] > li [data-part='detail'] {
+  flex: 1;
+}
+
+/*
+ * ─── Tables ─────────────────────────────────────────────────────────────────────────────────────
+ *
+ * The priority table is the screen a dispatch decision is made on, and it was a bare grid of
+ * borders. A header that stays put while a manager scrolls sixteen rows, a row that responds to the
+ * pointer, and a tier rendered as a pill — which is an addition to the word, never a replacement
+ * (11.7.5): the word is still in the cell.
+ */
+table {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--accent-quiet);
+  color: var(--ink);
+  font-size: 0.8125rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+tbody tr:hover {
+  background: #f6f8f7;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+td[data-part='degraded'] {
+  color: var(--tier-medium);
+  font-size: 0.8125rem;
+}
+
+/* The tier cell, as a pill. `[data-tier]` on the row keeps colouring the row's text as before. */
+tbody td[data-cell='tier'] {
+  white-space: nowrap;
+}
+
+tbody td[data-cell='tier'] span {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+/*
+ * ─── Sections ───────────────────────────────────────────────────────────────────────────────────
+ *
+ * Enough separation that a screen reads as a sequence of panels rather than as one long column.
+ * Deliberately not a card around everything: a border round a single sentence is noise.
+ */
+main > section > section {
+  margin-bottom: var(--s4);
+}
+
+main > section > nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s4);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+}
+
+main > section > nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: #fff;
+  text-decoration: none;
+}
+
+main > section > nav a:hover {
+  background: var(--accent-quiet);
+}
+
+/*
+ * ─── The resident's phone ───────────────────────────────────────────────────────────────────────
+ *
+ * Below 640px the header was wrapping into three rows before the page began: brand, then the
+ * navigation on two lines, then the account. The navigation now scrolls sideways on one line, which
+ * is the pattern a phone user already knows from every other application on the device.
+ */
+@media (max-width: 640px) {
+  [data-component='shell'] > header {
+    flex-wrap: nowrap;
+    gap: var(--s1);
+    padding: var(--s1) var(--s2);
+  }
+
+  [data-component='shell'] nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    /* No scrollbar gutter stealing height on a phone; the overflow is discoverable by dragging. */
+    scrollbar-width: none;
+  }
+
+  [data-component='shell'] nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  [data-component='shell'] nav a {
+    white-space: nowrap;
+    padding: 0 var(--s1);
+  }
+
+  [data-part='role'] {
+    display: none;
+  }
+
+  main {
+    padding: var(--s3) var(--s2) var(--s5);
+  }
+
+  /* The map is the screen, not an illustration on it. */
+  .map-canvas[data-size='short'] {
+    height: 58vh;
+    min-height: 320px;
+  }
+}
+
+/* The tier line inside a cluster card, as a pill — the words are unchanged (11.7.5). */
+ul[data-part='list'] > li > [data-part='tier'] {
+  display: inline-block;
+  margin: 0 0 var(--s1);
+  padding: 2px 10px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+ul[data-part='list'] > li > h3 {
+  margin: 0 0 var(--s1);
+  font-size: 1rem;
+}
+
+ul[data-part='list'] > li > [data-part='cases'] {
+  margin: 0;
+  color: var(--ink-quiet);
+}
+
+[data-part='report-count'] {
+  margin: 0 0 var(--s2);
+  color: var(--ink-quiet);
+  font-size: 0.9rem;
 }

@@ -469,7 +469,15 @@ describe('Alerts and the map — §11.2.11, §11.2.5, §6.1.7, §9.1.11', () => 
     });
     render(<ResidentMapScreen {...props({}, fetcher)} />);
 
-    await waitFor(() => expect(screen.getByText('High priority')).toBeTruthy());
+    // Scoped to the list entry rather than matched anywhere on the screen: since the map was
+    // drawn, "High priority" appears twice - once in the legend's key and once here - and both
+    // are the requirement being satisfied rather than a duplicate to be removed.
+    await waitFor(() =>
+      expect(document.querySelector('[data-part="tier"]')?.textContent).toBe('High priority'),
+    );
     expect(screen.getByText('61 case(s)')).toBeTruthy();
+    // 9.1.11 again, from the other side: the legend states the tier in words too, so a reader who
+    // cannot distinguish the fills can still decode the drawing.
+    expect(document.querySelector('.map-key[data-tier="High"]')?.textContent).toContain('High priority');
   });
 });

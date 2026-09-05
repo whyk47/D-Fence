@@ -1,6 +1,6 @@
 # D-Fence — Atomised Software Requirements
 
-Version 0.6 · drafted 2026-09-02, revised 2026-09-05 · status: DRAFT for team review
+Version 0.7 · drafted 2026-09-02, revised 2026-09-05 · status: DRAFT for team review
 Revised after adversarial review; findings and dispositions are recorded in §14.
 Project: NTU SC2006/CZ2006 team project (dengue sanitisation prioritiser)
 Working product name is a placeholder.
@@ -471,6 +471,11 @@ made it unverifiable and left the Lab 4 basis-path test with nothing to path ove
 - **9.1.9** The system shall display a 30-day case-size time series for a selected cluster.
 - **9.1.10** The system shall classify each cluster's trajectory as Growing, Stable or Receding from its case sizes over the preceding 14 days.
 - **9.1.11** The system shall label every cluster boundary on the map with its priority tier as text. *(Tightened in v0.3; "a means additional to colour" was unverifiable. The general rule is 11.7.5.)*
+- **9.1.12** The system shall render the map over a Singapore basemap that names roads and blocks, and shall attribute that basemap in the page (10.4.5). *(Added in v0.7. §9.1 said "on a map" and was for a time answered by a list, on the argument that every fact it demands was present in text. That argument holds for the facts and not for the requirement: a cluster is a shape on the ground, and a locality string of twelve road names is not a place a person can picture.)*
+- **9.1.13** The system shall support continuous zoom and pan over the map, operable by pointer, by touch and by keyboard (11.7.2).
+- **9.1.14** The system shall constrain the map to Singapore, so that panning cannot leave the area the data describes.
+- **9.1.15** The system shall open the Resident's map on that Resident's own saved locations when they have any, and on the extent of the active clusters otherwise. *(Added in v0.7. A resident opens this screen to ask about their block; an island-wide frame answers a question nobody asked.)*
+- **9.1.16** The system shall continue to present every fact in 9.1.1 to 9.1.5 as text on the same screen, so that the information survives without the drawing. *(Added in v0.7 to make explicit what 11.7.5 already implies, because "we have a map now" is exactly the argument under which a textual record gets deleted.)*
 
 ---
 
@@ -723,6 +728,7 @@ reader of this document alone can tell assumption from requirement.*
 | 1.2.6 | Inverse-distance weighting over the three nearest stations | Judgement | A cluster's rainfall is over- or under-stated where stations are sparse |
 | 1.2.5 | Three stations is the right number | Judgement | Too few is noisy, too many washes out local rain |
 | 11.8.x | "Accessible from a mobile app" means an **installable web application**, not a second native codebase | Judgement, recorded 2026-09-05 when the requirement was raised. `lab2/AI-TECH-STACK.md` had already decided against a native app — the crew journey is three screens and a camera upload — and that decision is not reversed here so much as *satisfied differently*: an installable web application is launched from the home screen, runs without browser chrome and works offline, which is what "from a mobile app" asks for in every respect a user can observe. A native build would duplicate every screen in a second language for the same three journeys, and could not be delivered before the demonstration | If the module requires a **native** artefact — an APK, or a React Native/Flutter project — this does not satisfy it, and the gap is one deliverable rather than one feature. Nothing built for 11.8 is wasted in that case: the API, the roles and the journeys are unchanged, and only the presentation layer would be rebuilt |
+| 9.1.12 | The basemap is **OneMap raster tiles** from the Singapore Land Authority, fetched from `www.onemap.gov.sg` | Judgement, recorded 2026-09-05 when the map was drawn. Three properties decided it: it needs no key or billing account, it labels roads and HDB blocks the way a Singaporean says them, and it is the same agency whose Search API already geocodes a resident's address — so the trust decision was one the system had already made. The alternative, a global provider, would add a second external dependency, a key to keep out of the repository, and a basemap on which "Blk 655" is not written anywhere | This is the **only** external origin the client fetches from, and the CSP names that host rather than relaxing `img-src`. If OneMap is unreachable, the tiles are blank and every cluster shape, marker, legend and list is still drawn and readable — the basemap is the background, not the data |
 | 9.1.10 | A ±10% change over the fortnight separates Growing and Receding from Stable | Judgement, added 2026-09-03 with the implementation. 9.1.10 names three classes and does not say where the lines fall; below 10% a single late-reported case would flip the label on a small cluster every other day | The trend column flickers, or a real escalation reads as Stable |
 
 **The polling question is now answered, and the answer shaped the design.** A live pull on

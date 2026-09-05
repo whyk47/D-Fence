@@ -102,6 +102,8 @@ for B0 and B6 and run the rest on a phone-width browser window (390 px).
 | B2 | Bottom navigation → **My locations** → **Add a location** | The address form | 11.2.6, 11.2.7 |
 | B3 | Type `560103` into **Address or postal code** → press **Search** | A candidate list — *"103 ANG MO KIO AVENUE 3 …"* | 3.1.3 |
 | B4 | Press the candidate → **Name this location** = `Home`, label **Home** → **Save** | The location card: status, the cluster it is near, its case size, the **data timestamp** | 3.1.4, 3.1.6, 3.1.10 |
+| B4a | Navigation → **Dengue map** | Singapore, drawn — and it opens on the block you just saved, not on the whole island. The purple dot is that location; the shaded outline is the real NEA cluster boundary | **9.1.1**, 9.1.2, 9.1.5, 9.1.15 |
+| B4b | Pinch to zoom out one step, then untick **Reports** and tick it again | Continuous zoom; the layer disappears and returns. Say: *"the tier is written in the key as well as painted on the shape — colour is never the only carrier"* | 9.1.6, **9.1.11**, 11.7.5 |
 | B5 | Navigation → **Report a site** → **Use my current location** | Latitude and longitude fill in from the phone's GPS | 11.6.x |
 | B6 | **Add a photograph** | **The camera opens directly** — not the photo library | **11.8.13** |
 | B7 | Take a photograph of anything | A thumbnail appears with a remove control; the file is uploaded as it is added | 5.1.5, 8.3.6 |
@@ -126,6 +128,8 @@ Laptop, `/ops`. Presenter 2. **Sign in before the session** — do not spend dem
 |---|---|---|---|
 | C1 | Open `/ops` | Overview: active clusters, active cases, open verified reports, open and overdue work orders, and **the age of the data** | 7.1.x, 7.1.9 |
 | C2 | Point at the age figure. Say: "if the feed were stale, this number is where you would see it first" | — | 7.1.9 |
+| C2a | Scroll to **Where the clusters are** | The sixteen clusters as real polygons over a Singapore basemap. Say: *"the boundaries are NEA's own — fifty-four points for the Lentor cluster, not a circle we drew"* | **9.1.1**, 9.1.2, 9.1.12 |
+| C2b | Click a shape | The cluster detail screen for it. The map is a way into the data, not a picture beside it | 9.1.7 |
 | C3 | Scroll to the **priority table** | Sixteen rows, ranked, each with score, tier and case delta | 7.2.1 |
 | C4 | Click the top row | The **cluster detail** screen with the full driver breakdown | 9.2.1, **4.1.10** |
 | C5 | Read the breakdown aloud, top to bottom | Seven drivers, each with raw value → normalised value → weight → contribution | 4.1.3, 4.1.10 |
@@ -139,6 +143,12 @@ Laptop, `/ops`. Presenter 2. **Sign in before the session** — do not spend dem
 | C13 | On the cluster you opened at C4, scroll to **Work orders** → **Raise a work order** | The work-order form, with **Cluster** already filled in from the link | 8.1.7, 8.1.8 |
 | C14 | Task **Fogging**, **Scheduled date** *today*, **Instructions for the crew**, → **Create work order** | The work-order detail screen, status **Created** | 8.1.1–8.1.6 |
 | C15 | Under **Assignment**, **Assign to** → the crew member from C7 (the option carries their open-job count) → **Assign** | “Assigned to …”; a notification is sent to that crew member | 8.2.1, 8.2.4, 8.2.5 |
+
+> **If the map is blank, the tiles are the only thing missing.** The basemap is OneMap, fetched
+> from `www.onemap.gov.sg` — the one external origin the client touches. On a network that blocks
+> it, every cluster shape, marker, legend entry and list row is still drawn and still readable; the
+> grey rectangle behind them is the only loss. Say so if it happens rather than apologising for the
+> map: the data was never in the tiles.
 
 > **Two details that decide whether C13–C15 works on stage.** Schedule the job for **today**: the
 > crew screen opens on its `Today` filter, so a job dated tomorrow is real but invisible at D1 until

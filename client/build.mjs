@@ -51,7 +51,34 @@ const options = {
 
 await mkdir(outdir, { recursive: true });
 await copyFile(resolve(here, 'index.html'), resolve(outdir, 'index.html'));
-await copyFile(resolve(here, 'styles.css'), resolve(outdir, 'styles.css'));
+/**
+ * One stylesheet, not two. Leaflet ships its own CSS and the map is unusable without it (every
+ * pane is absolutely positioned by those rules), but `index.html` links exactly one stylesheet and
+ * the CSP allows `style-src 'self'` with no inline styles - so the two are concatenated here
+ * rather than added as a second `<link>` a future edit could forget.
+ */
+const leafletCss = await readFile(
+  resolve(here, '..', 'node_modules', 'leaflet', 'dist', 'leaflet.css'),
+  'utf8',
+);
+// Leaflet's stylesheet references four sprites with relative URLs. Nothing here uses the default
+// marker or the built-in layers control, so they would never be requested - but copying them costs
+// four files and removes any chance of a 404 in the console during a demonstration.
+await mkdir(resolve(outdir, 'images'), { recursive: true });
+const leafletImages = resolve(here, '..', 'node_modules', 'leaflet', 'dist', 'images');
+for (const name of await readdir(leafletImages)) {
+  await copyFile(resolve(leafletImages, name), resolve(outdir, 'images', name));
+}
+
+const ourCss = await readFile(resolve(here, 'styles.css'), 'utf8');
+await writeFile(
+  resolve(outdir, 'styles.css'),
+  `${ourCss}
+
+/* --- Leaflet 1.9.4, bundled rather than fetched from a CDN --- */
+${leafletCss}
+`,
+);
 
 /**
  * Everything in `client/public` is served from the root: the manifest, the icons and the service

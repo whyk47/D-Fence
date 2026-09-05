@@ -70,9 +70,9 @@ export class ExpressApp {
        * script rather than merely discouraging one.
        *
        * It can be this strict because the client earns it: `index.html` has no inline script and no
-       * inline style, the bundle loads no external resource, and the only origin anything is
-       * fetched from is this one. That was checked rather than assumed — the single external URL
-       * in the bundle is a link inside a React error message.
+       * inline style, and the only origin the bundle fetches from is this one - with a single,
+       * named exception: the OneMap raster tiles the map draws on. `img-src` lists that host
+       * explicitly rather than relaxing to `*`, so a tile URL is the only thing it buys.
        *
        * `'unsafe-inline'` appears nowhere, which is the whole point: a policy that allows it stops
        * approximately nothing. If a future screen needs an inline style, the answer is a class in
@@ -87,7 +87,10 @@ export class ExpressApp {
           "default-src 'self'",
           "script-src 'self'",
           "style-src 'self'",
-          "img-src 'self' data:",
+          // 9.1.x - the OneMap basemap, named rather than a wildcard. This is the ONE external
+          // origin the client touches, and it is a Singapore Land Authority endpoint we already
+          // depend on for geocoding, so the trust decision is one we had already made.
+          "img-src 'self' data: https://www.onemap.gov.sg",
           "connect-src 'self'",
           "font-src 'self'",
           // 11.8.7 — the service worker is same-origin, and `worker-src` does not fall back to

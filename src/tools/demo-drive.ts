@@ -283,6 +283,24 @@ async function main(): Promise<void> {
       return verdict;
     });
 
+    await beat('B3', 'the resident map opens on their own block (9.1.5)', async () => {
+      await resident.goto(`${base}/map`, { waitUntil: 'domcontentloaded' });
+      await resident.locator('[data-part="resident-map"]').waitFor({ timeout: 30_000 });
+      // Waited for, not sampled. Tiles arrive one at a time over the network, and counting them
+      // the instant the first one lands measures how fast OneMap answered rather than whether the
+      // map drew - which is how this beat failed twice while the map was working.
+      await resident
+        .waitForFunction(() => document.querySelectorAll('.leaflet-tile-loaded').length >= 2, null, {
+          timeout: 30_000,
+        })
+        .catch(() => undefined);
+      const drawn = await resident.locator('.leaflet-tile-loaded').count();
+      // 9.1.6 - the layer switches are the resident's, and only for layers they received.
+      const layers = await resident.locator('.map-toggle').count();
+      return drawn >= 2 ? null : `${drawn} tile(s) loaded, ${layers} layer switch(es)`;
+    });
+    await shoot(resident, 'B3-resident-map');
+
     await beat('B6', 'the photograph input opens the camera on a phone (11.8.13)', async () => {
       await resident.goto(`${base}/report`, { waitUntil: 'domcontentloaded' });
       const capture = await resident.locator('#photo').getAttribute('capture');
@@ -354,6 +372,31 @@ async function main(): Promise<void> {
   if (!managerIn) {
     skip('C2–D10', 'operations and the crew loop', 'the manager could not sign in');
   } else {
+    await beat('C2–C3', 'the clusters are drawn on Singapore, with tiles and shapes (9.1.1, 9.1.2)', async () => {
+      await manager.goto(`${base}/ops`, { waitUntil: 'domcontentloaded' });
+      await manager.locator('[data-part="ops-map"]').waitFor({ timeout: 30_000 });
+      // Counted, not eyeballed. A map that renders its controls and no tiles looks like a design
+      // decision in a screenshot and is a broken map in front of an examiner - and the two failures
+      // that produce it (a CSP that blocks the tile origin, a container with no height) are exactly
+      // the ones that pass every unit test.
+      await manager
+        .waitForFunction(() => document.querySelectorAll('.leaflet-tile-loaded').length >= 4, null, {
+          timeout: 30_000,
+        })
+        .catch(() => undefined);
+      const drawn = await manager.locator('.leaflet-tile-loaded').count();
+      const shapes = await manager.locator('.leaflet-overlay-pane path').count();
+      // 9.1.11, 11.7.5 - and the tier is legible with the drawing switched off.
+      const legend = await manager.locator('.map-legend').innerText();
+      if (!/priority/i.test(legend)) {
+        return 'the legend does not state a tier in words';
+      }
+      return drawn >= 4 && shapes >= 1
+        ? null
+        : `${drawn} tile(s) loaded, ${shapes} cluster shape(s) drawn`;
+    });
+    await shoot(manager, 'C2-map');
+
     await beat('C4–C5', 'a cluster opens with its full driver breakdown (4.1.10)', async () => {
       await manager.goto(`${base}/ops`, { waitUntil: 'domcontentloaded' });
       const row = manager.locator('table a').first();

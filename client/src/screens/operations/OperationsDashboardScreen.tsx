@@ -17,6 +17,7 @@
 import { useLoad } from '../../lib/useLoad';
 import { StateView, StatTile } from '../../components/States';
 import { link } from '../../components/Link';
+import { SingaporeMap, MapCluster, MapMarker } from '../../components/SingaporeMap';
 import { ScreenProps } from '../ScreenProps';
 
 interface DashboardPayload {
@@ -31,7 +32,21 @@ interface DashboardPayload {
     dataAsOf: string | null;
     staleSources: string[];
   };
-  attention: Array<{ kind: string; message: string; clusterId?: string; workOrderId?: string }>;
+  /**
+   * 7.5.1-7.5.4. The field names are the server's — `detail` and `link`, not `message`. They were
+   * `message` here and nothing on the server ever sent one, so every item in this panel rendered
+   * as an empty bullet: the panel that exists to say what needs a decision today has been saying
+   * nothing at all, in production, while looking like it had nothing to say.
+   */
+  attention: Array<{ kind: string; detail: string; link: string }>;
+}
+
+/** 9.1.1-9.1.6 — the layers the server decided this manager may see. */
+interface LayersPayload {
+  clusters: MapCluster[];
+  reports: Array<{ reportId: string; latitude: number; longitude: number; status: string; type: string }>;
+  workOrders: Array<{ workOrderId: string; latitude: number; longitude: number; status: string; taskType: string }>;
+  savedLocations: Array<{ savedLocationId: string; latitude: number; longitude: number; label: string; exposureStatus: string }>;
 }
 
 interface PriorityPayload {
@@ -51,12 +66,37 @@ interface PriorityPayload {
 
 export function OperationsDashboardScreen(props: ScreenProps): JSX.Element {
   const dashboard = useLoad<DashboardPayload>(props.api, '/api/ops/dashboard');
+  const layers = useLoad<LayersPayload>(props.api, '/api/map/layers', {
+    isEmpty: (v) => v.clusters.length === 0,
+    emptyMessage: 'No cluster boundaries have been ingested yet, so there is nothing to draw.',
+  });
   const priority = useLoad<PriorityPayload>(props.api, '/api/ops/priority', {
     isEmpty: (v) => v.rows.length === 0,
     emptyMessage: 'No clusters have been scored yet. The next ingestion cycle will populate this table.',
   });
 
   const overview = dashboard.value?.overview;
+
+  // 9.1.3, 9.1.4 — reports and work orders as markers. Flattened here rather than in the map so
+  // the map component stays ignorant of D-Fence's vocabulary and can be reused by the resident.
+  const markers: MapMarker[] = [
+    ...(layers.value?.reports ?? []).map((r) => ({
+      id: r.reportId,
+      latitude: r.latitude,
+      longitude: r.longitude,
+      title: r.type,
+      detail: `Report — ${r.status}`,
+      kind: 'report' as const,
+    })),
+    ...(layers.value?.workOrders ?? []).map((w) => ({
+      id: w.workOrderId,
+      latitude: w.latitude,
+      longitude: w.longitude,
+      title: w.taskType,
+      detail: `Work order — ${w.status}`,
+      kind: 'workOrder' as const,
+    })),
+  ];
 
   return (
     <section data-screen="OpsDashboard" data-requirement="11.2.12">
@@ -100,10 +140,14 @@ export function OperationsDashboardScreen(props: ScreenProps): JSX.Element {
               {(dashboard.value?.attention ?? []).length === 0 ? (
                 <p data-state="empty">Nothing is waiting on you.</p>
               ) : (
-                <ul>
+                <ul data-part="attention-list">
                   {(dashboard.value?.attention ?? []).map((item, index) => (
                     <li key={`${item.kind}-${index}`} data-kind={item.kind}>
-                      {item.message}
+                      <span data-part="detail">{item.detail}</span>{' '}
+                      {/* 7.5.4 — the place it can be resolved, one click away rather than named. */}
+                      <a href={item.link} onClick={link(props, item.link)}>
+                        Open
+                      </a>
                     </li>
                   ))}
                 </ul>
@@ -113,6 +157,28 @@ export function OperationsDashboardScreen(props: ScreenProps): JSX.Element {
         )}
       </StateView>
 
+      {/*
+        * 9.1.1-9.1.11 — the clusters as shapes on Singapore, above the table that ranks them.
+        * The table answers "which one first"; the map answers "where is that, and what is next to
+        * it" — which is the question a dispatch decision actually turns on, and the one a locality
+        * string of twelve road names cannot answer.
+        */}
+      <section data-part="map">
+        <h2>Where the clusters are</h2>
+        <StateView state={layers.state} onRetry={layers.retry}>
+          <SingaporeMap
+            label="ops-map"
+            // Grey, so the tier fill is the strongest colour on the screen rather than competing
+            // with a full-colour street map.
+            basemap="Grey_HD"
+            clusters={layers.value?.clusters ?? []}
+            markers={markers}
+            size="tall"
+            onSelectCluster={(clusterId) => props.onNavigate(`/ops/clusters/${clusterId}`)}
+          />
+        </StateView>
+      </section>
+
       <section data-part="priority">
         <h2>Priority</h2>
         <StateView state={priority.state} onRetry={priority.retry}>
@@ -121,9 +187,10 @@ export function OperationsDashboardScreen(props: ScreenProps): JSX.Element {
               <tr>
                 <th scope="col">Rank</th>
                 <th scope="col">Locality</th>
-                <th scope="col">Cases</th>
-                <th scope="col">Change</th>
-                <th scope="col">Score</th>
+                {/* 11.6.3 — the numeric columns align on their digits so two rows compare. */}
+                <th scope="col" className="num">Cases</th>
+                <th scope="col" className="num">Change</th>
+                <th scope="col" className="num">Score</th>
                 <th scope="col">Tier</th>
                 <th scope="col">Work order</th>
               </tr>
@@ -131,17 +198,20 @@ export function OperationsDashboardScreen(props: ScreenProps): JSX.Element {
             <tbody>
               {(priority.value?.rows ?? []).map((row) => (
                 <tr key={row.clusterId} data-tier={row.tier} data-degraded={row.isDegraded}>
-                  <td>{row.rank}</td>
+                  <td className="num">{row.rank}</td>
                   <td>
                     <a href={`/ops/clusters/${row.clusterId}`} onClick={link(props, `/ops/clusters/${row.clusterId}`)}>
                       {row.locality}
                     </a>
                   </td>
-                  <td>{row.caseSize}</td>
-                  <td>{row.caseDelta > 0 ? `+${row.caseDelta}` : row.caseDelta}</td>
-                  <td>{row.score.toFixed(1)}</td>
-                  {/* 11.7.5 — the tier as a word in the cell, not a background colour. */}
-                  <td>{row.tier}</td>
+                  <td className="num">{row.caseSize}</td>
+                  <td className="num">{row.caseDelta > 0 ? `+${row.caseDelta}` : row.caseDelta}</td>
+                  <td className="num">{row.score.toFixed(1)}</td>
+                  {/* 11.7.5 — the tier as a WORD in the cell. The pill around it is decoration on
+                      top of the word; remove the styling and the cell still says "High". */}
+                  <td data-cell="tier">
+                    <span>{row.tier}</span>
+                  </td>
                   <td>{row.workOrderStatus ?? 'none'}</td>
                   {/* 7.2.8, 7.2.9 — a degraded score says so, and names what was left out. A
                       score computed without rainfall is not the same number as one computed with

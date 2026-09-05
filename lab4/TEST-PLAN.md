@@ -1420,6 +1420,46 @@ three runs.
 Result at the time of writing: **21 passed, 0 failed, 0 skipped - twice consecutively** against the
 deployment. The second run is the one that means anything.
 
+### 2.32 Twenty-eighth subject - the drawn map (`tests/map.test.tsx`)
+
+Added 2026-09-05, with §9.1.12-9.1.16. §9.1 says "on a map" and was answered for most of this
+project by a list, on the argument that every *fact* the requirement demands was present in text.
+The argument was true about the facts and wrong about the requirement, and the tests written under
+it tested the list.
+
+**Ten cases (N1-N10)**, and the interesting thing about them is what they refuse to assert.
+
+**No case asserts a pixel.** Leaflet renders into an element that jsdom never lays out, so no test
+in this file can prove a polygon is in the right place - and one that mocked Leaflet in order to
+claim it did would prove only that the mock agreed with the code that called it. What is assertable
+is everything the requirements actually ask for around the drawing: that the region is
+`role="application"` and says the arrow keys pan it (N1, 11.7.2); that every tier present is named
+in words in the key (N2, 9.1.11); that the basemap is attributed in the page and not only inside
+Leaflet's own control, which vanishes with the drawing (N3, 10.4.5); that a layer switch exists for
+a layer this principal received and **not** for one they did not, since offering it would advertise
+data they are refused (N4, 9.1.6 with §2.3); and that with no geometry at all the key says so
+rather than rendering empty (N6).
+
+The drawing itself is asserted in the only place it can honestly be asserted - a browser.
+`demo-drive.ts` beats **B3** and **C2-C3** count loaded tiles and rendered paths against the
+deployment. That beat earned its place immediately: it failed twice while the map was working,
+because it counted tiles the instant the first one arrived, which measures how fast OneMap answered
+rather than whether the map drew. It now waits for a threshold.
+
+**Two cases are regressions, and they are the reason this file is worth reading** (N7, N10). Drawing
+the map meant reading the map payload properly for the first time, and two screens turned out to
+have been reading fields that no response has ever contained:
+
+| Screen | Read | Sent | What the user saw |
+|---|---|---|---|
+| Resident map | `savedLocation.name`, `.status` | `label`, `exposureStatus` | Every saved location rendered as `" — "` |
+| Operations dashboard | `attention.message` | `detail`, `link` | One empty bullet per item, in the panel whose whole job is to say what needs a decision today |
+
+Both are the same defect as §2.28's: a boundary that TypeScript cannot check, because the client
+declares the shape it hopes for and the compiler agrees with the client. Both had been live in
+production. Neither was visible in any screenshot, because an empty bullet and a panel with nothing
+to report look identical.
+
 ---
 
 ## 3. Basis-path design
