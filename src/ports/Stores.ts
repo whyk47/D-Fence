@@ -35,6 +35,13 @@ export interface ClusterStore {
   findActive(): Promise<Cluster[]>;
   /** @returns the feature count written, for the IngestionRun (1.1.14). */
   upsertFromFeed(batch: ParsedBatch): Promise<number>;
+  /**
+   * 1.1.10 — close the clusters the feed no longer publishes. @returns the object ids closed.
+   *
+   * This was implemented on both stores and tested, and was on neither the port nor any call path,
+   * so nothing ever closed and the table grew by a full generation on every NEA publish.
+   */
+  deactivateAbsent(objectIdsSeen: Set<string>): Promise<string[]>;
   /** Append only. Snapshots are never overwritten: 1.1.8, 9.1.9 and 9.1.10 depend on history. */
   appendSnapshot(snapshot: ClusterSnapshot): Promise<void>;
   /** The previous snapshot for a cluster, or null the first time it is seen (1.1.6, 1.1.8). */

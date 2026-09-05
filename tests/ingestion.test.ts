@@ -181,6 +181,118 @@ describe('Ingestion template — the 1.1.20 conditional download across cycles',
   });
 });
 
+/**
+ * The feed reissues OBJECTIDs, and the system used to believe them.
+ *
+ * NEA publishes a fresh OBJECTID for the same locality every time, so keying identity on it turned
+ * every publish into a new generation of clusters: sixteen rows became thirty-two became
+ * forty-three, the dashboard summed all of them, and the priority table ranked one place three
+ * times. It also silenced 1.1.8 — with no predecessor to compare against, every cluster was NEW
+ * with a zero delta, so a driver holding a fifth of the scoring weight contributed nothing.
+ *
+ * These are regression tests: the defect passed all 552 tests that existed when it shipped.
+ */
+describe('Cluster identity across publishes — §1.1.6, §1.1.8, §1.1.10', () => {
+  /**
+   * A feed whose payload can change between cycles, driven by ONE long-lived job.
+   *
+   * That is how the server runs it (`server.ts:239` builds the job once and `cycle()` calls it on
+   * every tick), and it matters for 1.1.10: the "absent twice running" streak lives on the job, so
+   * a test that built a new job per cycle would reset the streak and never observe a close.
+   */
+  class MutableFeed implements ClusterSource {
+    constructor(public stamp: string, public body: unknown) {}
+    sourceKind(): SourceKind {
+      return SourceKind.Clusters;
+    }
+    async isHealthy(): Promise<boolean> {
+      return true;
+    }
+    async fetchLastUpdatedAt(): Promise<string | null> {
+      return this.stamp;
+    }
+    async fetchClusters(): Promise<RawPayload> {
+      return { retrievedAt: new Date('2026-09-03T12:00:00+08:00'), body: this.body };
+    }
+  }
+
+  /** The same two localities as `payload()`, but with the OBJECTIDs NEA would issue next time. */
+  function republished(caseSize: number): unknown {
+    const body = payload(caseSize) as { features: Array<{ properties: Record<string, unknown> }> };
+    body.features[0]!.properties.OBJECTID = 999001;
+    body.features[1]!.properties.OBJECTID = 999002;
+    return body;
+  }
+
+  it('N1 — a republished locality updates its cluster instead of creating a second one (1.1.6)', async () => {
+    const runs = new InMemoryIngestionRunStore();
+    const clusters = new InMemoryClusterStore();
+    await new ClusterIngestionJob(new FakeFeed('stamp-1', payload(258)), runs, clusters).run();
+    expect((await clusters.findActive()).length).toBe(2);
+
+    await new ClusterIngestionJob(new FakeFeed('stamp-2', republished(258)), runs, clusters).run();
+
+    const active = await clusters.findActive();
+    expect(active.length).toBe(2);
+    expect(new Set(active.map((c) => c.locality)).size).toBe(2);
+  });
+
+  it('N2 — a case count that grew across publishes is seen as growth, not as a new cluster (1.1.8)', async () => {
+    const runs = new InMemoryIngestionRunStore();
+    const clusters = new InMemoryClusterStore();
+    await new ClusterIngestionJob(new FakeFeed('stamp-1', payload(258)), runs, clusters).run();
+    await new ClusterIngestionJob(new FakeFeed('stamp-2', republished(261)), runs, clusters).run();
+
+    const grown = (await clusters.findActive()).find((c) => c.caseSize === 261);
+    expect(grown).toBeDefined();
+    // The whole point: a delta of 3 rather than the 0 that a "new" cluster reports.
+    expect(grown!.caseDelta).toBe(3);
+    expect(grown!.changeClass).toBe(ChangeClass.GROWN);
+  });
+
+  it('N3 — a locality the feed drops closes on the SECOND absence, not the first (1.1.10)', async () => {
+    const runs = new InMemoryIngestionRunStore();
+    const clusters = new InMemoryClusterStore();
+    const feed = new MutableFeed('stamp-1', payload(258));
+    const job = new ClusterIngestionJob(feed, runs, clusters);
+    await job.run();
+    expect((await clusters.findActive()).length).toBe(2);
+
+    // A payload carrying only the first locality: the second is now absent.
+    const dropped = payload(258) as { features: unknown[] };
+    dropped.features = [dropped.features[0]];
+
+    // 1.1.13 — one absence is not enough. A feed that briefly omits a cluster must not destroy it.
+    feed.stamp = 'stamp-2';
+    feed.body = dropped;
+    await job.run();
+    expect((await clusters.findActive()).length).toBe(2);
+
+    feed.stamp = 'stamp-3';
+    await job.run();
+    const active = await clusters.findActive();
+    expect(active.length).toBe(1);
+    expect(active[0]!.locality).toBe('Countryside Rd, Walk / Florissa Pk');
+  });
+
+  it('N4 — an empty feed closes nothing (1.1.12, 1.1.13)', async () => {
+    const runs = new InMemoryIngestionRunStore();
+    const clusters = new InMemoryClusterStore();
+    const feed = new MutableFeed('stamp-1', payload(258));
+    const job = new ClusterIngestionJob(feed, runs, clusters);
+    await job.run();
+
+    feed.stamp = 'stamp-2';
+    feed.body = { type: 'FeatureCollection', features: [] };
+    await job.run();
+    feed.stamp = 'stamp-3';
+    await job.run();
+
+    // Nothing published is a failure to report, not an instruction to close Singapore.
+    expect((await clusters.findActive()).length).toBe(2);
+  });
+});
+
 describe('A full scoring cycle over ingested clusters', () => {
   async function cycle(): Promise<{
     engine: PriorityScoringEngine;

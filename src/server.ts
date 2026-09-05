@@ -455,8 +455,20 @@ async function main(): Promise<void> {
     treatments,
     notifier,
     // 8.2.4, 8.3.11 travel the same road as resident alerts now that E6 exists.
-    // 8.5.3 — a verified work order is reflected in the next cycle; here, immediately.
-    { rescoreCluster: async () => cycle('MANUAL') },
+    //
+    // 8.5.3 — a verified work order is reflected in the next cycle; here, immediately. This used to
+    // call `cycle('MANUAL')`, which is a FULL INGESTION: three external APIs, measured at 30.7
+    // seconds with the manager's browser blocked on it for every verification. Worse, ingesting on
+    // a verification meant a demonstration could grow a fresh generation of clusters at the moment
+    // someone pressed a button, which is the last time you want the table underneath you to move.
+    //
+    // `scoreAndAlert` is the half of the cycle that 8.5.3 actually asks for — it reads what is
+    // already stored and rescores, without fetching anything. It rescores every active cluster
+    // rather than the one named: a few dozen rows out of the database is far cheaper than the
+    // network round trip it replaces, and the alternative is a second scoring path that can drift
+    // from this one. The argument stays in the port because the port is right; it is this binding
+    // that is coarse, and deliberately so.
+    { rescoreCluster: async () => scoreAndAlert(false) },
     reportLifecycle, // 5.2.7, 8.5.1, 8.5.2
     auditStore, // 2.4.1 — the single write path for status is the single audit point
   );

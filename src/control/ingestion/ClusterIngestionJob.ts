@@ -38,6 +38,17 @@ export class ClusterIngestionJob extends AbstractIngestionJob {
   /** Features rejected by 1.1.3 in the last parse, logged by 1.1.4 and reported to 1.4.x. */
   readonly rejected: Array<{ objectId: string | null; missingField: string }> = [];
   private publisherStamp: string | null = null;
+  /**
+   * 1.1.10 — the clusters that were missing from the PREVIOUS successful retrieval.
+   *
+   * The requirement says "absent from two consecutive successful retrievals", so one absence is not
+   * enough: a feed that briefly omits a cluster would otherwise close it, and 1.1.13 is explicit
+   * that a bad cycle must not destroy good data. A cluster closes on its second consecutive miss.
+   *
+   * Held in memory rather than in a column because it is a fact about the last cycle, not about the
+   * cluster: a restart costs one extra cycle of patience, which is the safe direction to fail.
+   */
+  private absentLastCycle: Set<string> = new Set();
 
   protected sourceKind(): SourceKind {
     return SourceKind.Clusters;
@@ -67,6 +78,16 @@ export class ClusterIngestionJob extends AbstractIngestionJob {
     const payload = raw.body as GeoJsonPayload;
     const features = payload.features ?? [];
     const records: Cluster[] = [];
+    // Read once, before the loop: sixteen features would otherwise mean sixteen full scans.
+    const activeByLocality = new Map<string, Cluster>();
+    for (const active of await this.clusters.findActive()) {
+      // First writer wins, so the oldest surviving row for a locality is the one identity carries
+      // to. The duplicates already in the table are absent from this feed's object ids and close on
+      // their own through 1.1.10 below.
+      if (!activeByLocality.has(active.locality)) {
+        activeByLocality.set(active.locality, active);
+      }
+    }
 
     for (const feature of features) {
       const geometryPresent = feature.geometry?.coordinates !== undefined;
@@ -76,10 +97,24 @@ export class ClusterIngestionJob extends AbstractIngestionJob {
         continue;
       }
       const parsed = result.accepted;
-      const existing = await this.clusters.latestSnapshot(parsed.objectId);
+      // 1.1.6, 1.1.8 — identity is the LOCALITY, not the feed's OBJECTID.
+      //
+      // NEA issues a fresh OBJECTID for the same locality on every publish. Keying on it made each
+      // publish sixteen brand-new clusters: the table grew a generation at a time, the dashboard
+      // summed all of them and reported 1,375 active cases against a true 464, and the priority
+      // table ranked the same place three times. It also silently disabled 1.1.8 — with no
+      // predecessor to find, every cluster was NEW with a delta of zero, so CaseGrowthDelta
+      // contributed nothing on every row despite carrying a fifth of the scoring weight.
+      //
+      // The stored object id therefore becomes the FIRST one seen for a locality, and later ids for
+      // that same locality are deliberately discarded. The feed's own id is not stable enough to be
+      // an identity; the locality is what NEA is actually naming.
+      const carried = activeByLocality.get(parsed.locality);
+      const objectId = carried?.objectId ?? parsed.objectId;
+      const existing = await this.clusters.latestSnapshot(objectId);
 
       const cluster = new Cluster();
-      cluster.objectId = parsed.objectId;
+      cluster.objectId = objectId;
       cluster.locality = parsed.locality;
       cluster.caseSize = parsed.caseSize;
       cluster.boundary = ClusterIngestionJob.toPolygon(feature.geometry?.coordinates);
@@ -109,6 +144,7 @@ export class ClusterIngestionJob extends AbstractIngestionJob {
   /** 1.1.5 — the snapshot is appended for every accepted feature, never overwritten. */
   protected async persist(batch: ParsedBatch): Promise<number> {
     const written = await this.clusters.upsertFromFeed(batch);
+    await this.closeAbsent(batch);
     for (const cluster of batch.records as Cluster[]) {
       const stored = await this.clusters.findById(cluster.id);
       const snapshot = new ClusterSnapshot();
@@ -121,6 +157,34 @@ export class ClusterIngestionJob extends AbstractIngestionJob {
       await this.clusters.appendSnapshot(snapshot);
     }
     return written;
+  }
+
+  /**
+   * 1.1.10 — close what the feed has stopped publishing, on the second consecutive absence.
+   *
+   * Runs after the upsert so this cycle's clusters are already active and cannot be caught by their
+   * own sweep. An empty batch is left alone entirely: a feed that returns nothing is a failure to
+   * report under 1.1.12, not an instruction to close every cluster in Singapore.
+   */
+  private async closeAbsent(batch: ParsedBatch): Promise<void> {
+    const seen = new Set((batch.records as Cluster[]).map((c) => c.objectId));
+    if (seen.size === 0) {
+      return;
+    }
+    const missingNow = (await this.clusters.findActive())
+      .map((c) => c.objectId)
+      .filter((id) => !seen.has(id));
+    // Absent twice running: close it. Absent for the first time: remember, and decide next cycle.
+    const closeNow = new Set(missingNow.filter((id) => this.absentLastCycle.has(id)));
+    this.absentLastCycle = new Set(missingNow.filter((id) => !closeNow.has(id)));
+    if (closeNow.size > 0) {
+      // The store closes everything active that is NOT in the set it is given, so it is handed the
+      // survivors rather than the condemned.
+      const survivors = new Set(
+        (await this.clusters.findActive()).map((c) => c.objectId).filter((id) => !closeNow.has(id)),
+      );
+      await this.clusters.deactivateAbsent(survivors);
+    }
   }
 
   /** 1.1.20 — record the publisher stamp only after the payload has been parsed and stored. */
