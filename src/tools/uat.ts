@@ -808,7 +808,9 @@ async function main(): Promise<void> {
     });
 
     let workOrderId = '';
-    const clusterId = await firstClusterId(manager);
+    // The smallest, not the top-ranked: this segment writes a treatment record and would otherwise
+    // suppress 15% of the score on the row the demonstration opens with. See `smallestClusterId`.
+    const clusterId = await smallestClusterId(manager);
 
     if (clusterId === null) {
       skip('D', '8.1.1', 'a manager can raise a work order', 'no clusters ingested');
@@ -1097,6 +1099,35 @@ async function main(): Promise<void> {
 }
 
 /** The first cluster id the manager can see, or null when nothing has been ingested. */
+/**
+ * The cluster this run is allowed to disturb: the **smallest** active one, not the top-ranked one.
+ *
+ * This used to take `rows[0]`, and that was a mistake with a visible consequence. Segment D drives
+ * a real work order to Verified, which writes a real `treatment_record` (8.3.12) — so every run
+ * reset the recency driver on whichever cluster was ranked first. After thirty-five runs the
+ * largest cluster in Singapore carried thirty-five treatments dated today, `DaysSinceLastTreatment`
+ * read zero, and 15% of the scoring weight was suppressed on the exact row a demonstration opens
+ * with. The priority table looked broken; the scoring was doing precisely what it should with the
+ * data it had been given.
+ *
+ * **An acceptance harness that mutates the data it is inspecting is not measuring the system.** It
+ * cannot avoid writing — verification is the requirement under test — so it writes where the
+ * distortion is smallest: a two-case cluster contributes almost nothing to `CaseSize` and ranks
+ * near the bottom either way.
+ */
+async function smallestClusterId(manager: Session): Promise<string | null> {
+  const result = await call(manager, 'GET', '/api/ops/priority');
+  const rows = (result.body.rows ?? []) as Array<Record<string, unknown>>;
+  if (rows.length === 0) {
+    return null;
+  }
+  const smallest = rows.reduce((least, row) =>
+    Number(row.caseSize ?? 0) < Number(least.caseSize ?? 0) ? row : least,
+  );
+  return String(smallest.clusterId);
+}
+
+/** The top-ranked cluster, for the beats that only READ (4.1.10's breakdown). */
 async function firstClusterId(manager: Session): Promise<string | null> {
   const result = await call(manager, 'GET', '/api/ops/priority');
   const rows = (result.body.rows ?? []) as Array<Record<string, unknown>>;

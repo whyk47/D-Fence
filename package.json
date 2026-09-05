@@ -23,7 +23,8 @@
     "uat": "tsx src/tools/uat.ts",
     "uat:client": "tsx src/tools/client-uat.ts",
     "load:check": "tsx src/tools/load-check.ts",
-    "peek": "tsx src/tools/audit-peek.ts"
+    "peek": "tsx src/tools/audit-peek.ts",
+    "demo:clean": "tsx src/tools/demo-clean.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
