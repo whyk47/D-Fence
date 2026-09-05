@@ -508,7 +508,21 @@ async function main(): Promise<void> {
     // network round trip it replaces, and the alternative is a second scoring path that can drift
     // from this one. The argument stays in the port because the port is right; it is this binding
     // that is coarse, and deliberately so.
-    { rescoreCluster: async () => scoreAndAlert(false) },
+    {
+      rescoreCluster: async () => {
+        // Deliberately NOT awaited. 8.5.3 asks for the verification to be reflected "within one
+        // scoring cycle", not within the HTTP response, and the work that the manager is waiting on
+        // — the status change, the treatment record, the closed reports — is already committed by
+        // the time this runs. Awaiting it charged them 7.8s of rescoring (and, before that, 30.7s
+        // of ingestion) for a number they were not looking at yet.
+        //
+        // The failure is logged rather than swallowed: a rescore that stops happening would
+        // otherwise be invisible, and 4.1.17 is the requirement that closes the loop.
+        void scoreAndAlert(false).catch((error: unknown) => {
+          console.error(`rescore after verification failed: ${error instanceof Error ? error.message : String(error)}`);
+        });
+      },
+    },
     reportLifecycle, // 5.2.7, 8.5.1, 8.5.2
     auditStore, // 2.4.1 — the single write path for status is the single audit point
   );
