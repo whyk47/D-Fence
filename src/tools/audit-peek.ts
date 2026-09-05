@@ -23,6 +23,8 @@ const TABLES = [
   'completion_evidence',
   'treatment_record',
   'account',
+  'local_credential',
+  'local_credential_token',
   'cluster',
   'priority_score',
 ];

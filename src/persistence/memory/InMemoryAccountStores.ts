@@ -15,6 +15,7 @@
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { AccountStore, SessionStore } from '../../ports/Stores';
 import { AuthCredentials, AuthProvider, AuthSession, AuthUserId, AuthenticationFailed } from '../../ports/AuthProvider';
+import { CredentialRecord, CredentialStore, IssuedToken } from '../../ports/CredentialStore';
 import { Uuid } from '../../entity/valueTypes';
 import { Role } from '../../entity/enums';
 import { Account } from '../../entity/Account';
@@ -83,20 +84,101 @@ export class InMemorySessionStore implements SessionStore {
 }
 
 /**
+ * The default `CredentialStore`: three maps, which is exactly what `LocalAuthProvider` held before
+ * the storage was split out of it. Bound whenever there is no database, and by every unit test.
+ */
+export class InMemoryCredentialStore implements CredentialStore {
+  private readonly users = new Map<AuthUserId, CredentialRecord>();
+  private readonly verifications = new Map<AuthUserId, string>();
+  private readonly resets = new Map<string, IssuedToken>();
+
+  async findByEmail(email: string): Promise<CredentialRecord | null> {
+    return [...this.users.values()].find((u) => u.email === email) ?? null;
+  }
+
+  async findById(authUserId: AuthUserId): Promise<CredentialRecord | null> {
+    return this.users.get(authUserId) ?? null;
+  }
+
+  async insert(record: CredentialRecord): Promise<void> {
+    this.users.set(record.authUserId, record);
+  }
+
+  async updateSecret(authUserId: AuthUserId, salt: Buffer, hash: Buffer): Promise<void> {
+    const user = this.users.get(authUserId);
+    if (user !== undefined) {
+      this.users.set(authUserId, { ...user, salt, hash });
+    }
+  }
+
+  async setDisabled(authUserId: AuthUserId, disabled: boolean): Promise<void> {
+    const user = this.users.get(authUserId);
+    if (user !== undefined) {
+      this.users.set(authUserId, { ...user, disabled });
+    }
+  }
+
+  async delete(authUserId: AuthUserId): Promise<void> {
+    this.users.delete(authUserId);
+    this.verifications.delete(authUserId);
+  }
+
+  async putVerification(authUserId: AuthUserId, token: string): Promise<void> {
+    this.verifications.set(authUserId, token);
+  }
+
+  async verificationTokenFor(authUserId: AuthUserId): Promise<string | null> {
+    return this.verifications.get(authUserId) ?? null;
+  }
+
+  async takeVerification(token: string): Promise<AuthUserId | null> {
+    for (const [authUserId, issued] of this.verifications) {
+      if (issued === token) {
+        this.verifications.delete(authUserId);
+        return authUserId;
+      }
+    }
+    return null;
+  }
+
+  async putReset(token: string, authUserId: AuthUserId, expiresAt: Date): Promise<void> {
+    this.resets.set(token, { authUserId, expiresAt, used: false });
+  }
+
+  async findReset(token: string): Promise<IssuedToken | null> {
+    return this.resets.get(token) ?? null;
+  }
+
+  async markResetUsed(token: string): Promise<void> {
+    const entry = this.resets.get(token);
+    if (entry !== undefined) {
+      this.resets.set(token, { ...entry, used: true });
+    }
+  }
+
+  async latestResetToken(): Promise<string | null> {
+    const outstanding = [...this.resets.entries()].filter(([, t]) => !t.used);
+    return outstanding.length === 0 ? null : (outstanding[outstanding.length - 1] as [string, IssuedToken])[0];
+  }
+}
+
+/**
  * A development-only `AuthProvider`. Passwords are stored as **salted scrypt hashes** (10.3.1) and
  * compared in constant time; the plaintext is never retained. Verification and reset tokens are
- * held in memory rather than emailed.
+ * issued here rather than emailed.
+ *
+ * The *storage* is injected (`CredentialStore`) so that the deployment can keep credentials in
+ * Postgres while the rules — hashing, the constant-time comparison, single use, and silence on an
+ * unknown email — stay in one class. Held in memory, a restart left every account still present
+ * with a role and a staff-list entry, and nobody able to sign in to it.
  */
 export class LocalAuthProvider implements AuthProvider {
-  private readonly users = new Map<AuthUserId, { email: string; salt: Buffer; hash: Buffer; disabled: boolean }>();
-  private readonly resetTokens = new Map<string, { authUserId: AuthUserId; expiresAt: Date; used: boolean }>();
-  /** What a real deployment would email. Exposed so 2.1.5 is observable in a test. */
-  readonly verificationTokens = new Map<AuthUserId, string>();
+  constructor(private readonly store: CredentialStore = new InMemoryCredentialStore()) {}
 
   async register(credentials: AuthCredentials): Promise<AuthUserId> {
     const authUserId = await this.createUser(credentials);
     const token = randomBytes(16).toString('base64url'); // 2.1.5
-    this.verificationTokens.set(authUserId, token);
+    await this.store.putVerification(authUserId, token);
     // Printed because there is no mail server. 2.1.6 refuses an unverified account, so without
     // this a resident who registers can never sign in and the demo has no resident in it. This is
     // the single most development-only line in the codebase, and it is in the class whose name
@@ -107,12 +189,43 @@ export class LocalAuthProvider implements AuthProvider {
   }
 
   async createUser(credentials: AuthCredentials): Promise<AuthUserId> {
-    if ([...this.users.values()].some((u) => u.email === credentials.email)) {
+    if ((await this.store.findByEmail(credentials.email)) !== null) {
       throw new AuthenticationFailed(); // 2.1.4, defended here as well as in the controller
     }
     const authUserId = randomUUID();
-    this.users.set(authUserId, { email: credentials.email, ...LocalAuthProvider.hash(credentials.password), disabled: false });
+    await this.store.insert({
+      authUserId,
+      email: credentials.email,
+      ...LocalAuthProvider.hash(credentials.password),
+      disabled: false,
+    });
     return authUserId;
+  }
+
+  /**
+   * Seeding, and only seeding: create this credential, or bring the existing one into line.
+   *
+   * The seeded manager and resident are re-established on every boot from configuration, and with
+   * credentials in memory that was `createUser` every time — which now raises 2.1.4's duplicate on
+   * the second boot and aborts start-up. Making it idempotent here rather than at the call site
+   * keeps 2.1.4 strict where it matters: `createUser` still refuses a duplicate, because a
+   * *registration* that quietly overwrote a password would be an account takeover.
+   *
+   * It re-enables as well as re-hashes, so that changing `DFENCE_SEED_MANAGER_PASSWORD` and
+   * restarting is a working way to rotate the seeded password — the only way an operator has,
+   * since there is no mail server behind 2.1.11's reset.
+   *
+   * @returns the provider id to bind to the account, existing or new
+   */
+  async ensureUser(credentials: AuthCredentials): Promise<AuthUserId> {
+    const existing = await this.store.findByEmail(credentials.email);
+    if (existing === null) {
+      return this.createUser(credentials);
+    }
+    const secret = LocalAuthProvider.hash(credentials.password);
+    await this.store.updateSecret(existing.authUserId, secret.salt, secret.hash);
+    await this.store.setDisabled(existing.authUserId, false);
+    return existing.authUserId;
   }
 
   /**
@@ -121,15 +234,18 @@ export class LocalAuthProvider implements AuthProvider {
    * where `emailVerified` lives.
    */
   async signIn(credentials: AuthCredentials): Promise<AuthSession> {
-    const entry = [...this.users.entries()].find(([, u]) => u.email === credentials.email);
-    if (entry === undefined) {
+    const user = await this.store.findByEmail(credentials.email);
+    if (user === null) {
       throw new AuthenticationFailed();
     }
-    const [authUserId, user] = entry;
     if (user.disabled || !LocalAuthProvider.matches(credentials.password, user.salt, user.hash)) {
       throw new AuthenticationFailed();
     }
-    return { authUserId, token: randomBytes(24).toString('base64url'), expiresAt: new Date(Date.now() + 86_400_000) };
+    return {
+      authUserId: user.authUserId,
+      token: randomBytes(24).toString('base64url'),
+      expiresAt: new Date(Date.now() + 86_400_000),
+    };
   }
 
   async signOut(_token: string): Promise<void> {
@@ -138,39 +254,33 @@ export class LocalAuthProvider implements AuthProvider {
 
   /** 2.1.11 — thirty minutes, single use. */
   async requestPasswordReset(email: string): Promise<void> {
-    const entry = [...this.users.entries()].find(([, u]) => u.email === email);
-    if (entry === undefined) {
+    const user = await this.store.findByEmail(email);
+    if (user === null) {
       return; // silence, so the reset form is not a directory of registered addresses
     }
-    this.resetTokens.set(randomBytes(16).toString('base64url'), {
-      authUserId: entry[0],
-      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
-      used: false,
-    });
+    await this.store.putReset(
+      randomBytes(16).toString('base64url'),
+      user.authUserId,
+      new Date(Date.now() + 30 * 60 * 1000),
+    );
   }
 
   async completePasswordReset(token: string, newPassword: string): Promise<void> {
-    const entry = this.resetTokens.get(token);
-    if (entry === undefined || entry.used || entry.expiresAt.getTime() < Date.now()) {
+    const entry = await this.store.findReset(token);
+    if (entry === null || entry.used || (entry.expiresAt?.getTime() ?? 0) < Date.now()) {
       throw new AuthenticationFailed(); // 2.1.11 — expired or already used
     }
-    const user = this.users.get(entry.authUserId);
-    if (user === undefined) {
+    if ((await this.store.findById(entry.authUserId)) === null) {
       throw new AuthenticationFailed();
     }
-    Object.assign(user, LocalAuthProvider.hash(newPassword));
-    entry.used = true; // usable once
+    const secret = LocalAuthProvider.hash(newPassword);
+    await this.store.updateSecret(entry.authUserId, secret.salt, secret.hash);
+    await this.store.markResetUsed(token); // usable once
   }
 
   /** 2.1.5, 2.1.6. Single use, like the reset link. */
   async consumeVerification(token: string): Promise<AuthUserId | null> {
-    for (const [authUserId, issued] of this.verificationTokens) {
-      if (issued === token) {
-        this.verificationTokens.delete(authUserId);
-        return authUserId;
-      }
-    }
-    return null;
+    return this.store.takeVerification(token);
   }
 
   async verifyToken(_token: string): Promise<AuthUserId | null> {
@@ -179,27 +289,25 @@ export class LocalAuthProvider implements AuthProvider {
   }
 
   async disableUser(authUserId: AuthUserId): Promise<void> {
-    const user = this.users.get(authUserId);
-    if (user !== undefined) {
-      user.disabled = true;
-    }
+    await this.store.setDisabled(authUserId, true);
   }
 
   async enableUser(authUserId: AuthUserId): Promise<void> {
-    const user = this.users.get(authUserId);
-    if (user !== undefined) {
-      user.disabled = false;
-    }
+    await this.store.setDisabled(authUserId, false);
   }
 
   async deleteUser(authUserId: AuthUserId): Promise<void> {
-    this.users.delete(authUserId);
+    await this.store.delete(authUserId);
+  }
+
+  /** Test hook: the outstanding verification token that would have been emailed (2.1.5). */
+  verificationTokenFor(authUserId: AuthUserId): Promise<string | null> {
+    return this.store.verificationTokenFor(authUserId);
   }
 
   /** Test hook: the single-use reset token that would have been emailed. */
-  latestResetToken(): string | null {
-    const tokens = [...this.resetTokens.entries()].filter(([, t]) => !t.used);
-    return tokens.length === 0 ? null : (tokens[tokens.length - 1] as [string, unknown])[0];
+  latestResetToken(): Promise<string | null> {
+    return this.store.latestResetToken();
   }
 
   private static hash(password: string): { salt: Buffer; hash: Buffer } {

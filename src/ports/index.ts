@@ -4,6 +4,7 @@
  * dependency graph acyclic while still letting control depend on abstractions of the outside world.
  */
 export * from './AuthProvider';
+export * from './CredentialStore';
 export * from './ExternalGateway';
 export * from './ObjectStorage';
 export * from './Repository';

@@ -258,16 +258,31 @@ ARM REST API therefore need no Avast window at all; only `az webapp deploy` does
 
 ## 7. Known limitations of a deployed instance
 
-- **Passwords do not survive a restart.** `LocalAuthProvider` is the development stand-in for
-  Supabase Auth and holds its scrypt hashes in memory. Accounts, roles, lock-outs and Telegram links
-  all persist; the credentials do not, so every restart re-seeds the manager and any resident
-  account registered through the UI stops working. This is the largest remaining gap between the
-  deployment and a real one.
 - **Email verification has no email.** 2.1.4's token is written to the server log, so a resident
   registering on the public instance cannot complete verification without someone reading the log
-  stream (`az webapp log tail`).
-- **Photograph URLs are not signed** (10.3.5) — that needs Supabase Storage, which does not exist
-  yet.
-- **Saved locations, alerts, forecasts and the audit trail are still in memory** and are lost on
-  restart. The audit trail is the one that matters: its schema guarantees are real, the table
-  exists, and nothing writes to it yet.
+  stream (see section 6 for reading it remotely). This is now the largest remaining gap between the
+  deployment and a real one.
+- **The alert log and the 24-hour forecast are still in memory** and are lost on restart. Neither
+  affects what a user can do: the forecast is re-fetched on the next ingestion cycle, and the alert
+  log is a record of deliveries rather than a thing anything depends on. 6.1.9's daily cap is read
+  from it, so after a restart a resident could in principle receive one more alert than the cap
+  allows — stated rather than hidden.
+- `bash.exe.stackdump` is tracked in git and dirties every working tree. Harmless, and left alone
+  because deleting a tracked file is Yen Kit's call.
+
+**What used to be listed here and is not any more** (all closed 2026-09-05, all verified against
+the deployment rather than a laptop):
+
+- Photographs are stored, in private buckets, and a completion citing a key that names nothing is
+  refused. Signed URLs are real (10.3.5).
+- The audit trail is written to Postgres and readable at `GET /api/ops/audit`.
+- Saved locations and alert subscriptions persist.
+- **Credentials persist.** `LocalAuthProvider` is still the development stand-in for Supabase Auth
+  — 10.3.1 gives credential handling to the provider and that decision stands — but its salted
+  scrypt hashes and its single-use tokens now live in `local_credential`, so an account registered
+  through the UI still works after a restart. It used to be the reverse of a missing account: the
+  account survived with its role and its staff-list entry, and nobody could sign in to it.
+
+Run `npm run peek` against any environment to see which of these is actually true there. It counts
+rows in the tables that should be filling and prints the newest audit entries; every silent defect
+of this kind showed up as a zero.

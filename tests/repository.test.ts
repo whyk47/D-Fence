@@ -28,6 +28,8 @@ import { WorkOrderRepository, TreatmentRecordRepository } from '../src/persisten
 import { AccountRepository, SessionRepository } from '../src/persistence/AccountRepository';
 import { ClusterRepository } from '../src/persistence/ClusterRepository';
 import { AuditRepository } from '../src/persistence/AuditRepository';
+import { CredentialRepository } from '../src/persistence/CredentialRepository';
+import { LocalAuthProvider } from '../src/persistence/memory/InMemoryAccountStores';
 import { AlertSubscriptionRepository, SavedLocationRepository } from '../src/persistence/SavedLocationRepository';
 import { SavedLocation } from '../src/entity/SavedLocation';
 import { AlertSubscription } from '../src/entity/AlertSubscription';
@@ -557,5 +559,130 @@ describe.skipIf(!live)('Saved locations and subscriptions against live PostGIS �
   it('L8 — every location is readable for the 3.1.8 re-evaluation sweep', async () => {
     const all = await locations.all();
     expect(all.some((l) => l.accountId === accountId)).toBe(true);
+  });
+});
+
+/**
+ * The development auth provider's secrets, against live Postgres (§2.1.4, §2.1.5, §2.1.7, §2.1.11).
+ *
+ * `LocalAuthProvider` held these in three Maps while the `account` row was already in the database,
+ * so a restart left every account present — with a role, in the staff list — and nobody able to
+ * sign in to it. The provider's *rules* are tested against the in-memory store in
+ * `tests/account.test.ts`; what can only be tested here is the storage those rules stand on.
+ *
+ * The case that would otherwise bite silently is C2: `bytea` must come back as the same bytes. A
+ * hash round-tripped through a string under the wrong encoding compares unequal to itself, and the
+ * symptom — "the password I just set does not work" — points at the hashing rather than at the
+ * storage.
+ */
+describe.skipIf(!live)('Local credentials against live Postgres — §2.1.x, §10.3.1', () => {
+  let db: Database;
+  let store: CredentialRepository;
+  let provider: LocalAuthProvider;
+  const email = 'cred-test-' + randomUUID().slice(0, 8) + '@d-fence.test';
+
+  beforeAll(async () => {
+    db = new Database(url);
+    store = new CredentialRepository(db);
+    provider = new LocalAuthProvider(store);
+  }, 30_000);
+
+  afterAll(async () => {
+    if (db === undefined) {
+      return;
+    }
+    await db.query('DELETE FROM local_credential WHERE email LIKE $1', ['cred-test-%@d-fence.test']);
+    await db.close();
+  }, 30_000);
+
+  it('C1 — a registered credential authenticates after being read back from the database', async () => {
+    const authUserId = await provider.register({ email, password: 'CorrectHorse2026' });
+    // A fresh provider over the same table is exactly what a restart produces.
+    const afterRestart = new LocalAuthProvider(new CredentialRepository(db));
+    const session = await afterRestart.signIn({ email, password: 'CorrectHorse2026' });
+
+    expect(session.authUserId).toBe(authUserId);
+    await expect(afterRestart.signIn({ email, password: 'wrong' })).rejects.toThrow();
+  });
+
+  it('C2 — the salt and the hash return as the same bytes, with no encoding round trip', async () => {
+    const record = await store.findByEmail(email);
+    expect(Buffer.isBuffer(record?.salt)).toBe(true);
+    expect(Buffer.isBuffer(record?.hash)).toBe(true);
+    // scrypt with a 16-byte salt and a 64-byte key length, which is what the provider asks for.
+    expect(record?.salt.length).toBe(16);
+    expect(record?.hash.length).toBe(64);
+    // And no plaintext anywhere near the row.
+    expect(JSON.stringify(record)).not.toContain('CorrectHorse2026');
+  });
+
+  it('C3 — the same address cannot be registered twice (2.1.4)', async () => {
+    await expect(provider.createUser({ email, password: 'Another2026Pass' })).rejects.toThrow();
+    // And the original password still works: a refused duplicate must not have touched it.
+    await expect(provider.signIn({ email, password: 'CorrectHorse2026' })).resolves.toBeTruthy();
+  });
+
+  it('C4 — a verification token is single use (2.1.5)', async () => {
+    const second = 'cred-test-' + randomUUID().slice(0, 8) + '@d-fence.test';
+    const authUserId = await provider.register({ email: second, password: 'VerifyMe2026' });
+    const token = (await provider.verificationTokenFor(authUserId)) as string;
+    expect(token).toBeTruthy();
+
+    expect(await provider.consumeVerification(token)).toBe(authUserId);
+    // The read is the delete, so two requests carrying the same link cannot both succeed.
+    expect(await provider.consumeVerification(token)).toBeNull();
+  });
+
+  it('C5 — a reset changes the password once, and the spent token stays refused (2.1.11)', async () => {
+    await provider.requestPasswordReset(email);
+    const token = (await provider.latestResetToken()) as string;
+    await provider.completePasswordReset(token, 'RotatedPass2026');
+
+    await expect(provider.signIn({ email, password: 'RotatedPass2026' })).resolves.toBeTruthy();
+    await expect(provider.signIn({ email, password: 'CorrectHorse2026' })).rejects.toThrow();
+    // Spent, not deleted: "already used" must stay distinguishable from "never existed", or a user
+    // clicking an old link twice gets the same answer as someone guessing tokens.
+    await expect(provider.completePasswordReset(token, 'ThirdPassword26')).rejects.toThrow();
+  });
+
+  it('C6 — an expired reset token is refused (2.1.11)', async () => {
+    const record = await store.findByEmail(email);
+    const expired = 'expired-' + randomUUID();
+    await store.putReset(expired, (record as { authUserId: string }).authUserId, new Date(Date.now() - 1000));
+    await expect(provider.completePasswordReset(expired, 'TooLatePass26')).rejects.toThrow();
+  });
+
+  it('C7 — a deactivated credential does not authenticate, and reactivation restores it (2.2.5)', async () => {
+    const record = (await store.findByEmail(email)) as { authUserId: string };
+    await provider.disableUser(record.authUserId);
+    await expect(provider.signIn({ email, password: 'RotatedPass2026' })).rejects.toThrow();
+
+    await provider.enableUser(record.authUserId);
+    await expect(provider.signIn({ email, password: 'RotatedPass2026' })).resolves.toBeTruthy();
+  });
+
+  it('C8 — seeding is idempotent, which is what a restart needs (2.1.4)', async () => {
+    const seedEmail = 'cred-test-' + randomUUID().slice(0, 8) + '@d-fence.test';
+    const first = await provider.ensureUser({ email: seedEmail, password: 'SeedPass2026aa' });
+    // The second boot. `createUser` would raise 2.1.4's duplicate here and abort start-up.
+    const second = await provider.ensureUser({ email: seedEmail, password: 'SeedPass2026bb' });
+
+    expect(second).toBe(first);
+    // And the configured password wins, so changing the environment variable and restarting is a
+    // working rotation — the only one an operator has without a mail server.
+    await expect(provider.signIn({ email: seedEmail, password: 'SeedPass2026bb' })).resolves.toBeTruthy();
+    await expect(provider.signIn({ email: seedEmail, password: 'SeedPass2026aa' })).rejects.toThrow();
+  });
+
+  it('C9 — deleting a credential takes its tokens with it (10.4.3)', async () => {
+    const doomed = 'cred-test-' + randomUUID().slice(0, 8) + '@d-fence.test';
+    const authUserId = await provider.register({ email: doomed, password: 'DeleteMe2026x' });
+    const token = (await provider.verificationTokenFor(authUserId)) as string;
+
+    await provider.deleteUser(authUserId);
+    expect(await store.findById(authUserId)).toBeNull();
+    // The cascade, not a second DELETE in the application: an orphaned token is a live link to an
+    // account that no longer exists.
+    expect(await provider.consumeVerification(token)).toBeNull();
   });
 });

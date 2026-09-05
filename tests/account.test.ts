@@ -96,7 +96,7 @@ describe('Registration — §2.1.1 to §2.1.5, §2.2.2', () => {
 
   it('R6 — a verification token is issued, which is what 2.1.5 would email', async () => {
     const account = await f.auth.register('verify@example.com', GOOD_PASSWORD);
-    expect(f.provider.verificationTokens.get(account.authUserId)).toBeTruthy();
+    expect(await f.provider.verificationTokenFor(account.authUserId)).toBeTruthy();
   });
 
   it('R7 — the password is never stored on the account row (10.3.1)', async () => {
@@ -286,13 +286,13 @@ describe('Password reset — §2.1.11', () => {
   it('P1 — a reset request for an unknown address succeeds silently (2.1.11)', async () => {
     // The same response either way, or the reset form becomes the directory sign-in refuses to be.
     await expect(f.auth.requestReset('nobody@example.com')).resolves.toBeUndefined();
-    expect(f.provider.latestResetToken()).toBeNull();
+    expect(await f.provider.latestResetToken()).toBeNull();
   });
 
   it('P2 — the link is single-use (2.1.11)', async () => {
     await resident(f);
     await f.auth.requestReset('ah.seng@example.com');
-    const token = f.provider.latestResetToken() as string;
+    const token = (await f.provider.latestResetToken()) as string;
     await f.auth.completeReset(token, 'brandnew123');
     await expect(f.auth.completeReset(token, 'another456')).rejects.toThrow();
   });
@@ -300,14 +300,14 @@ describe('Password reset — §2.1.11', () => {
   it('P3 — the new password must satisfy 2.1.2 and 2.1.3 as well', async () => {
     await resident(f);
     await f.auth.requestReset('ah.seng@example.com');
-    const token = f.provider.latestResetToken() as string;
+    const token = (await f.provider.latestResetToken()) as string;
     await expect(f.auth.completeReset(token, 'short1')).rejects.toThrow(/at least 8 characters/);
   });
 
   it('P4 — after a reset the new password works and the old one does not', async () => {
     await resident(f);
     await f.auth.requestReset('ah.seng@example.com');
-    await f.auth.completeReset(f.provider.latestResetToken() as string, 'brandnew123');
+    await f.auth.completeReset((await f.provider.latestResetToken()) as string, 'brandnew123');
     await expect(f.auth.signIn('ah.seng@example.com', 'brandnew123')).resolves.toBeTruthy();
     await expect(f.auth.signIn('ah.seng@example.com', GOOD_PASSWORD)).rejects.toThrow();
   });

@@ -37,6 +37,7 @@ import { AuditRoutes } from './boundary/http/AuditRoutes';
 import { AuditController } from './control/AuditController';
 import { AuditRepository } from './persistence/AuditRepository';
 import { AlertSubscriptionRepository, SavedLocationRepository } from './persistence/SavedLocationRepository';
+import { CredentialRepository } from './persistence/CredentialRepository';
 import { UploadRoutes } from './boundary/http/UploadRoutes';
 import { PhotoUploadController } from './control/PhotoUploadController';
 import { SupabaseStorageGateway } from './boundary/gateways/SupabaseStorageGateway';
@@ -81,6 +82,7 @@ import { TrendAnalyser } from './control/TrendAnalyser';
 import { MapViewController } from './control/MapViewController';
 import {
   InMemoryAccountStore,
+  InMemoryCredentialStore,
   InMemorySessionStore,
   LocalAuthProvider,
 } from './persistence/memory/InMemoryAccountStores';
@@ -155,7 +157,19 @@ async function main(): Promise<void> {
   const ac0 = new AccessControlService(new AccessPolicy(), auditStore);
   // Supabase Auth is the decision; the project does not exist yet, so §2 runs on the local
   // provider (real salted scrypt hashes, no email). Swapping is one line — see AuthProvider.
-  const authProvider = new LocalAuthProvider();
+  /**
+   * 2.1.7, 10.3.1. The provider is still the development one — Supabase Auth remains the decision
+   * — but its secrets now live where the `account` row already did.
+   *
+   * In memory, a restart produced the worst available combination: the account still existed,
+   * still had a role and still appeared in the staff list, and nobody could sign in to it again.
+   * "Your account does not exist" is a bad outcome; "your account exists and your password is
+   * wrong" is worse, because the user retries, trips 2.1.10's lock-out, and ends up with evidence
+   * that the system is lying to them.
+   */
+  const authProvider = new LocalAuthProvider(
+    database === null ? new InMemoryCredentialStore() : new CredentialRepository(database),
+  );
   const authentication = new AuthenticationController(authProvider, accounts, sessions, auditStore);
   const staff = new StaffAccountController(ac0, authProvider, accounts, sessions, auditStore);
 
@@ -237,8 +251,8 @@ async function main(): Promise<void> {
       ? 'Persistence: in-memory (no DATABASE_URL) — a restart loses cluster history.'
       : 'Persistence: Postgres for accounts, sessions, clusters, rainfall, runs, scores, reports, '
         + 'work orders, treatments, the audit trail, saved locations and alert subscriptions; '
-        + 'in-memory for the alert log and forecasts. '
-        + 'Credentials live in the development auth provider and do NOT survive a restart.',
+        + 'in-memory for the alert log and forecasts. Credentials are salted scrypt hashes in '
+        + 'Postgres, issued by the development auth provider (10.3.1 gives that to Supabase Auth).',
   );
   // Reports and work orders were the two that mattered most after the ingestion path: without
   // them a restart forgets every report a resident filed and every job a crew did, which makes
@@ -464,12 +478,11 @@ async function main(): Promise<void> {
   const seedEmail = firstConfigured(process.env.DFENCE_SEED_MANAGER_EMAIL, config.get('DFENCE_SEED_MANAGER_EMAIL'), 'manager@d-fence.local');
   const seedPassword = firstConfigured(process.env.DFENCE_SEED_MANAGER_PASSWORD, config.get('DFENCE_SEED_MANAGER_PASSWORD'), 'dfence2026');
   //
-  // With a database the account survives the restart but the credential does not: `LocalAuthProvider`
-  // is the development stand-in for Supabase Auth and holds its scrypt hashes in memory (10.3.1 —
-  // the provider owns the credential, and there is deliberately no password column in this schema).
-  // So a second boot re-binds the stored account to a fresh provider identity rather than creating a
-  // second account and failing 2.1.4. Re-seeding blindly would abort startup on every restart after
-  // the first, which is the sort of breakage that only appears in the demonstration.
+  // The seed is re-established from configuration on every boot, so it must be idempotent: creating
+  // the account outright would fail 2.1.4 on the second start, and that is the sort of breakage
+  // that only appears in the demonstration. `ensureUser` creates the credential or brings the
+  // existing one into line with the configured password — which is also the only password rotation
+  // an operator has, since there is no mail server behind 2.1.11's reset.
   const existingSeed = await accounts.findByEmail(seedEmail);
   const seededManagerId =
     existingSeed === null
@@ -486,7 +499,7 @@ async function main(): Promise<void> {
       : await rebindSeed(existingSeed);
 
   async function rebindSeed(account: Account): Promise<Uuid> {
-    account.authUserId = await authProvider.createUser({ email: seedEmail, password: seedPassword });
+    account.authUserId = await authProvider.ensureUser({ email: seedEmail, password: seedPassword });
     account.emailVerified = true;
     account.isActive = true;
     account.clearFailedAttempts();
@@ -520,8 +533,8 @@ async function main(): Promise<void> {
       resident.emailVerified = true;
       await accounts.save(resident);
     } else {
-      // Same reason the manager rebinds: the account survives a restart and the credential does not.
-      existingResident.authUserId = await authProvider.createUser({
+      // Same as the manager: idempotent, so a restart neither fails nor forks a second credential.
+      existingResident.authUserId = await authProvider.ensureUser({
         email: seedResidentEmail,
         password: seedResidentPassword,
       });
