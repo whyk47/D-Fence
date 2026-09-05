@@ -123,14 +123,35 @@ az webapp config appsettings set --name dfence-sc2006 --resource-group dfence --
   ONE_MAP_EMAIL="…"                    \
   ONE_MAP_PASSWORD="…"                 \
   TELEGRAM_BOT_TOKEN="…"               \
+  SUPABASE_URL="…"                     \
+  SUPABASE_SERVICE_KEY="…"             \
   DFENCE_REQUIRE_HTTPS=true            \
   DFENCE_SEED_MANAGER_EMAIL="…"        \
   DFENCE_SEED_MANAGER_PASSWORD="…"     \
   SCM_DO_BUILD_DURING_DEPLOYMENT=false
 ```
 
-Copy the first four values from `src/.env`. **Set them from a terminal, not from a file you commit,
+Copy the first six values from `src/.env`. **Set them from a terminal, not from a file you commit,
 and not into a chat window.**
+
+### The two storage buckets
+
+`SUPABASE_SERVICE_KEY` is what lets the server write photographs, and it **bypasses row-level
+security**, so it is server-side only and must never reach a browser bundle. It does not: the only
+class that holds it is `SupabaseStorageGateway`, and the client's route to an image is a signed URL
+that expires.
+
+Two **private** buckets must exist in the Supabase project, both limited to 5 MB and to
+`image/jpeg` + `image/png`:
+
+- `report-photos` — 5.1.5, a resident's photographs of a site
+- `completion-evidence` — 8.3.6, a crew member's photographs of the finished work
+
+Private is not a detail: 10.3.5 requires non-enumerable, authenticated access, and a public bucket
+would put every photograph anyone has ever uploaded one guessed URL away. Without the two variables
+the server falls back to in-memory storage and **says so on start-up** — a photograph then does not
+survive a restart, and a completion citing it is refused by 8.3.7, which is the honest behaviour
+rather than a silent one.
 
 ### `DFENCE_SEED_MANAGER_PASSWORD` — read this one
 
@@ -204,7 +225,7 @@ npm run uat:client -- --base https://dfence-sc2006.azurewebsites.net
 npm run load:check -- --base https://dfence-sc2006.azurewebsites.net
 ```
 
-Expect **48 passed / 0 failed / 1 documented skip** and **9 / 0** as on localhost. `load:check` is
+Expect **52 passed / 0 failed / 1 documented skip** and **9 / 0** as on localhost. `load:check` is
 the interesting one after a move: it is the first measurement of 10.1.5 across a real network rather
 than a loopback, and the dashboard number is the one to watch.
 
@@ -223,7 +244,7 @@ sleep 6                       # let the stream attach before the first registrat
 npm run uat -- --base https://dfence-sc2006.azurewebsites.net --log stream.log
 ```
 
-With the stream attached the remote run reaches **48 / 0 / 1**, the same as localhost. The single
+With the stream attached the remote run reaches **52 / 0 / 1**, the same as localhost. The single
 skip is 8.3.14, which is genuinely unreachable over HTTP: 8.1.4 refuses a work order scheduled in
 the past, so no overdue one can be created through the API.
 

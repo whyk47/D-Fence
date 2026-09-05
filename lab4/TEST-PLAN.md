@@ -1106,7 +1106,7 @@ live database**, over HTTP, in the order a person would. They are how §3.2.4's 
 and record the results" is answered for the paths no unit test reaches - the ones where the defect
 is in the wiring rather than in any one class.
 
-**`uat.ts` - 49 checks, executed 2026-09-04: 48 passed, 0 failed, 1 skipped.** Organised as beats:
+**`uat.ts` - 53 checks, executed 2026-09-05 against the deployment: 52 passed, 0 failed, 1 skipped.** Organised as beats:
 A (the system is up and credits its sources publicly), B (a resident registers, verifies, saves a
 location, submits a report), C (a manager reads the dashboard, the priority table, source health,
 the analytics, the CSV export, and moderates), D (dispatch, assignment, the crew's day, verification
