@@ -215,6 +215,26 @@ describe('7.3.1 — total active cases over the preceding 30 days', () => {
 });
 
 describe('7.3.2 — the tier distribution', () => {
+  /** Scores one tier per cluster, in the order the object ids are given. */
+  async function scoreEach(
+    clusters: InMemoryClusterStore,
+    scores: InMemoryPriorityScoreStore,
+    tiers: Array<[string, PriorityTier]>,
+  ): Promise<void> {
+    const saved: PriorityScore[] = [];
+    for (const [objectId, tier] of tiers) {
+      const cluster = await clusters.findByObjectId(objectId);
+      const score = new PriorityScore();
+      score.clusterId = (cluster as Cluster).id;
+      score.rank = saved.length + 1;
+      score.tier = tier;
+      score.computedAt = NOW;
+      score.contributions = [];
+      saved.push(score);
+    }
+    await scores.saveAll(saved);
+  }
+
   it('C7 — counted from the last scoring cycle, and insufficient before one has run', async () => {
     const scores = new InMemoryPriorityScoreStore();
     const analytics = new AnalyticsController(ac(), await clusterStore([]), scores);
@@ -222,23 +242,62 @@ describe('7.3.2 — the tier distribution', () => {
     expect(empty.sufficient).toBe(false);
     expect(empty.insufficientReason).toBe('no scoring cycle has completed yet');
 
-    const tiers = [PriorityTier.High, PriorityTier.High, PriorityTier.Medium, PriorityTier.Low];
-    await scores.saveAll(
-      tiers.map((tier, i) => {
-        const score = new PriorityScore();
-        score.clusterId = `c-${i}`;
-        score.rank = i + 1;
-        score.tier = tier;
-        score.computedAt = NOW;
-        score.contributions = [];
-        return score;
-      }),
-    );
-    const full = await analytics.tierDistribution();
+    const clusters = await clusterStore(['a', 'b', 'c', 'd']);
+    const scored = new InMemoryPriorityScoreStore();
+    await scoreEach(clusters, scored, [
+      ['a', PriorityTier.High],
+      ['b', PriorityTier.High],
+      ['c', PriorityTier.Medium],
+      ['d', PriorityTier.Low],
+    ]);
+    const full = await new AnalyticsController(ac(), clusters, scored).tierDistribution();
     expect(full.sufficient).toBe(true);
     expect(full.points).toEqual({ High: 2, Medium: 1, Low: 1 });
   });
+
+  it('C7b — a closed cluster leaves the distribution, and the total tracks the cluster count', async () => {
+    // 7.3.2 says the distribution of ACTIVE clusters. `scores.latest()` is the latest score per
+    // cluster whether or not 1.1.10 has since closed it, so counting it unscoped means the chart
+    // can only ever grow: every closure leaves its last score behind as permanent sediment, and
+    // the total drifts away from the cluster count shown on every other screen. This is the same
+    // defect that was found in `DashboardController`, in its second home.
+    const clusters = await clusterStore(['a', 'b', 'c']);
+    const scores = new InMemoryPriorityScoreStore();
+    await scoreEach(clusters, scores, [
+      ['a', PriorityTier.High],
+      ['b', PriorityTier.Medium],
+      ['c', PriorityTier.Low],
+    ]);
+    const analytics = new AnalyticsController(ac(), clusters, scores);
+
+    const before = await analytics.tierDistribution();
+    expect(before.points).toEqual({ High: 1, Medium: 1, Low: 1 });
+
+    // NEA stops publishing 'a'. Its score row is untouched — nothing deletes priority history.
+    await clusters.deactivateAbsent(new Set(['b', 'c']));
+
+    const after = await analytics.tierDistribution();
+    expect(after.points).toEqual({ High: 0, Medium: 1, Low: 1 });
+    expect(sum(after.points)).toBe((await clusters.findActive()).length);
+  });
+
+  it('C7c — scores that all belong to closed clusters read as insufficient, not as three zeroes', async () => {
+    // The distinction matters: three zeroes drawn without a caveat says "there are no high-priority
+    // clusters today", which is a reassuring claim. The truth is that nothing is being scored.
+    const clusters = await clusterStore(['a']);
+    const scores = new InMemoryPriorityScoreStore();
+    await scoreEach(clusters, scores, [['a', PriorityTier.High]]);
+    await clusters.deactivateAbsent(new Set());
+
+    const chart = await new AnalyticsController(ac(), clusters, scores).tierDistribution();
+    expect(chart.sufficient).toBe(false);
+    expect(chart.insufficientReason).toBe('every cluster that has been scored has since been closed');
+  });
 });
+
+function sum(distribution: Record<PriorityTier, number>): number {
+  return Object.values(distribution).reduce((total, count) => total + count, 0);
+}
 
 describe('7.3.3 — open work orders per Cleaning Crew Member', () => {
   it('C8 — counted per assignee, busiest first, with an unassigned bucket', async () => {

@@ -1,6 +1,6 @@
 /**
  * D-Fence — screen id → component.
- * Stereotype: <<boundary>>. Traces: 11.2.1–11.2.25, 11.3.1, 11.3.2.
+ * Stereotype: <<boundary>>. Traces: 11.2.1–11.2.26, 11.3.1, 11.3.2.
  *
  * The one place the route table meets the components. `AppShell` renders whatever this returns and
  * knows none of these names, which is what lets a screen be added without editing the shell.
@@ -41,6 +41,7 @@ import { WorkOrderListScreen } from '../screens/operations/WorkOrderListScreen';
 import { WorkOrderDetailScreen } from '../screens/operations/WorkOrderDetailScreen';
 import { StaffAccountsScreen } from '../screens/operations/StaffAccountsScreen';
 import { DataSourcesScreen } from '../screens/operations/DataSourcesScreen';
+import { AnalyticsScreen } from '../screens/operations/AnalyticsScreen';
 
 import { MyJobsScreen } from '../screens/crew/MyJobsScreen';
 import { JobDetailScreen } from '../screens/crew/JobDetailScreen';
@@ -76,6 +77,7 @@ export const SCREENS: Record<string, Screen> = {
   WODetail: WorkOrderDetailScreen,
   StaffAccounts: StaffAccountsScreen,
   DataSources: DataSourcesScreen,
+  Analytics: AnalyticsScreen,
 
   MyJobs: MyJobsScreen,
   JobDetail: JobDetailScreen,

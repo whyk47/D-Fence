@@ -580,6 +580,7 @@ the list the Lab 1 UI mockups must cover.*
 - **11.2.23** The system shall provide a Data Sources screen showing each source's last successful retrieval.
 - **11.2.24** The system shall provide a Not Authorised screen and a Not Found screen.
 - **11.2.25** The system shall provide a Work Order List screen for an Operations Manager. *(Added in v0.4. Requirement 11.1.3 mandates a Work Orders navigation item, but §11.2 defined no list screen for it to open, and 11.3.7 requires a create action to return to the list it came from. Found by adversarial review of the Lab 2 model.)*
+- **11.2.26** The system shall provide an Analytics screen for an Operations Manager, presenting the five §7.3 visualisations, each carrying its own sufficiency statement. *(Added in v0.5. §7.3 says "the dashboard shall display" five charts and `AnalyticsController` builds all five, but §11.2 defined no screen to display them on and the Operations Dashboard realises §7.1 rather than §7.3 — so `GET /api/ops/analytics` answered correctly and no user could reach it. The same class of gap as 11.2.25. Found by independent review of the live deployment, 2026-09-05.)*
 
 ## 11.3 Dialog map and transitions
 

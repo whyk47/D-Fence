@@ -138,16 +138,32 @@ export class AnalyticsController {
       [PriorityTier.Medium]: 0,
       [PriorityTier.Low]: 0,
     };
+    // 7.3.2 says the distribution of **active** clusters, and `scores.latest()` is the latest score
+    // per cluster including the ones 1.1.10 has since closed. Counted unscoped, this chart can only
+    // ever grow: every closure leaves its last score behind, so the tiers accumulate a permanent
+    // sediment of clusters that no longer exist and the total drifts away from the cluster count on
+    // every other screen. The same defect was found and fixed in `DashboardController`; this is the
+    // second copy of it, which the first fix did not reach.
+    const activeIds = new Set((await this.clusters.findActive()).map((cluster) => cluster.id));
+    let counted = 0;
     for (const score of latest) {
-      distribution[score.tier] += 1;
+      if (activeIds.has(score.clusterId)) {
+        distribution[score.tier] += 1;
+        counted += 1;
+      }
     }
     // Needs no history at all — it is a picture of the last scoring cycle — so the only way it can
-    // be insufficient is if that cycle has not run.
+    // be insufficient is if that cycle has not run over anything that is still open.
     return {
       requirement: '7.3.2',
       points: distribution,
-      sufficient: latest.length > 0,
-      insufficientReason: latest.length > 0 ? null : 'no scoring cycle has completed yet',
+      sufficient: counted > 0,
+      insufficientReason:
+        counted > 0
+          ? null
+          : latest.length === 0
+            ? 'no scoring cycle has completed yet'
+            : 'every cluster that has been scored has since been closed',
     };
   }
 

@@ -57,6 +57,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   { screenId: 'WODetail', path: '/ops/work-orders/:id', requirement: '11.2.18', roles: [Role.OperationsManager], title: 'Work order' },
   { screenId: 'StaffAccounts', path: '/ops/staff', requirement: '11.2.22', roles: [Role.OperationsManager], title: 'Staff' },
   { screenId: 'DataSources', path: '/ops/sources', requirement: '11.2.23', roles: [Role.OperationsManager], title: 'Data sources' },
+  { screenId: 'Analytics', path: '/ops/analytics', requirement: '11.2.26', roles: [Role.OperationsManager], title: 'Analytics' },
 
   // 2.3.5 — the crew member's three screens, and nothing else.
   { screenId: 'MyJobs', path: '/crew', requirement: '11.2.19', roles: [Role.CleaningCrew], title: 'My jobs' },

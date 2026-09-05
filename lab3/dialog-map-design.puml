@@ -71,6 +71,7 @@ state "Operations Manager  (RouteGuard: role = OperationsManager)" as OpsRegion 
   state "Work Order Detail\n/ops/work-orders/:id  (11.2.18)" as WODetail
   state "Staff Accounts\n/ops/staff  (11.2.22)" as StaffAccounts
   state "Data Sources\n/ops/sources  (11.2.23)" as DataSources
+  state "Analytics\n/ops/analytics  (11.2.26)" as Analytics
 
   OpsDashboard --> ClusterDetail : selectCluster /\nDashboardController.buildPriorityTable()
   OpsDashboard --> ModQueue : openModeration /\nModerationController.listQueue()
@@ -81,6 +82,7 @@ state "Operations Manager  (RouteGuard: role = OperationsManager)" as OpsRegion 
   WOList --> OpsDashboard : back
   OpsDashboard --> StaffAccounts : openStaff
   OpsDashboard --> DataSources : openSources /\nIngestionController.reportSourceHealth()
+  OpsDashboard --> Analytics : openAnalytics /\nAnalyticsController.buildAll()
   ClusterDetail --> WOCreate : createWorkOrder
   ClusterDetail --> OpsDashboard : back
   ModQueue --> OpsDashboard : back
@@ -99,6 +101,7 @@ state "Operations Manager  (RouteGuard: role = OperationsManager)" as OpsRegion 
   WODetail --> ClusterDetail : viewCluster
   StaffAccounts --> OpsDashboard : back /\nStaffAccountController
   DataSources --> OpsDashboard : back
+  Analytics --> OpsDashboard : back
 }
 
 state "Cleaning Crew  (RouteGuard: role = CleaningCrew)" as CrewRegion {

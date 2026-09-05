@@ -25,7 +25,17 @@ export interface NavItem {
 const TOP_LEVEL: Record<Role, string[]> = {
   [Role.Resident]: ['ResidentMap', 'MyLocations', 'MyReports', 'AlertSettings'],
   // 11.1.3 — the Work Orders item opens the Work Order List screen (11.2.25), not the create form.
-  [Role.OperationsManager]: ['OpsDashboard', 'ModQueue', 'DispatchProposal', 'WOList', 'StaffAccounts', 'DataSources'],
+  [Role.OperationsManager]: [
+    'OpsDashboard',
+    // 11.2.26 — next to the dashboard, because §7.3 belongs to it: the five charts are the
+    // same manager's same question asked over thirty days instead of over today.
+    'Analytics',
+    'ModQueue',
+    'DispatchProposal',
+    'WOList',
+    'StaffAccounts',
+    'DataSources',
+  ],
   [Role.CleaningCrew]: ['MyJobs'],
 };
 
