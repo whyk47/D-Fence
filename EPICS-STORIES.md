@@ -1925,6 +1925,65 @@ terms only, and does not satisfy it.*
 - Cross-check against the entity class diagram so the two cannot drift.
 - Commit to `lab1/data-dictionary.md` with an author.
 
+### US-10.9 — Install D-Fence on a phone and open it offline
+**As** a Resident or a Cleaning Crew Member, **I want** D-Fence on my home screen and usable when the
+signal drops **so that** it behaves like an app rather than a bookmark.
+
+*Added in v0.6. The brief calls for a mobile application; the whole system is built as a responsive
+web client (§11.7), which is a defensible engineering choice only if it is actually installable.
+Native iOS and Android are out of scope and `REQUIREMENTS.md` §13 records that as a declared
+simplification rather than an omission.*
+
+**Traces:**
+- 11.8.1 to 11.8.14
+- 11.7.1, 11.7.4 (the same touch and contrast rules apply once installed)
+- 10.5.3 (an offline failure must still state a cause and a remedy)
+
+**Acceptance:**
+- A web app manifest with name, icons at 192, 512 and maskable 512, `display: standalone` and a
+  theme colour is served as `application/manifest+json`.
+- The application can be added to the home screen on Android and iOS and opens without browser
+  chrome.
+- A service worker caches the shell — and never anything under `/api/`, because a cached figure
+  presented beside a §7.1.9 freshness statement would make a true statement false.
+- The cache name carries the build stamp, so a deployment cannot strand an installed copy on a
+  version that no longer exists.
+- Offline, a deep link still lands on the application and it says "You are offline" in its own words
+  with a remedy, rather than showing the browser's error page.
+- The photograph inputs open the camera directly on a phone (`capture="environment"`).
+- The install control appears only while installation is possible, and never inside an installed
+  copy.
+
+**Subtasks:**
+- Write the manifest and generate the icon set.
+- Write the service worker (network-first, cache as fallback) and stamp it at build time.
+- Register it, and add the install control and the offline banner to the shell.
+- Serve the manifest and the worker with the right content types, `no-store`, and CSP entries for
+  `worker-src` and `manifest-src`.
+- Test the worker by executing it, not by asserting its source.
+
+### US-10.10 — Create a staff account from the Staff screen
+**As** an Operations Manager, **I want** to add a crew member from the Staff screen **so that**
+onboarding does not require an engineer.
+
+*Added in v0.6. 2.2.3 was implemented and enforced on the server, but the only client that could
+reach it was a command line — which is not a feature a manager has.*
+
+**Traces:**
+- 2.2.3
+- 2.2.1, 2.2.2 (role is restricted to the roles a manager may create)
+- 10.5.3
+
+**Acceptance:**
+- The Staff screen offers email, role and a temporary password, and the role choice offers only
+  Cleaning Crew Member and Operations Manager.
+- A refusal states its cause and its remedy without disclosing whether the address already exists.
+- The new account appears in the staff list without a reload.
+
+**Subtasks:**
+- Add the form and wire it to `POST /api/ops/staff`.
+- Cover the happy path, the refusal and the role restriction in `tests/client-screens-ops.test.tsx`.
+
 ---
 
 # Build order

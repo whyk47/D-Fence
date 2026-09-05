@@ -1352,6 +1352,74 @@ port: the server was started, an account registered and verified through the HTT
 killed, the server started again, and the same credentials accepted. That sequence is what the
 whole section is about, and it had never been run before today.
 
+
+### 2.30 Twenty-sixth subject - the mobile application (`tests/mobile-app.test.tsx`, `tests/http-boundary.test.ts`)
+
+Added 2026-09-05, with §11.8. The brief asks for a mobile application and D-Fence answers with an
+installable web application, so "installable" has to be a tested claim rather than a hopeful one.
+
+**Fourteen cases (M1-M14).** The interesting decision is that M8 and M9 **execute the service
+worker** rather than assert against its source. `client/public/sw.js` is a real file with no build
+step of its own, so the test reads it and runs it in a constructed scope:
+
+```ts
+new Function('self', 'caches', 'fetch', 'Response', 'URL', source)(scope, ...);
+```
+
+The scope records the listeners the worker registers, and the test then fires `install`, `activate`
+and `fetch` at them with a fake cache. This is more work than matching a string, and it earned its
+keep immediately: `worker.replace('__BUILD__', stamp)` in `client/build.mjs` was replacing the
+occurrence in the *doc comment* rather than the constant, so every deployment shipped a worker whose
+cache name was the literal `__BUILD__`. Nothing about the file's text looked wrong. Running it
+failed. The build now uses `replaceAll` and throws if any placeholder survives.
+
+The rest of the series covers what installability actually consists of: the manifest parses and
+names the icon sizes a launcher needs (M1-M3); `/api/` is never cached in either direction, because
+a cached figure shown beside a §7.1.9 freshness line would make a true statement false (M10); an
+offline navigation falls back to the shell so a deep link lands on the application rather than the
+browser's error page (M11); the install control appears only when the browser offers it and
+disappears once installed (M12-M13); and the viewport does **not** lock zoom - M14 asserts that the
+opt-out string appears nowhere, since a user who needs to zoom in bright sunlight must be allowed
+to.
+
+**Four boundary cases (H14-H17)** check the server's half: the manifest is served as
+`application/manifest+json`, the worker with `no-store` and `Service-Worker-Allowed: /` (a worker
+served from cache is a worker that cannot be replaced), the icons exist at the paths the manifest
+claims, and the CSP carries `worker-src 'self'` and `manifest-src 'self'` - without which the whole
+feature is silently blocked in production and works perfectly in development.
+
+### 2.31 Twenty-seventh subject - the demo, driven by a machine (`src/tools/demo-drive.ts`)
+
+Added 2026-09-05. Not a unit test and not counted among the 689: a third acceptance harness, beside
+`uat.ts` and `client-uat.ts`, whose subject is **the demonstration itself**. It drives twenty-one
+beats of `lab4/DEMO-SCRIPT.md` through real Edge - a 390x844 phone context with Bishan geolocation
+for the resident and the crew, a laptop context for the manager - and reports PASS/FAIL per beat
+with a screenshot each.
+
+What it is for is narrow and worth stating: a demo script is a document that rots. The software
+moves, a button gets renamed, and nobody finds out until it is being projected. This closes that gap
+by making the script executable.
+
+The engineering in it is all about running **twice**. A harness that passes once and fails on its
+sixth run is worse than none, and both failures were the system behaving correctly:
+
+| What refused it | Why | What the driver does now |
+|---|---|---|
+| 3.1.1 - five saved locations per account | It added one per run | Sweeps its own `Demo <token>` locations before and after, leaving the seeded one alone |
+| 8.1.12 - one open work order per cluster | It collided with the previous run's order | Walks **up from the bottom** of the priority table until it finds a free cluster |
+
+Bottom rather than top for the reason §2.28's investigation established: this path ends in a
+treatment record, and writing one against the top-ranked cluster zeroes `DaysSinceLastTreatment` and
+suppresses 15% of the score the demonstration is about. The harness that distorted the data is the
+one lesson this project has already paid for once.
+
+A third fix is smaller and was the most expensive: a failing beat now reports the **refusal text**
+from the screen. `waitForURL: Timeout 25000ms exceeded` hid `you already have 5 saved locations` for
+three runs.
+
+Result at the time of writing: **21 passed, 0 failed, 0 skipped - twice consecutively** against the
+deployment. The second run is the one that means anything.
+
 ---
 
 ## 3. Basis-path design
