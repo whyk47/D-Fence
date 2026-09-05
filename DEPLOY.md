@@ -165,7 +165,14 @@ npm prune --omit=dev   # ship only what runs
 # habit. Windows 10+ ships bsdtar as tar.exe, and `-a` infers the format from
 # the extension, so this writes a real zip. Compress-Archive also works but
 # takes minutes over a node_modules tree and trips on long paths.
-tar -a -c -f deploy.zip dist node_modules package.json
+#
+# Run this in PowerShell, where `tar` IS bsdtar. Under Git Bash or WSL `tar` is
+# GNU tar, which does not recognise `.zip` for `-a` and silently writes a plain
+# tar with a `.zip` name. Azure unpacks that anyway, so nothing complains and
+# the mistake surfaces later as something unrelated. Verify rather than trust:
+#   python -c "import zipfile; print(len(zipfile.ZipFile('deploy.zip').namelist()))"
+# A real archive here is about 1800 entries and 5 MB.
+tar -a -c -f deploy.zip dist node_modules package.json config
 
 az webapp deploy --name dfence-sc2006 --resource-group dfence `
   --src-path deploy.zip --type zip
@@ -175,6 +182,14 @@ npm install            # put the dev dependencies back locally
 
 `node_modules` travels in the archive on purpose: `SCM_DO_BUILD_DURING_DEPLOYMENT=false` means
 Azure installs nothing, so what is shipped is exactly what runs.
+
+**`config` is in that list, and this file left it out for its first two deployments.** The server
+reads `config/scoring.default.json` at startup — the tunable weights behind 4.1.x — and without it
+the container exits 1 with `ENOENT` before it can serve anything. It never showed up locally
+because the file sits in the working tree, so every local run found it; the first environment
+without the working tree is the first to notice. The general lesson is worth more than the fix: a
+deployment package assembled by naming its parts will omit whatever nobody remembered, and the
+build says nothing, because omission is not an error until something reads the missing thing.
 
 ---
 
@@ -193,9 +208,30 @@ Expect **48 passed / 0 failed / 1 documented skip** and **9 / 0** as on localhos
 the interesting one after a move: it is the first measurement of 10.1.5 across a real network rather
 than a loopback, and the dashboard number is the one to watch.
 
-The `uat` run needs `--log` to read a registration verification token, which a deployed instance does
-not put in a local file — so the B1 beat (a resident registering) will report that it cannot read the
-token. That is a limitation of the harness against a remote host, not a failure of the system.
+The `uat` run needs `--log` to read a registration verification token (2.1.4). A deployed instance
+writes it to the container's stdout rather than to a local file, so the naive remote run reports
+that it cannot read the token and **ten further beats skip behind it** — the whole resident segment
+goes untested, which is precisely the part a remote run most needs to cover.
+
+Azure streams that stdout, so point the harness at it. Stream to a file in the background first,
+then run against it:
+
+```bash
+TOKEN=$(az account get-access-token --query accessToken -o tsv | tr -d '')
+curl.exe -s -N -H "Authorization: Bearer $TOKEN"   "https://dfence-sc2006.scm.azurewebsites.net/api/logstream/application"   -o stream.log --max-time 240 &
+sleep 6                       # let the stream attach before the first registration
+npm run uat -- --base https://dfence-sc2006.azurewebsites.net --log stream.log
+```
+
+With the stream attached the remote run reaches **48 / 0 / 1**, the same as localhost. The single
+skip is 8.3.14, which is genuinely unreachable over HTTP: 8.1.4 refuses a work order scheduled in
+the past, so no overdue one can be created through the API.
+
+**`curl.exe`, not `curl`.** Under Avast's TLS interception the Azure CLI and every Python HTTP
+client fail with `CERTIFICATE_VERIFY_FAILED`, because they verify against their own bundled CA list
+which does not contain Avast's root. `curl.exe` uses Schannel — the Windows certificate store —
+where Avast installs its root, so it works while HTTPS scanning is on. Reading logs and calling the
+ARM REST API therefore need no Avast window at all; only `az webapp deploy` does.
 
 ---
 
