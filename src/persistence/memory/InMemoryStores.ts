@@ -313,6 +313,19 @@ export class InMemoryAuditStore implements AuditStore {
       .map((r) => ({ ...r, occurredAt: new Date(r.occurredAt.getTime()) }));
   }
 
+  /**
+   * 2.4.1 — one entity's history. Filtered **before** the limit is applied, which is the whole
+   * point: taking the last N rows and then filtering would answer "nothing happened to this work
+   * order" for any order older than the last N events in the system.
+   */
+  async forTarget(targetEntity: string, targetId: Uuid, limit: number): Promise<AuditEntry[]> {
+    return this.records
+      .filter((r) => r.targetEntity === targetEntity && r.targetId === targetId)
+      .slice(-Math.max(0, limit))
+      .reverse()
+      .map((r) => ({ ...r, occurredAt: new Date(r.occurredAt.getTime()) }));
+  }
+
   size(): number {
     return this.records.length;
   }

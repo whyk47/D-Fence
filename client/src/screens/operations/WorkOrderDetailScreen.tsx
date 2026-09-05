@@ -13,6 +13,12 @@
  *
  * A refused transition (8.3.16) is rendered with the state the order is actually in — "you cannot
  * verify this" is useless; "the work order is In Progress" tells the manager what to do next.
+ *
+ * **The history comes from the audit trail (2.4.1), not from the work order.** The entity keeps no
+ * second copy of who moved it, deliberately: two records of the same fact eventually disagree, and
+ * only one of them is the one that may not be edited. `WorkOrderRoutes` has documented that
+ * decision since §8 was built, and until 2026-09-05 the endpoint it named did not exist — so the
+ * screen showed a status with no account of how it got there.
  */
 import { useState } from 'react';
 import { ApiError } from '../../lib/ApiClient';
@@ -40,6 +46,17 @@ interface DetailPayload {
   };
 }
 
+interface HistoryPayload {
+  entries: Array<{
+    accountId: string;
+    action: string;
+    refused: boolean;
+    targetEntity: string;
+    targetId: string | null;
+    occurredAt: string;
+  }>;
+}
+
 interface CrewPayload {
   crew: Array<{ crewId: string; email: string; isActive: boolean; openWorkOrders: number }>;
 }
@@ -48,6 +65,7 @@ export function WorkOrderDetailScreen(props: ScreenProps): JSX.Element {
   const id = props.params['id'] ?? '';
   const detail = useLoad<DetailPayload>(props.api, `/api/ops/work-orders/${id}`);
   const crew = useLoad<CrewPayload>(props.api, '/api/ops/work-orders/crew-workload');
+  const history = useLoad<HistoryPayload>(props.api, `/api/ops/work-orders/${id}/history`);
 
   const [chosenCrew, setChosenCrew] = useState('');
   const [reason, setReason] = useState<FormField>(field());
@@ -65,6 +83,9 @@ export function WorkOrderDetailScreen(props: ScreenProps): JSX.Element {
       await props.api.post(`/api/ops/work-orders/${id}/${action}`, body);
       detail.retry();
       crew.retry();
+      // The action just taken is a row in the trail; re-reading it is how the manager sees that
+      // their own decision was recorded, which is the only visible proof 2.4.1 is working.
+      history.retry();
     } catch (error) {
       const f = error instanceof ApiError ? error.failure : null;
       setFailure({
@@ -177,6 +198,37 @@ export function WorkOrderDetailScreen(props: ScreenProps): JSX.Element {
               >
                 Cancel work order
               </button>
+            </section>
+
+            {/*
+              * 2.4.1 — who did what, and when. Rendered as a real list rather than a table: it is
+              * read top to bottom, one line per event, and a table would promise columns worth
+              * sorting by.
+              */}
+            <section data-part="history">
+              <h2>History</h2>
+              <StateView state={history.state} onRetry={history.retry}>
+                {history.value == null ? null : history.value.entries.length === 0 ? (
+                  // Not an error and not an empty-state apology: a work order raised a moment ago
+                  // genuinely has no history yet.
+                  <p data-part="history-empty">Nothing has been recorded against this job yet.</p>
+                ) : (
+                  <ol data-part="history-list">
+                    {history.value.entries.map((entry) => (
+                      <li key={`${entry.occurredAt}-${entry.action}`} data-refused={entry.refused}>
+                        <span data-part="when">{new Date(entry.occurredAt).toLocaleString()}</span>{' '}
+                        <span data-part="what">
+                          {/* 2.3.8's refusals mean the opposite of the rest of the list, so they
+                              say so in words rather than only in a colour or an attribute. */}
+                          {entry.refused ? 'Refused: ' : ''}
+                          {entry.action}
+                        </span>{' '}
+                        <span data-part="who">by {entry.accountId}</span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </StateView>
             </section>
 
             {failure === null ? null : (

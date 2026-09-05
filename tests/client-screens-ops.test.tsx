@@ -288,6 +288,7 @@ describe('Dispatch, clusters and work orders — §11.2.16, §11.2.13, §11.2.17
           ],
         },
       },
+      '/api/ops/work-orders/wo-1/history': { body: { entries: [] } },
     });
     render(<WorkOrderDetailScreen {...props({ params: { id: 'wo-1' } }, fetcher)} />);
 
@@ -304,6 +305,7 @@ describe('Dispatch, clusters and work orders — §11.2.16, §11.2.13, §11.2.17
         },
       },
       '/api/ops/work-orders/crew-workload': { body: { crew: [] } },
+      '/api/ops/work-orders/wo-1/history': { body: { entries: [] } },
       '/api/ops/work-orders/wo-1/verify': {
         status: 422,
         body: { error: 'InProgress → Verified is not a permitted transition', remedy: 'the work order is InProgress' },
@@ -317,6 +319,55 @@ describe('Dispatch, clusters and work orders — §11.2.16, §11.2.13, §11.2.17
     const alert = await screen.findByRole('alert');
     // "Cannot verify" alone is useless; the state is what tells the manager what to do next.
     expect(alert.textContent).toContain('the work order is InProgress');
+  });
+
+  it('W6 — the detail screen shows the audited history, refusals included (2.4.1, 2.3.8)', async () => {
+    const { fetcher } = router({
+      '/api/ops/work-orders/wo-1': {
+        body: {
+          workOrder: { id: 'wo-1', clusterId: 'c1', assigneeId: 'cr-1', taskType: 'Fogging', status: 'Assigned', scheduledDate: '2026-09-06', priority: 'High', instructions: 'i', issueFlag: false, issueReason: null, cancellationReason: null, verifiedAt: null },
+        },
+      },
+      '/api/ops/work-orders/crew-workload': { body: { crew: [] } },
+      '/api/ops/work-orders/wo-1/history': {
+        body: {
+          entries: [
+            { accountId: 'mgr-1', action: 'workOrder:assign', refused: false, targetEntity: 'WorkOrder', targetId: 'wo-1', occurredAt: '2026-09-05T02:00:00.000Z' },
+            { accountId: 'cr-9', action: 'workOrder:cancel', refused: true, targetEntity: 'WorkOrder', targetId: 'wo-1', occurredAt: '2026-09-05T02:05:00.000Z' },
+          ],
+        },
+      },
+    });
+    render(<WorkOrderDetailScreen {...props({ params: { id: 'wo-1' } }, fetcher)} />);
+
+    // The entity keeps no copy of who moved it; this list is the only account of how the order
+    // reached its status, and until 2026-09-05 the endpoint behind it did not exist.
+    const list = await screen.findByText('workOrder:assign');
+    expect(list.textContent).toContain('workOrder:assign');
+    expect(screen.getByText('by mgr-1')).toBeTruthy();
+
+    // 2.3.8's refusals mean the opposite of everything else in the list, so they say so in words.
+    const refusal = screen.getByText(/Refused: workOrder:cancel/);
+    expect(refusal).toBeTruthy();
+    expect(refusal.closest('li')?.getAttribute('data-refused')).toBe('true');
+  });
+
+  it('W7 — a work order nothing has happened to says so, rather than showing an error', async () => {
+    const { fetcher } = router({
+      '/api/ops/work-orders/wo-1': {
+        body: {
+          workOrder: { id: 'wo-1', clusterId: 'c1', assigneeId: null, taskType: 'Fogging', status: 'Created', scheduledDate: '2026-09-06', priority: 'Low', instructions: 'i', issueFlag: false, issueReason: null, cancellationReason: null, verifiedAt: null },
+        },
+      },
+      '/api/ops/work-orders/crew-workload': { body: { crew: [] } },
+      '/api/ops/work-orders/wo-1/history': { body: { entries: [] } },
+    });
+    render(<WorkOrderDetailScreen {...props({ params: { id: 'wo-1' } }, fetcher)} />);
+
+    // An order raised a moment ago genuinely has no history. That is not an error, and it is not
+    // an empty-state apology either.
+    await waitFor(() => expect(screen.getByText('Nothing has been recorded against this job yet.')).toBeTruthy());
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
 

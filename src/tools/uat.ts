@@ -1016,7 +1016,64 @@ async function main(): Promise<void> {
                   });
 
             if (completed) {
-              await step('D', '8.3.12, 4.1.15', 'the manager can verify it, writing a treatment record', async () => {
+              /**
+             * 2.4.1, 2.4.2 — the trail, read back over HTTP.
+             *
+             * Placed after the whole dispatch loop on purpose: by this point the run has assigned,
+             * accepted, started, been refused twice and completed, so a trail that answers with
+             * any of those is a trail that survived the round trip to Postgres. Until 2026-09-05
+             * `audit_record` held zero rows in the deployment — the hooks all wrote to an array a
+             * container restart discarded.
+             */
+            await step('D', '2.4.1, 2.3.4', 'the manager can read the audit trail', async () => {
+              const result = await call(manager, 'GET', '/api/ops/audit?limit=50');
+              if (result.status !== 200) {
+                return `expected 200, got ${result.status}: ${JSON.stringify(result.body)}`;
+              }
+              const entries = (result.body.entries ?? []) as Array<Record<string, unknown>>;
+              if (entries.length === 0) {
+                return 'the trail is empty after a full dispatch run — nothing is being persisted';
+              }
+              const row = entries[0] as Record<string, unknown>;
+              // All four of 2.4.1's columns, or it is not the trail.
+              return typeof row.accountId === 'string'
+                && typeof row.action === 'string'
+                && typeof row.targetEntity === 'string'
+                && typeof row.occurredAt === 'string'
+                ? null
+                : `an entry is missing one of the four required fields: ${JSON.stringify(row)}`;
+            });
+
+            await step('D', '2.4.1, 8.3.x', 'the work order has an audited history of its own', async () => {
+              const result = await call(manager, 'GET', `/api/ops/work-orders/${workOrderId}/history`);
+              if (result.status !== 200) {
+                return `expected 200, got ${result.status}: ${JSON.stringify(result.body)}`;
+              }
+              const entries = (result.body.entries ?? []) as Array<Record<string, unknown>>;
+              // The endpoint `WorkOrderRoutes` has documented since §8 was built, and which did
+              // not exist until now: the entity keeps no second copy of who moved it.
+              if (!entries.some((e) => String(e.action).includes('assign'))) {
+                return `the assignment is not in the order's history (${entries.length} entr(ies))`;
+              }
+              return entries.every((e) => e.targetId === workOrderId)
+                ? null
+                : "the history contains another entity's rows";
+            });
+
+            await step('D', '2.3.4, 2.3.8', 'a crew member is refused the audit trail, and the refusal is logged', async () => {
+              const refused = await call(crew, 'GET', '/api/ops/audit');
+              if (refused.status !== 403) {
+                return `expected 403, got ${refused.status}`;
+              }
+              // 2.3.8 — someone probing the trail is exactly what the trail is for.
+              const result = await call(manager, 'GET', '/api/ops/audit?limit=50');
+              const entries = (result.body.entries ?? []) as Array<Record<string, unknown>>;
+              return entries.some((e) => e.refused === true && String(e.action) === 'audit:read')
+                ? null
+                : 'the refusal was not recorded in the trail';
+            });
+
+            await step('D', '8.3.12, 4.1.15', 'the manager can verify it, writing a treatment record', async () => {
                 const result = await call(manager, 'POST', `/api/ops/work-orders/${workOrderId}/verify`, {});
                 if (result.status !== 200) {
                   return `expected 200, got ${result.status}: ${JSON.stringify(result.body)}`;

@@ -62,6 +62,11 @@ export class AccessPolicy {
         // it is listed here rather than checked inside IngestionController for the same reason as
         // every other role rule.
         'ingestion:trigger',
+        // 2.4.1, 2.3.4 — reading the audit trail. Given to this role alone and deliberately not
+        // ownership-scoped: oversight of *other people's* actions is the entire point, and a
+        // resident reading their own rows would still be reading the actors and targets around
+        // them. A resident who wants to know what happened to their report reads the report.
+        'audit:read',
       ]),
     ],
     // 2.3.5: only work orders assigned to that member — hence workOrder:readAssigned, not readAll.

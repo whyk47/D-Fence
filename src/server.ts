@@ -33,6 +33,9 @@ import { LocationRoutes } from './boundary/http/LocationRoutes';
 import { AlertRoutes } from './boundary/http/AlertRoutes';
 import { MapRoutes } from './boundary/http/MapRoutes';
 import { PrivacyRoutes } from './boundary/http/PrivacyRoutes';
+import { AuditRoutes } from './boundary/http/AuditRoutes';
+import { AuditController } from './control/AuditController';
+import { AuditRepository } from './persistence/AuditRepository';
 import { UploadRoutes } from './boundary/http/UploadRoutes';
 import { PhotoUploadController } from './control/PhotoUploadController';
 import { SupabaseStorageGateway } from './boundary/gateways/SupabaseStorageGateway';
@@ -134,14 +137,21 @@ async function main(): Promise<void> {
   const config = ConfigLoader.load();
   const http = new HttpClient();
 
-  const auditStore = new InMemoryAuditStore();
-  const ac0 = new AccessControlService(new AccessPolicy(), auditStore);
-  // Bound below, once `database` is known — declared here because the authentication controllers
-  // are constructed before the persistence choice is made.
+  // Bound first, because the audit store now depends on the persistence choice — 2.4.1's trail
+  // was being written to an array in production, and a container restart is not a retention policy.
   const accountsAndSessions = bindAccountStores(config.get('DATABASE_URL'));
   const accounts = accountsAndSessions.accounts;
   const sessions = accountsAndSessions.sessions;
   const database = accountsAndSessions.database;
+  /**
+   * 2.4.1, 2.4.2. The one store where the in-memory fallback is a genuine loss rather than a
+   * development convenience: an audit trail that a restart discards answers no question anyone
+   * asks of it, and the whole point of 2.4.2 is that the record outlives the people in it.
+   * `audit_record` carries an append-only trigger, so the guarantee is the database's rather
+   * than this line's.
+   */
+  const auditStore = database === null ? new InMemoryAuditStore() : new AuditRepository(database);
+  const ac0 = new AccessControlService(new AccessPolicy(), auditStore);
   // Supabase Auth is the decision; the project does not exist yet, so §2 runs on the local
   // provider (real salted scrypt hashes, no email). Swapping is one line — see AuthProvider.
   const authProvider = new LocalAuthProvider();
@@ -215,7 +225,8 @@ async function main(): Promise<void> {
     database === null
       ? 'Persistence: in-memory (no DATABASE_URL) — a restart loses cluster history.'
       : 'Persistence: Postgres for accounts, sessions, clusters, rainfall, runs, scores, reports, '
-        + 'work orders and treatments; in-memory for saved locations, alerts, forecasts and audit. '
+        + 'work orders, treatments and the audit trail; in-memory for saved locations, alerts and '
+        + 'forecasts. '
         + 'Credentials live in the development auth provider and do NOT survive a restart.',
   );
   // Reports and work orders were the two that mattered most after the ingestion path: without
@@ -589,6 +600,8 @@ async function main(): Promise<void> {
   app.mount(new LocationRoutes(ac, locations));
   app.mount(new AlertRoutes(ac, notifications, alertPreferences));
   app.mount(new MapRoutes(ac, mapView));
+  // 2.4.1, 2.3.8 — the trail is finally readable, which is what makes writing it worth anything.
+  app.mount(new AuditRoutes(ac, new AuditController(ac, auditStore)));
   // 5.1.5, 8.3.6 — the only path by which an image enters the system.
   app.mount(new UploadRoutes(ac, new PhotoUploadController(ac, objectStorage, auditStore)));
   // §8's two halves, finally reachable over HTTP. Both were declared skeletons that threw, so the

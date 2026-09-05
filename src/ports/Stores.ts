@@ -327,6 +327,16 @@ export interface AuditStore {
   /** 2.4.x — the audit trail, newest first. Implementations return copies: 2.4.2 forbids
    *  modification by any role, and handing back the stored object makes that false. */
   recent(limit: number): Promise<AuditEntry[]>;
+  /**
+   * 2.4.1, 8.3.x — one entity's history, newest first.
+   *
+   * `WorkOrderRoutes` documents that a work order keeps no second copy of who moved it, because
+   * two records of the same fact eventually disagree and only one of them may not be edited. That
+   * design is only honest if the audited copy is *readable*, which is what this method is for.
+   * Filtering `recent()` in the caller is not the same thing: the trail is unbounded, so the row
+   * being looked for is exactly the one a `LIMIT` drops.
+   */
+  forTarget(targetEntity: string, targetId: Uuid, limit: number): Promise<AuditEntry[]>;
 }
 
 /** One row of the 2.4.1 trail: who, what, which thing, when. All four, or it is not the trail. */

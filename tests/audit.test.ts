@@ -30,6 +30,7 @@ import { ModerationController } from '../src/control/ModerationController';
 import { WorkOrderTransitionTable } from '../src/control/WorkOrderTransitionTable';
 import { WorkOrderLifecycleController } from '../src/control/WorkOrderLifecycleController';
 import { DispatchController } from '../src/control/DispatchController';
+import { AuditController } from '../src/control/AuditController';
 import { Principal, SYSTEM_ACTOR_ID } from '../src/control/Principal';
 import { Cluster } from '../src/entity/Cluster';
 import { GeoPoint, Polygon, PremisesMix } from '../src/entity/valueTypes';
@@ -283,3 +284,113 @@ describe('2.4.2 — an audit record cannot be modified or deleted by any role', 
     expect(f.audit.size()).toBeGreaterThan(0);
   });
 });
+
+/**
+ * 2.4.1 is only half a requirement while the trail cannot be read.
+ *
+ * Everything above establishes that the rows are *written*. Until 2026-09-05 there was no route,
+ * no controller and — in the deployment — no table row either, because `server.ts` constructed the
+ * in-memory store in production. A record nobody can read is indistinguishable from a record
+ * nobody keeps, and `WorkOrderRoutes.ts` had been documenting an audit endpoint that did not exist.
+ */
+describe('2.4.1 — the trail can be read, by the one role entitled to read it', () => {
+  async function readable(): Promise<{
+    controller: AuditController;
+    audit: InMemoryAuditStore;
+    workOrderId: string;
+    f: Awaited<ReturnType<typeof fixture>>;
+  }> {
+    const f = await fixture();
+    const order = await f.dispatch.createWorkOrder(
+      { clusterId: f.clusterId, taskType: TaskType.Fogging, scheduledDate: tomorrow() },
+      MANAGER,
+    );
+    await f.dispatch.assign(order.id, CREW.accountId, MANAGER);
+    await f.lifecycle.accept(order.id, CREW);
+    const controller = new AuditController(
+      new AccessControlService(new AccessPolicy(), f.audit),
+      f.audit,
+    );
+    return { controller, audit: f.audit, workOrderId: order.id, f };
+  }
+
+  it('A11 — a manager reads the trail; a resident and a crew member are refused (2.3.4)', async () => {
+    const { controller } = await readable();
+
+    expect((await controller.recent(50, MANAGER)).length).toBeGreaterThan(0);
+    // The trail names every actor and every target in the system. Unrestricted, it is a directory
+    // of what exists and who touched it — the oracle 2.3.7 refuses to be.
+    await expect(controller.recent(50, RESIDENT)).rejects.toThrow(/not authorised/);
+    await expect(controller.recent(50, CREW)).rejects.toThrow(/not authorised/);
+  });
+
+  it('A12 — a work order history is its own, not the whole trail filtered by eye', async () => {
+    const { controller, workOrderId } = await readable();
+    const history = await controller.history('WorkOrder', workOrderId, 50, MANAGER);
+
+    expect(history.length).toBeGreaterThan(0);
+    expect(history.every((e) => e.targetId === workOrderId)).toBe(true);
+    expect(history.every((e) => e.targetEntity === 'WorkOrder')).toBe(true);
+    // 8.3.x — the assignment and the acceptance are both there, which is the pair a review of a
+    // dispatch decision actually asks about.
+    expect(history.some((e) => e.action.includes('assign'))).toBe(true);
+    expect(history.some((e) => e.action.includes('Accepted'))).toBe(true);
+  });
+
+  it('A13 — the filter runs before the limit, so an old entity still has a history', async () => {
+    const { controller, audit, workOrderId } = await readable();
+    // Fifty unrelated events after the ones under test. Taking the last N rows and *then*
+    // filtering would answer "nothing ever happened to this work order" — the failure mode is
+    // silent, and it gets worse the longer the system runs.
+    for (let i = 0; i < 50; i += 1) {
+      await audit.appendAction('manager-1', 'noise', 'Cluster', `cluster-${i}`);
+    }
+
+    const history = await controller.history('WorkOrder', workOrderId, 5, MANAGER);
+    expect(history.length).toBeGreaterThan(0);
+    expect(history.every((e) => e.targetId === workOrderId)).toBe(true);
+  });
+
+  it('A14 — an entity nothing has happened to is an empty list, not an error', async () => {
+    const { controller } = await readable();
+    // "Nothing has happened yet" and "there is no such thing" are different facts, and only the
+    // first is this endpoint's to answer. A 404 here would make the trail an existence oracle.
+    expect(await controller.history('WorkOrder', 'never-existed', 50, MANAGER)).toEqual([]);
+  });
+
+  it('A15 — a refusal is flagged as one rather than left as a string convention', async () => {
+    const { controller, f } = await readable();
+    await expect(f.moderation.verify('no-such-report', RESIDENT)).rejects.toThrow(/not authorised/);
+
+    const refusal = (await controller.recent(50, MANAGER)).find((e) => e.refused);
+    expect(refusal).toBeDefined();
+    // The `DENIED:` prefix is lifted into a boolean here: a screen that discovers the convention
+    // by string-matching gets it wrong the day an action name legitimately contains the word.
+    expect(refusal?.action.startsWith('DENIED:')).toBe(false);
+    expect(refusal?.action).toBe('report:moderate');
+  });
+
+  it('A16 — the limit is bounded, so the whole growing table cannot be asked for', async () => {
+    const { controller, audit } = await readable();
+    for (let i = 0; i < 20; i += 1) {
+      await audit.appendAction('manager-1', 'noise', 'Cluster', `cluster-${i}`);
+    }
+
+    expect((await controller.recent(3, MANAGER)).length).toBe(3);
+    // Absent, negative and absurd all land on a sane number rather than on the table's size.
+    expect((await controller.recent(undefined, MANAGER)).length).toBeLessThanOrEqual(100);
+    expect((await controller.recent(-5, MANAGER)).length).toBeLessThanOrEqual(100);
+    expect((await controller.recent(10_000_000, MANAGER)).length).toBeLessThanOrEqual(500);
+  });
+
+  it('A17 — reading the trail is itself refused-and-logged when it should not have happened', async () => {
+    const { controller, audit } = await readable();
+    await expect(controller.recent(50, RESIDENT)).rejects.toThrow(/not authorised/);
+
+    const denial = (await audit.recent(200)).find((e) => e.action === 'DENIED:audit:read');
+    // 2.3.8 applies to this route like every other, and it is the route where a quiet refusal
+    // would matter most: someone probing the trail is exactly what the trail is for.
+    expect(denial?.accountId).toBe('resident-1');
+  });
+});
+

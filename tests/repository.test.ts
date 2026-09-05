@@ -27,6 +27,7 @@ import { ReportRepository } from '../src/persistence/ReportRepository';
 import { WorkOrderRepository, TreatmentRecordRepository } from '../src/persistence/WorkOrderRepository';
 import { AccountRepository, SessionRepository } from '../src/persistence/AccountRepository';
 import { ClusterRepository } from '../src/persistence/ClusterRepository';
+import { AuditRepository } from '../src/persistence/AuditRepository';
 import { Account } from '../src/entity/Account';
 import { Session } from '../src/entity/Session';
 import { Report } from '../src/entity/Report';
@@ -300,3 +301,88 @@ describe.skipIf(!live)('Repositories against live PostGIS — §5.1.7, §5.1.11,
     expect((await sessions.findByToken(session.token))?.lastActiveAt.toISOString()).toBe('2026-09-04T10:20:00.000Z');
   });
 });
+
+/**
+ * §2.4.2's guarantee is the database's, and this is where that claim is checked.
+ *
+ * Every other audit test in the suite runs against `InMemoryAuditStore`, where "cannot be
+ * modified" means "the interface has no method for it" — true, and worth nothing against a
+ * `psql` prompt. The real guarantee is the `audit_record_no_change` trigger, and a trigger is not
+ * a property of the port, so it can only be tested here.
+ *
+ * **These rows are not cleaned up, deliberately.** `afterAll` cannot delete them: that is the
+ * behaviour under test. They carry a unique target id so they are identifiable as test rows, and
+ * an audit table that accumulates a handful of them is exactly what an append-only table looks
+ * like.
+ */
+describe.skipIf(!live)('The audit trail against live Postgres — §2.4.1, §2.4.2', () => {
+  let db: Database;
+  let audit: AuditRepository;
+  const targetId = randomUUID();
+  const actor = randomUUID();
+
+  beforeAll(async () => {
+    db = new Database(url);
+    audit = new AuditRepository(db);
+  }, 30_000);
+
+  afterAll(async () => {
+    // No DELETE here. There cannot be one — see the block comment.
+    await db.close();
+  }, 30_000);
+
+  it('U1 — a row written through the port comes back through the port', async () => {
+    await audit.appendAction(actor, 'workOrder:assign', 'RepositoryTest', targetId);
+    const history = await audit.forTarget('RepositoryTest', targetId, 10);
+
+    expect(history).toHaveLength(1);
+    expect(history[0]?.accountId).toBe(actor);
+    expect(history[0]?.action).toBe('workOrder:assign');
+    expect(history[0]?.occurredAt.getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it('U2 — a denial is stored distinguishably from a thing that happened (2.3.8)', async () => {
+    await audit.appendDenial(actor, 'audit:read', 'RepositoryTest', targetId);
+    const history = await audit.forTarget('RepositoryTest', targetId, 10);
+    expect(history.some((e) => e.action === 'DENIED:audit:read')).toBe(true);
+  });
+
+  it('U3 — a non-uuid actor and a non-uuid target are stored, not silently dropped', async () => {
+    // `SYSTEM_ACTOR_ID` is the string 'system' and a photograph is named by a storage key —
+    // a uuid *plus an extension*. Both were refused by the original column type, and because
+    // `append` swallows failures on purpose, they were refused invisibly. Migration 003 is what
+    // this case defends.
+    const photoKey = `${randomUUID()}.jpg`;
+    await audit.appendAction('system', 'photo:upload', 'RepositoryTestPhoto', photoKey);
+    const history = await audit.forTarget('RepositoryTestPhoto', photoKey, 10);
+
+    expect(history).toHaveLength(1);
+    expect(history[0]?.accountId).toBe('system');
+  });
+
+  it('U4 — Postgres itself refuses an UPDATE and a DELETE (2.4.2)', async () => {
+    await expect(
+      db.query("UPDATE audit_record SET action = 'tampered' WHERE target_id = $1", [targetId]),
+    ).rejects.toThrow(/cannot be update/i);
+    // The row proving something happened is the row an attacker most wants gone, so the refusal
+    // has to hold against the application's own connection — which owns the schema, so a REVOKE
+    // would not bind it. A trigger does.
+    await expect(
+      db.query('DELETE FROM audit_record WHERE target_id = $1', [targetId]),
+    ).rejects.toThrow(/cannot be delete/i);
+
+    expect((await audit.forTarget('RepositoryTest', targetId, 10)).length).toBeGreaterThan(0);
+  });
+
+  it('U5 — the trail is newest first, and ties break in insertion order', async () => {
+    const burst = randomUUID();
+    for (const action of ['first', 'second', 'third']) {
+      await audit.appendAction(actor, action, 'RepositoryTestOrder', burst);
+    }
+    const history = await audit.forTarget('RepositoryTestOrder', burst, 10);
+    // Two rows written in the same millisecond share `occurred_at`; ordering by time alone leaves
+    // their relative order to the planner, which is how a trail comes back scrambled.
+    expect(history.map((e) => e.action)).toEqual(['third', 'second', 'first']);
+  });
+});
+
