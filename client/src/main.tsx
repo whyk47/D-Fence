@@ -54,11 +54,29 @@ function App(): JSX.Element {
    */
   const api = useMemo(
     () =>
-      new ApiClient('', globalThis.fetch.bind(globalThis), () => {
-        // 11.2.24 — the server refused; the client shows the refusal rather than inventing one.
-        window.history.pushState({}, '', '/not-authorised');
-        setUrl('/not-authorised');
-      }),
+      new ApiClient(
+        '',
+        globalThis.fetch.bind(globalThis),
+        () => {
+          // 11.2.24 — the server refused; the client shows the refusal rather than inventing one.
+          window.history.pushState({}, '', '/not-authorised');
+          setUrl('/not-authorised');
+        },
+        () => {
+          // 2.1.9 — the session expired underneath them. Forget it and send them somewhere that
+          // can fix it, carrying where they were so signing in resumes the journey (11.1.10).
+          setPrincipal(null);
+          setToken(null);
+          rememberToken(storage, null);
+          const returnTo = window.location.pathname + window.location.search;
+          const next = `/signin?returnTo=${encodeURIComponent(returnTo)}`;
+          window.history.pushState({}, '', next);
+          setUrl(next);
+        },
+      ),
+    // `storage` is a useMemo([]) constant, so capturing it here is stable by construction and
+    // naming it as a dependency would be noise that suggests it could change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 

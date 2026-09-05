@@ -45,6 +45,19 @@ export class ApiClient {
     private readonly fetcher: Fetcher = globalThis.fetch?.bind(globalThis),
     /** Called on a 403 so the shell can route to Not Authorised (11.2.24). */
     private readonly onForbidden: () => void = () => undefined,
+    /**
+     * Called on a 401 so the shell can drop the dead session and offer sign-in (2.1.9, 11.1.10).
+     *
+     * Separate from `onForbidden` because the two refusals need opposite responses: a 403 is
+     * permanent and the user should be told, a 401 is fixable and the user should be sent to fix
+     * it. Routing a 401 to Not Authorised — which is what happened while the server answered 403
+     * for both — leaves someone whose session merely expired reading that they lack permission for
+     * a screen they own, with no control anywhere on it that would help.
+     *
+     * This became the ordinary path rather than an edge case the moment tokens started surviving a
+     * refresh: an expired stored token is now what a returning user most often presents.
+     */
+    private readonly onUnauthenticated: () => void = () => undefined,
   ) {}
 
   /** 2.1.8 — the session token, held in memory only. */
@@ -82,6 +95,12 @@ export class ApiClient {
       });
     }
 
+    if (response.status === 401) {
+      // The token is dead. Dropping it here rather than leaving it to the caller means one stale
+      // request cleans up for every screen, instead of each screen remembering to.
+      this.token = null;
+      this.onUnauthenticated();
+    }
     if (response.status === 403) {
       this.onForbidden();
     }

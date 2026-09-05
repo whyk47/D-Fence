@@ -305,8 +305,20 @@ async function main(): Promise<void> {
           ? null
           : accumulator.accumulate(cluster.boundary.centroid(), stations, readings, now);
       inputs.set(cluster.id, {
-        rainfall24h: rain?.accum24hMm,
-        rainfall72h: rain?.accum72hMm,
+        // 4.1.12, 4.1.20 — `undefined` excludes the driver, names it in `excludedDrivers` and
+        // marks the score degraded; 4.1.19 then redistributes its weight. A total computed over
+        // less than three quarters of its window is handed over as absent for exactly that reason:
+        // the deployment spent its first days publishing `accum72hMm = 0` with `isDegraded = false`
+        // on 26 hours of history, which asserts "no rain for three days" on the strength of one.
+        // This corrects itself without intervention once the history is long enough.
+        rainfall24h:
+          rain !== null && RainfallAccumulator.sufficientFor(rain.observed24hHours, 24)
+            ? rain.accum24hMm
+            : undefined,
+        rainfall72h:
+          rain !== null && RainfallAccumulator.sufficientFor(rain.observed72hHours, 72)
+            ? rain.accum72hMm
+            : undefined,
         verifiedOpenReports: reportCounts.get(cluster.id) ?? 0, // 4.1.3 via 5.2.5
         // 4.1.15/4.1.16 — measured from the last verified treatment now that work orders exist,
         // defaulting to 90 days when a cluster has never been treated.

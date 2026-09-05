@@ -18,6 +18,27 @@ export class NotAuthorised extends Error {
   }
 }
 
+/**
+ * No usable session was presented at all — no bearer token, or one the store no longer knows.
+ *
+ * Distinct from `NotAuthorised`, which means a known caller asked for something their role does not
+ * cover. The two are different HTTP answers (401 against 403) and, more importantly, different
+ * *instructions*: one is fixed by signing in and the other never is, so a client that cannot tell
+ * them apart either sends an authorised user to a sign-in form or leaves an expired session staring
+ * at "not authorised" with no way forward. That second case became live the moment tokens started
+ * surviving a refresh — an expired stored token is now the ordinary path, not an edge case.
+ *
+ * **This does not weaken 2.3.7.** That requirement forbids a refusal from revealing whether a
+ * resource exists. The distinction here is about the *caller's own credentials*, which the caller
+ * already knows: an anonymous prober learns nothing from being told it presented no token.
+ */
+export class NotAuthenticated extends Error {
+  constructor() {
+    super('not authenticated');
+    this.name = 'NotAuthenticated';
+  }
+}
+
 export class AccessControlService {
   constructor(
     private readonly policy: AccessPolicy,

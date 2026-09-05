@@ -27,6 +27,9 @@ export class ExpressApp {
     private readonly resolver: PrincipalResolver | null = null,
     private readonly requireHttps = false,
   ) {
+    // Express advertises itself in a header on every response. It tells an attacker which stack
+    // and therefore which CVE list to start from, and it does nothing for anyone else.
+    this.app.disable('x-powered-by');
     this.app.use(express.json({ limit: '2mb' }));
     this.app.use((req: ExRequest, res: ExResponse, next: () => void) => {
       // Behind a proxy or a platform load balancer, TLS terminates upstream and the only evidence
@@ -49,6 +52,38 @@ export class ExpressApp {
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('X-Frame-Options', 'DENY');
       res.setHeader('Referrer-Policy', 'no-referrer');
+      /**
+       * 10.3.x — a Content-Security-Policy, which is the header that actually stops an injected
+       * script rather than merely discouraging one.
+       *
+       * It can be this strict because the client earns it: `index.html` has no inline script and no
+       * inline style, the bundle loads no external resource, and the only origin anything is
+       * fetched from is this one. That was checked rather than assumed — the single external URL
+       * in the bundle is a link inside a React error message.
+       *
+       * `'unsafe-inline'` appears nowhere, which is the whole point: a policy that allows it stops
+       * approximately nothing. If a future screen needs an inline style, the answer is a class in
+       * `styles.css`, not a weaker policy here.
+       *
+       * `data:` is permitted for images alone, because a photograph chosen on a phone is previewed
+       * from a data URL before it is uploaded (8.3.9).
+       */
+      res.setHeader(
+        'Content-Security-Policy',
+        [
+          "default-src 'self'",
+          "script-src 'self'",
+          "style-src 'self'",
+          "img-src 'self' data:",
+          "connect-src 'self'",
+          "font-src 'self'",
+          "object-src 'none'",
+          "base-uri 'self'",
+          "form-action 'self'",
+          // The header equivalent of X-Frame-Options: DENY, which CSP supersedes.
+          "frame-ancestors 'none'",
+        ].join('; '),
+      );
       next();
     });
 
@@ -124,8 +159,21 @@ export class ExpressApp {
         maxAge: 0,
       }),
     );
-    this.app.get('*', (req: ExRequest, res: ExResponse) => {
-      if (req.path.startsWith('/api/')) {
+    /**
+     * `all`, not `get`.
+     *
+     * This was registered for GET only, so an unmatched **POST** fell past it to Express's built-in
+     * handler and came back as an HTML error page — `<pre>Cannot POST /api/…</pre>` — while the
+     * same path answered correct JSON to a GET. A client `fetch` calling `.json()` on that gets a
+     * parse error, which sends whoever is debugging it looking at the client rather than at the
+     * route table.
+     *
+     * A non-GET to a **client** path is a 404 rather than the shell: `/ops/work-orders` is a
+     * drawing instruction to a browser, and there is no sense in which anything can be posted to
+     * it. Returning the HTML shell to such a request would be answering a question nobody asked.
+     */
+    this.app.all('*', (req: ExRequest, res: ExResponse) => {
+      if (req.path.startsWith('/api/') || req.method !== 'GET') {
         res.status(404).json({ error: 'no such route', remedy: 'check the path' });
         return;
       }
@@ -179,6 +227,9 @@ export class ExpressApp {
       },
       text(body: string, contentType = 'text/plain'): void {
         res.type(contentType).send(body);
+      },
+      header(name: string, value: string): void {
+        res.setHeader(name, value);
       },
     };
     return wrapper;

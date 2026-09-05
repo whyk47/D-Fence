@@ -125,8 +125,16 @@ async function main(): Promise<void> {
         ? null
         : accumulator.accumulate(cluster.boundary.centroid(), stations, readings, now);
     inputs.set(cluster.id, {
-      rainfall24h: rain?.accum24hMm,
-      rainfall72h: rain?.accum72hMm,
+      // 4.1.12/4.1.20 — see the same guard in server.ts: a window with too little history behind
+      // it is absent, not zero.
+      rainfall24h:
+        rain !== null && RainfallAccumulator.sufficientFor(rain.observed24hHours, 24)
+          ? rain.accum24hMm
+          : undefined,
+      rainfall72h:
+        rain !== null && RainfallAccumulator.sufficientFor(rain.observed72hHours, 72)
+          ? rain.accum72hMm
+          : undefined,
       // 4.1.16: no treatment record yet means the 90-day default, which saturates that driver.
       daysSinceLastTreatment: 90,
     });

@@ -6,7 +6,7 @@
  * it in the base is how the design makes forgetting the check visible rather than silent.
  */
 import { randomUUID } from 'node:crypto';
-import { AccessControlService, NotAuthorised } from '../../control/AccessControlService';
+import { AccessControlService, NotAuthenticated, NotAuthorised } from '../../control/AccessControlService';
 import { Principal } from '../../control/Principal';
 import { Role } from '../../entity/enums';
 
@@ -20,6 +20,12 @@ export type Response = {
   status(code: number): Response;
   json(body: unknown): void;
   text(body: string, contentType?: string): void;
+  /**
+   * Set a response header. Optional so the many hand-rolled `Response` fakes in the test suite keep
+   * compiling; the one caller uses `?.` and degrades to a 401 without `WWW-Authenticate`, which is
+   * still a correct answer.
+   */
+  header?(name: string, value: string): void;
 };
 
 export type Schema = (value: unknown) => boolean;
@@ -75,19 +81,22 @@ export abstract class RouteHandler {
    * wired (E2, 2026-09-03) the real path is the resolver and this branch is unreachable in the
    * server; it is retained for handler unit tests that have no session store.
    *
-   * @throws NotAuthorised when there is no valid session — 2.3.7, carrying no detail
+   * @throws NotAuthenticated when there is no valid session — 2.3.7, carrying no detail
    */
   protected async resolvePrincipal(req: Request): Promise<Principal> {
     if (this.resolver !== null) {
       const token = RouteHandler.bearerOf(req);
       const principal = token === null ? null : await this.resolver.resolve(token);
       if (principal === null) {
-        throw new NotAuthorised();
+        // Not `NotAuthorised`: nobody was identified, so there is no role to have found wanting.
+        // A missing token and an expired one are deliberately the same answer — telling them apart
+        // would say whether a token had ever been valid, which is exactly the oracle 2.3.7 refuses.
+        throw new NotAuthenticated();
       }
       return principal;
     }
     if (process.env.DFENCE_DEV_PRINCIPAL !== 'true') {
-      throw new NotAuthorised();
+      throw new NotAuthenticated();
     }
     const claimed = req.headers['x-dev-role'];
     const role = Object.values(Role).find((r) => r === claimed) ?? Role.Resident;
@@ -116,8 +125,28 @@ export abstract class RouteHandler {
    */
   protected fail(res: Response, error: Error): void {
     const correlationId = randomUUID();
+    if (error instanceof NotAuthenticated) {
+      // RFC 7235 — a 401 without this header is a 401 the specification does not describe, and
+      // any standards-aware client is entitled to ignore it.
+      res.header?.('WWW-Authenticate', 'Bearer realm="D-Fence"');
+      res.status(401).json({
+        error: 'not authenticated',
+        remedy: 'sign in and try again',
+        correlationId,
+      });
+      return;
+    }
     if (error instanceof NotAuthorised) {
-      res.status(403).json({ error: 'not authorised', correlationId });
+      // 2.3.7 still governs the `error`: it names no resource and does not say whether one exists.
+      // The remedy is the *same sentence for every refusal in the system*, so it carries no
+      // information about what was asked for — which is what makes it compatible with 2.3.7 while
+      // still meeting 10.5.3's requirement that an error say what to do next. A user staring at a
+      // bare "not authorised" cannot tell a mistake from a broken system.
+      res.status(403).json({
+        error: 'not authorised',
+        remedy: 'if you need access to this, ask an Operations Manager',
+        correlationId,
+      });
       return;
     }
     console.error(`[${correlationId}] ${error.stack ?? error.message}`);

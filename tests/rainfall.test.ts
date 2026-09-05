@@ -147,6 +147,80 @@ describe('EC/BV: rolling accumulations and staleness (1.2.7, 1.2.8, 1.2.10)', ()
     expect(rain.accum24hMm).toBe(0);
     expect(rain.isStale).toBe(false);
   });
+
+  /**
+   * The defect an independent review found on the live deployment, and the one this block exists
+   * for: **0 mm is a measurement, but 0 mm over 26 hours is not a 72-hour measurement.**
+   *
+   * Every one of the 43 scored clusters carried `accum72hMm = 0`, `excludedDrivers = []` and
+   * `isDegraded = false` on a deployment 26 hours old. The arithmetic was right — it genuinely had
+   * not rained — and the claim was still wrong: the system asserted three dry days on the strength
+   * of one, and had no way to say otherwise. W5 above stays exactly as it was, because the
+   * accumulation is not what was broken; what was missing was any record of how much of the window
+   * stood behind it.
+   */
+  it('W6 — a window reports how many hours of history it actually had', () => {
+    const readings = RainfallFeedParser.parseReadings(
+      payload([
+        { minutesAgo: 26 * 60, values: { S111: 0, S222: 0, S333: 0 } },
+        { minutesAgo: 5, values: { S111: 0, S222: 0, S333: 0 } },
+      ]),
+    );
+    const rain = accumulator.accumulate(CENTROID, stations, readings, NOW);
+
+    // The live case: 26 hours of history, and a 72-hour window asked of it.
+    expect(rain.observed72hHours).toBeCloseTo(26, 0);
+    // The 24-hour window is fully covered by the same readings — the oldest predates it.
+    expect(rain.observed24hHours).toBeCloseTo(24, 0);
+  });
+
+  it('W7 — 26 hours is enough for the 24-hour driver and not for the 72-hour one', () => {
+    // The consequence, stated as the scoring path will read it. 4.1.19 redistributes the excluded
+    // driver's weight, so the score stays on a 0-100 scale rather than quietly losing 0.12 of it.
+    expect(RainfallAccumulator.sufficientFor(26, 24)).toBe(true);
+    expect(RainfallAccumulator.sufficientFor(26, 72)).toBe(false);
+  });
+
+  it('W8 — the 75% boundary, on both sides of it', () => {
+    // 54 of 72 hours is exactly three quarters and is accepted; a minute less is not.
+    expect(RainfallAccumulator.sufficientFor(54, 72)).toBe(true);
+    expect(RainfallAccumulator.sufficientFor(53.98, 72)).toBe(false);
+    expect(RainfallAccumulator.sufficientFor(18, 24)).toBe(true);
+    expect(RainfallAccumulator.sufficientFor(17.9, 24)).toBe(false);
+  });
+
+  it('W9 — once three days of history exist, the driver returns on its own', () => {
+    const readings = RainfallFeedParser.parseReadings(
+      payload([
+        { minutesAgo: 71 * 60, values: { S111: 0, S222: 0, S333: 0 } },
+        { minutesAgo: 5, values: { S111: 0, S222: 0, S333: 0 } },
+      ]),
+    );
+    const rain = accumulator.accumulate(CENTROID, stations, readings, NOW);
+    // No intervention, no configuration change, no redeployment: the exclusion is a statement
+    // about the data and it stops being true when the data stops being short.
+    expect(RainfallAccumulator.sufficientFor(rain.observed72hHours, 72)).toBe(true);
+  });
+
+  it('W10 — the exclusion sentence says what is missing, in hours (10.5.3)', () => {
+    // Not "insufficient data". A reader deciding whether to trust tomorrow's score needs to know
+    // whether it is short by two hours or by two days.
+    expect(RainfallAccumulator.coverageReason(26, 72)).toBe(
+      '26.0 of 72 hours of rainfall history — too little to report as a 72-hour total',
+    );
+  });
+
+  it('W11 — a window with no readings at all reports no coverage, not full coverage', () => {
+    // The other half of the same distinction. `accumulate` writes 0 mm because the field is typed
+    // `number`, and the coverage is what stops that 0 being read as a measurement.
+    const readings = RainfallFeedParser.parseReadings(
+      payload([{ minutesAgo: 80 * 60, values: { S111: 9, S222: 9, S333: 9 } }]),
+    );
+    const rain = accumulator.accumulate(CENTROID, stations, readings, NOW);
+    expect(rain.accum72hMm).toBe(0);
+    expect(rain.observed72hHours).toBe(0);
+    expect(RainfallAccumulator.sufficientFor(rain.observed72hHours, 72)).toBe(false);
+  });
 });
 
 class FakeRainSource implements RainfallSource {
