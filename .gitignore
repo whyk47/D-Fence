@@ -5,3 +5,5 @@ dist/
 *.local
 !.env.example
 deploy.zip
+# Kudu log-stream capture, used by the remote UAT run (DEPLOY.md section 6).
+stream.log

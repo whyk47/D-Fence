@@ -1,0 +1,160 @@
+# D-Fence — build, test and deploy to Azure App Service.
+#
+# **Why this exists.** Deploying from the development laptop needs the Azure CLI, and the Azure CLI
+# does not work on that machine while Avast's Web Shield is on. Avast intercepts HTTPS and presents
+# its own certificate; its root is installed into the Windows certificate store, so `curl.exe` and
+# every browser accept it, but the Azure CLI is Python and validates against its own bundled CA
+# file, which has never heard of Avast. The documented remedy — append the root to the CLI's
+# bundle — does not work here either: OpenSSL 3 rejects Avast's root outright with "Basic
+# Constraints of CA cert not marked critical", because the certificate is malformed by OpenSSL's
+# rules even though Windows' more forgiving validator accepts it.
+#
+# The workaround was to disable HTTPS scanning for a few minutes per deployment. That is a security
+# control being switched off on a schedule, which is the wrong shape of solution: it degrades
+# protection on the whole machine to fix one tool, and it has to be remembered every single time.
+#
+# A GitHub runner has no Avast, so the problem does not exist there. Nothing about the deployment
+# touches the laptop's TLS stack any more.
+#
+# **The second thing this fixes is the packaging.** The manual path assembled `deploy.zip` by hand
+# and had already produced three separate failures that were invisible until they were not:
+#   - `config/` omitted from the archive, so the container exited 1 on a missing scoring file —
+#     never reproducible locally, because the file sits in the working tree;
+#   - `tar -a -c -f deploy.zip` run under Git Bash, where `tar` is GNU tar rather than bsdtar and
+#     silently writes a plain tar with a `.zip` name that Azure unpacks anyway;
+#   - `npm prune --omit=dev` failing on a locked `esbuild.exe` and shipping a 28 MB archive with
+#     the dev dependencies still in it.
+# All three are assembly mistakes, and all three go away when the assembly is a script that runs
+# the same way every time.
+#
+# **Tests run before the deploy, and a failure stops it.** This is the real upgrade over deploying
+# by hand: it is no longer possible to ship a build that does not compile or does not pass.
+#
+# ## One-time setup
+#
+# 1. Get the publish profile:
+#      az webapp deployment list-publishing-profiles --name dfence-sc2006 \
+#        --resource-group dfence --xml
+#    or, in the Azure Portal, the App Service's **Get publish profile** button.
+# 2. GitHub → the repository → Settings → Secrets and variables → Actions → New repository secret.
+#    Name it `AZURE_WEBAPP_PUBLISH_PROFILE` and paste the whole XML document, including the
+#    `<publishData>` wrapper.
+# 3. That secret carries deployment credentials for the App Service. It is a password. Rotate it
+#    with the portal's **Reset publish profile** if it is ever pasted somewhere it should not be.
+#
+# ## What triggers a deployment
+#
+# `main` only, plus a manual run from the Actions tab. Deliberately **not** `dev`: that branch
+# takes work-in-progress commits several times an hour, and a deployment pipeline that fires on
+# every one of them is a way to have the demonstration instance restart underneath a rehearsal.
+name: Deploy to Azure
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Two runs at once would race each other onto the same App Service and the later-finishing one
+# would win regardless of which commit it carried. Queue them instead.
+concurrency:
+  group: deploy-dfence
+  cancel-in-progress: false
+
+env:
+  AZURE_WEBAPP_NAME: dfence-sc2006
+  # Matches the App Service's NODE:24-lts runtime. If these two drift apart, the native modules
+  # compiled here are not the ones the container can load.
+  NODE_VERSION: '24.x'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://dfence-sc2006.azurewebsites.net
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # `ci` rather than `install`: it installs exactly what the lockfile says and fails if the
+      # lockfile and package.json disagree, which is the point of having one.
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      # SCM_DO_BUILD_DURING_DEPLOYMENT=false on the App Service means Azure installs nothing, so
+      # what is shipped is exactly what runs — node_modules included.
+      - name: Prune to runtime dependencies
+        run: npm prune --omit=dev
+
+      # `config/` is in this list and was missing from the first two hand-built packages. The
+      # server reads config/scoring.default.json at startup and exits 1 without it.
+      - name: Package
+        run: zip -qr deploy.zip dist node_modules package.json config
+
+      # Assembly mistakes are silent — Azure unpacks a wrong archive without complaint and the
+      # symptom arrives later as something unrelated. So the archive is inspected before it is
+      # sent, and the job fails here rather than on the running site.
+      - name: Verify the package
+        run: |
+          python3 - <<'PY'
+          import os, sys, zipfile
+          z = zipfile.ZipFile('deploy.zip')      # not a zip at all -> raises here
+          names = z.namelist()
+          size_mb = os.path.getsize('deploy.zip') / 1048576
+          print(f'{len(names)} entries, {size_mb:.1f} MB')
+
+          problems = []
+          if 'dist/src/server.mjs' not in names:
+              problems.append('no dist/src/server.mjs — the server bundle is missing')
+          if not any(n.startswith('config/') for n in names):
+              problems.append('no config/ — the container will exit 1 on the scoring file')
+          if not any(n.startswith('dist/client/') for n in names):
+              problems.append('no dist/client/ — the browser bundle is missing')
+          # A pruned tree is ~1800 entries and ~5 MB. Twenty is the threshold at which the prune
+          # plainly did not happen, rather than the tree having merely grown.
+          if size_mb > 20:
+              problems.append(f'{size_mb:.1f} MB — the dev dependencies are still in here')
+
+          if problems:
+              sys.exit('package rejected:\n  ' + '\n  '.join(problems))
+          print('package looks right')
+          PY
+
+      - name: Deploy
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: deploy.zip
+
+      # The deploy step reports success once Azure has accepted and unpacked the archive, which is
+      # not the same claim as the site answering. A container that exits 1 on a missing file is
+      # a successful deployment by that definition — which is exactly how the config/ omission got
+      # through the first time.
+      - name: Prove the site answers
+        run: |
+          for attempt in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' https://dfence-sc2006.azurewebsites.net/api/health || true)
+            if [ "$code" = "200" ]; then
+              echo "healthy after ${attempt} attempt(s)"
+              exit 0
+            fi
+            echo "attempt ${attempt}: HTTP ${code:-no response}"
+            sleep 15
+          done
+          echo 'the site did not answer 200 within five minutes'
+          exit 1
