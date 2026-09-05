@@ -36,6 +36,7 @@ import { PrivacyRoutes } from './boundary/http/PrivacyRoutes';
 import { AuditRoutes } from './boundary/http/AuditRoutes';
 import { AuditController } from './control/AuditController';
 import { AuditRepository } from './persistence/AuditRepository';
+import { AlertSubscriptionRepository, SavedLocationRepository } from './persistence/SavedLocationRepository';
 import { UploadRoutes } from './boundary/http/UploadRoutes';
 import { PhotoUploadController } from './control/PhotoUploadController';
 import { SupabaseStorageGateway } from './boundary/gateways/SupabaseStorageGateway';
@@ -158,8 +159,18 @@ async function main(): Promise<void> {
   const authentication = new AuthenticationController(authProvider, accounts, sessions, auditStore);
   const staff = new StaffAccountController(ac0, authProvider, accounts, sessions, auditStore);
 
-  const savedLocations = new InMemorySavedLocationStore();
-  const subscriptions = new InMemoryAlertSubscriptionStore();
+  /**
+   * 3.1.1, 3.1.11, 3.1.12, 6.1.1 — §3 is the epic a restart hurt most.
+   *
+   * A resident saves their home, their child's school and their workplace: three geocoding round
+   * trips through OneMap, each confirmed by hand. In memory, a container recycle threw all of it
+   * away — and Azure recycles containers for reasons that have nothing to do with this system, so
+   * "it lasts until something restarts" was never a property to rely on.
+   */
+  const savedLocations =
+    database === null ? new InMemorySavedLocationStore() : new SavedLocationRepository(database);
+  const subscriptions =
+    database === null ? new InMemoryAlertSubscriptionStore() : new AlertSubscriptionRepository(database);
   const oneMap = new OneMapGateway(
     http,
     'https://www.onemap.gov.sg',
@@ -225,8 +236,8 @@ async function main(): Promise<void> {
     database === null
       ? 'Persistence: in-memory (no DATABASE_URL) — a restart loses cluster history.'
       : 'Persistence: Postgres for accounts, sessions, clusters, rainfall, runs, scores, reports, '
-        + 'work orders, treatments and the audit trail; in-memory for saved locations, alerts and '
-        + 'forecasts. '
+        + 'work orders, treatments, the audit trail, saved locations and alert subscriptions; '
+        + 'in-memory for the alert log and forecasts. '
         + 'Credentials live in the development auth provider and do NOT survive a restart.',
   );
   // Reports and work orders were the two that mattered most after the ingestion path: without

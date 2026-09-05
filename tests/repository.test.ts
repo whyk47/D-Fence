@@ -28,6 +28,10 @@ import { WorkOrderRepository, TreatmentRecordRepository } from '../src/persisten
 import { AccountRepository, SessionRepository } from '../src/persistence/AccountRepository';
 import { ClusterRepository } from '../src/persistence/ClusterRepository';
 import { AuditRepository } from '../src/persistence/AuditRepository';
+import { AlertSubscriptionRepository, SavedLocationRepository } from '../src/persistence/SavedLocationRepository';
+import { SavedLocation } from '../src/entity/SavedLocation';
+import { AlertSubscription } from '../src/entity/AlertSubscription';
+import { AlertTrigger, ExposureStatus, LocationLabel } from '../src/entity/enums';
 import { Account } from '../src/entity/Account';
 import { Session } from '../src/entity/Session';
 import { Report } from '../src/entity/Report';
@@ -386,3 +390,172 @@ describe.skipIf(!live)('The audit trail against live Postgres — §2.4.1, §2.4
   });
 });
 
+/**
+ * §3's data, which is the data a restart hurt most (3.1.1, 3.1.11, 3.1.12, 6.1.1).
+ *
+ * Three properties here belong to Postgres rather than to the port, and each has a specific way of
+ * being wrong that no in-memory double can reproduce:
+ *
+ *  1. `ST_MakePoint` takes (longitude, latitude) and the entity is (latitude, longitude). A swap
+ *     survives every unit test and puts a Bishan address in the Java Sea.
+ *  2. `numeric` columns come back from `pg` as **strings**. Left uncoerced, `caseSize` renders as
+ *     "12" and a distance comparison compares text.
+ *  3. `alert_subscription` is UNIQUE on `saved_location_id`, so an upsert keyed on `id` — the
+ *     obvious thing to write — violates the constraint the second time a resident changes their
+ *     alert settings.
+ */
+describe.skipIf(!live)('Saved locations and subscriptions against live PostGIS — §3.1.x, §6.1.x', () => {
+  let db: Database;
+  let locations: SavedLocationRepository;
+  let subscriptions: AlertSubscriptionRepository;
+  let accounts: AccountRepository;
+  const accountId = randomUUID();
+  /** Bishan, and deliberately not symmetrical: a latitude/longitude swap must be visible. */
+  const HOME = new GeoPoint(1.3521, 103.8198);
+
+  beforeAll(async () => {
+    db = new Database(url);
+    locations = new SavedLocationRepository(db);
+    subscriptions = new AlertSubscriptionRepository(db);
+    accounts = new AccountRepository(db);
+
+    const account = new Account();
+    account.id = accountId;
+    account.email = 'loc-test-' + accountId.slice(0, 8) + '@d-fence.test';
+    account.authUserId = 'auth-' + accountId;
+    account.emailVerified = true;
+    account.role = Role.Resident;
+    account.isActive = true;
+    account.telegramChatId = null;
+    account.createdAt = new Date();
+    await accounts.save(account);
+  }, 30_000);
+
+  afterAll(async () => {
+    if (db === undefined) {
+      return;
+    }
+    // `saved_location` and `alert_subscription` both cascade from the account.
+    await db.query('DELETE FROM account WHERE id = $1', [accountId]);
+    await db.close();
+  }, 30_000);
+
+  function location(name: string, evaluated: boolean): SavedLocation {
+    const l = new SavedLocation();
+    l.id = randomUUID();
+    l.accountId = accountId;
+    l.inputText = '123456';
+    l.resolvedAddress = 'BLK 1 TEST STREET SINGAPORE 123456';
+    l.point = HOME;
+    l.label = LocationLabel.Home;
+    l.name = name;
+    l.exposureStatus = evaluated ? ExposureStatus.WITHIN_150M : ExposureStatus.CLEAR;
+    l.exposure = evaluated
+      ? {
+          clusterId: null,
+          clusterLocality: 'Test Cluster Rd',
+          caseSize: 12,
+          distanceMetres: 87.5,
+          dataTimestamp: new Date('2026-09-05T00:00:00Z'),
+        }
+      : { clusterId: null, clusterLocality: null, caseSize: null, distanceMetres: null, dataTimestamp: null };
+    l.rain24hMm = evaluated ? 4.5 : null;
+    l.rain72hMm = evaluated ? 18.25 : null;
+    l.evaluatedAt = evaluated ? new Date('2026-09-05T01:00:00Z') : null;
+    return l;
+  }
+
+  it('L1 — a saved location round-trips, and the point is not transposed', async () => {
+    const saved = await locations.save(location('Home', true));
+    const read = await locations.findById(saved.id);
+
+    expect(read).not.toBeNull();
+    // Six decimal places is about 11 cm; anything less would let a swap of 1.35/103.82 hide.
+    expect(read?.point.latitude).toBeCloseTo(HOME.latitude, 6);
+    expect(read?.point.longitude).toBeCloseTo(HOME.longitude, 6);
+    expect(read?.resolvedAddress).toBe('BLK 1 TEST STREET SINGAPORE 123456');
+  });
+
+  it('L2 — the exposure evaluation is stored, as numbers rather than as numeric strings', async () => {
+    const saved = await locations.save(location('School', true));
+    const read = await locations.findById(saved.id);
+
+    expect(read?.exposureStatus).toBe(ExposureStatus.WITHIN_150M);
+    expect(read?.exposure.caseSize).toBe(12);
+    expect(read?.exposure.distanceMetres).toBe(87.5);
+    // `numeric(7,1)` — a tenth of a millimetre, so 18.25 comes back as 18.3. Asserted rather than
+    // avoided: the rounding is the column's, it is invisible in every in-memory test, and a future
+    // reader comparing a stored total against a freshly computed one needs to know it happens.
+    expect(read?.rain72hMm).toBe(18.3);
+    // 3.1.10 shows the *feed's* timestamp, not the evaluation time, so both are stored.
+    expect(read?.exposure.dataTimestamp?.toISOString()).toBe('2026-09-05T00:00:00.000Z');
+    expect(read?.evaluatedAt?.toISOString()).toBe('2026-09-05T01:00:00.000Z');
+    // And 3.1.8's exposure check must be able to compare, not concatenate.
+    expect(typeof read?.exposure.distanceMetres).toBe('number');
+  });
+
+  it('L3 — an unevaluated location has a null evaluation, not a fresh-looking one', async () => {
+    const saved = await locations.save(location('Workplace', false));
+    const read = await locations.findById(saved.id);
+    // A default of now() would say "checked just now and found clear" about a location nothing has
+    // ever looked at — the one wrong answer worth ruling out.
+    expect(read?.evaluatedAt).toBeNull();
+    expect(read?.exposure.caseSize).toBeNull();
+  });
+
+  it('L4 — a resident sees their own locations, in a stable order (2.3.1, 3.1.11)', async () => {
+    const mine = await locations.findForAccount(accountId);
+    expect(mine.length).toBeGreaterThanOrEqual(3);
+    expect(mine.every((l) => l.accountId === accountId)).toBe(true);
+    // 3.1.11's five-location limit is counted from this list, so an unstable one would make the
+    // limit depend on the order rows happened to come back in.
+    const second = await locations.findForAccount(accountId);
+    expect(second.map((l) => l.id)).toEqual(mine.map((l) => l.id));
+  });
+
+  it('L5 — a subscription is keyed by location, so changing it twice does not insert twice', async () => {
+    const saved = await locations.save(location('Alerts', false));
+    const first = await subscriptions.save(AlertSubscription.create(saved.id, accountId));
+    const again = AlertSubscription.create(saved.id, accountId);
+    again.enabled = true;
+    again.growthThreshold = 9;
+    again.triggers = [AlertTrigger.ClusterGrowth];
+    const second = await subscriptions.save(again);
+
+    // 6.1.1 is a switch *per location*, and the table says UNIQUE (saved_location_id): an upsert
+    // keyed on the entity's own id would violate it the second time a resident changed a setting.
+    expect(second.id).toBe(first.id);
+    const read = await subscriptions.findForLocation(saved.id);
+    expect(read?.enabled).toBe(true);
+    expect(read?.growthThreshold).toBe(9);
+    expect(read?.triggers).toEqual([AlertTrigger.ClusterGrowth]);
+  });
+
+  it('L6 — deleting a location takes its subscription with it (3.1.12)', async () => {
+    const saved = await locations.save(location('Doomed', false));
+    await subscriptions.save(AlertSubscription.create(saved.id, accountId));
+
+    const removed = await subscriptions.deleteForLocation(saved.id);
+    // The count is what the confirmation message states, so it is returned rather than inferred.
+    expect(removed).toBe(1);
+    await locations.delete(saved.id);
+    expect(await locations.findById(saved.id)).toBeNull();
+    expect(await subscriptions.findForLocation(saved.id)).toBeNull();
+  });
+
+  it('L7 — the cascade holds even when only the location is deleted', async () => {
+    const saved = await locations.save(location('Cascade', false));
+    await subscriptions.save(AlertSubscription.create(saved.id, accountId));
+
+    // The controller deletes the subscription first because it must report the count and because
+    // the in-memory store has no cascade. This asserts the database guarantee underneath it, which
+    // is what protects a subscription orphaned by any other path.
+    await locations.delete(saved.id);
+    expect(await subscriptions.findForLocation(saved.id)).toBeNull();
+  });
+
+  it('L8 — every location is readable for the 3.1.8 re-evaluation sweep', async () => {
+    const all = await locations.all();
+    expect(all.some((l) => l.accountId === accountId)).toBe(true);
+  });
+});
