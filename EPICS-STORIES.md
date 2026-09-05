@@ -244,10 +244,12 @@ be easy to call it compliant — and that would be reading the requirement to su
 `Attribution.credentialedSources()` returns the exception, so it is testable, appears in the API
 response, and belongs in the demo notes.
 
-**Still gated, not forgotten.** 10.3.5's signed, non-enumerable photograph URLs need **Supabase
-Storage, which does not exist yet** — `SupabaseStorageGateway.signedUrl` remains a stub and the bucket
-policy is the real guarantee. 10.3.2's actual TLS needs **a deployment**; what exists is the redirect,
-HSTS and the header policy, which is the half we control.
+**Both gates are now closed (2026-09-05).** 10.3.5's signed, non-enumerable photograph URLs are
+real: two **private** Supabase buckets (`report-photos`, `completion-evidence`), keys that are random
+UUIDs derived from nothing about the uploader or the file, and `signedUrl` issuing a URL that
+expires. There is deliberately no `publicUrl` method on the port to reach for. 10.3.2's TLS arrived
+with the deployment — Azure terminates it and `DFENCE_REQUIRE_HTTPS=true` makes the redirect and
+HSTS behave correctly behind `x-forwarded-proto`.
 
 Verified live over HTTP, not only in tests: `GET /api/attribution?screenId=MapView` returned the two
 sources the map draws from and no OneMap credit; `GET /api/attribution` reported all four with
@@ -1445,6 +1447,14 @@ provable.
 - Implement server-side validation of the four required elements.
 - Implement the issue flag and its surfacing on the dashboard.
 - Test refusal of a photograph-less completion.
+
+*Completed 2026-09-05, commit `f9984dd` on `dev`. The screen collected a file and sent
+`storageKey: file.name`; nothing ever left the browser, and the server had no way to tell a key from
+a wish, so `photoKeys: ["not-a-real-file-at-all"]` closed a work order with a 200 while the UAT
+reported the requirement as met. The photograph now travels to the private `completion-evidence`
+bucket through `POST /api/uploads/completion-evidence`, and `complete()` refuses any key the store
+does not recognise — before the evidence row is written, so a refused submission leaves nothing
+behind. Verified against the deployment, not only in tests.*
 
 ### US-8.6 — Verify or reject completed work
 **As** an Operations Manager, **I want** to check completions **so that** a treatment record only exists
