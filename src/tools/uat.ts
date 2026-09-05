@@ -164,6 +164,15 @@ function uniqueEmail(prefix: string): string {
 const PASSWORD = 'UatPass2026';
 
 /**
+ * A one-pixel PNG, so the harness can upload a photograph that is genuinely a photograph.
+ *
+ * Small enough to inline and real enough to be decoded: the point of these beats is that bytes
+ * arrive in a bucket, and a placeholder string is exactly the failure they exist to catch.
+ */
+const PIXEL_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+/**
  * A fresh point for every run, far enough from every previous run's point to clear 5.1.11.
  *
  * Before the stores moved onto Postgres this was unnecessary: every run met an empty server. Now
@@ -405,13 +414,45 @@ async function main(): Promise<void> {
           : 'clusters carry no tierLabel, so the map would rely on colour alone';
       });
 
-      await step('B4', '5.1.1–5.1.4', 'a resident can submit a report', async () => {
+      // 5.1.5's resident half. A report may carry photographs, and until the upload endpoint existed
+      // the screen sent `storageKey: file.name` — a report referring to an image that had never
+      // been sent anywhere. This beat uploads first and files the key it gets back.
+      let reportPhotoKey: string | null = null;
+      await step('B4', '5.1.5, 10.3.5', 'a resident can upload a report photograph', async () => {
+        const result = await call(resident, 'POST', '/api/uploads/report-photo', {
+          contentType: 'image/png',
+          data: PIXEL_PNG_BASE64,
+        });
+        if (result.status !== 201) {
+          return `expected 201, got ${result.status}: ${JSON.stringify(result.body)}`;
+        }
+        reportPhotoKey = typeof result.body.key === 'string' ? result.body.key : null;
+        // 10.3.5 — the key must be opaque. A key derived from the account or the filename would
+        // make one photograph's URL a map to everyone else's.
+        return reportPhotoKey === null
+          ? 'the upload returned no key'
+          : /^[0-9a-f-]{36}\.(jpg|png)$/.test(reportPhotoKey)
+            ? null
+            : `the key is not opaque: ${reportPhotoKey}`;
+      });
+
+      await step('B4', '5.1.1–5.1.5', 'a resident can submit a report, carrying the photograph', async () => {
         const result = await call(resident, 'POST', '/api/reports', {
           latitude: SITE.latitude,
           longitude: SITE.longitude,
           type: 'StandingWater',
           description: 'UAT — standing water in a disused pot behind the void deck.',
-          photos: [],
+          photos:
+            reportPhotoKey === null
+              ? []
+              : [
+                  {
+                    filename: 'uat-site.png',
+                    contentType: 'image/png',
+                    sizeBytes: 70,
+                    storageKey: reportPhotoKey,
+                  },
+                ],
         });
         if (result.status !== 201) {
           return `expected 201, got ${result.status}: ${JSON.stringify(result.body)}`;
@@ -910,7 +951,7 @@ async function main(): Promise<void> {
                 : `start: expected 200, got ${started.status}: ${JSON.stringify(started.body)}`;
             });
 
-            await step('D', '8.3.10', 'a completion with no photograph is refused', async () => {
+            await step('D', '8.3.7', 'a completion with no photograph is refused', async () => {
               const result = await call(crew, 'POST', `/api/crew/work-orders/${workOrderId}/complete`, {
                 notes: 'UAT — done, but with no evidence.',
                 photoKeys: [],
@@ -920,15 +961,59 @@ async function main(): Promise<void> {
                 : `a completion with no photograph was accepted (${result.status})`;
             });
 
-            const completed = await step('D', '8.3.6, 8.3.7', 'the crew member can record a completion', async () => {
+            /**
+             * The beat this harness was missing, and the reason it reported 8.3.7 as met for weeks
+             * while nothing was ever stored: it checked that an *empty* key list was refused and
+             * never checked that a key referred to anything. `photoKeys:
+             * ["not-a-real-file-at-all"]` closed a work order and every run printed PASS.
+             */
+            await step('D', '8.3.7, 10.3.6', 'a completion citing a photograph that does not exist is refused', async () => {
               const result = await call(crew, 'POST', `/api/crew/work-orders/${workOrderId}/complete`, {
-                notes: 'UAT — perimeter drains fogged.',
-                photoKeys: ['uat-after.jpg'],
+                notes: 'UAT — citing a key that names nothing.',
+                photoKeys: ['not-a-real-file-at-all'],
               });
-              return result.status === 200
+              return result.status >= 400
                 ? null
-                : `expected 200, got ${result.status}: ${JSON.stringify(result.body)}`;
+                : `a fabricated photograph key was accepted as evidence (${result.status})`;
             });
+
+            // A real photograph, uploaded through the real endpoint, so what follows is testing the
+            // requirement rather than testing a string.
+            let photoKey: string | null = null;
+            await step('D', '5.1.5, 8.3.6', 'the crew member can upload a photograph', async () => {
+              const result = await call(crew, 'POST', '/api/uploads/completion-evidence', {
+                contentType: 'image/png',
+                data: PIXEL_PNG_BASE64,
+              });
+              if (result.status !== 201) {
+                return `expected 201, got ${result.status}: ${JSON.stringify(result.body)}`;
+              }
+              photoKey = typeof result.body.key === 'string' ? result.body.key : null;
+              return photoKey === null ? 'the upload returned no key' : null;
+            });
+
+            await step('D', '5.1.5, 10.3.6', 'a PDF is refused as a photograph', async () => {
+              const result = await call(crew, 'POST', '/api/uploads/completion-evidence', {
+                contentType: 'application/pdf',
+                data: PIXEL_PNG_BASE64,
+              });
+              return result.status === 422
+                ? null
+                : `expected 422, got ${result.status}: ${JSON.stringify(result.body)}`;
+            });
+
+            const completed =
+              photoKey === null
+                ? (skip('D', '8.3.6, 8.3.7', 'the crew member can record a completion', 'the photograph upload failed'), false)
+                : await step('D', '8.3.6, 8.3.7', 'the crew member can record a completion', async () => {
+                    const result = await call(crew, 'POST', `/api/crew/work-orders/${workOrderId}/complete`, {
+                      notes: 'UAT — perimeter drains fogged.',
+                      photoKeys: [photoKey],
+                    });
+                    return result.status === 200
+                      ? null
+                      : `expected 200, got ${result.status}: ${JSON.stringify(result.body)}`;
+                  });
 
             if (completed) {
               await step('D', '8.3.12, 4.1.15', 'the manager can verify it, writing a treatment record', async () => {

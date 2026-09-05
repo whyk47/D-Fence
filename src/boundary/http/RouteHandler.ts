@@ -60,6 +60,18 @@ export abstract class RouteHandler {
   }
 
   /**
+   * Paths whose body may be far larger than a JSON object — an image, base64-encoded.
+   *
+   * Declared by the handler rather than configured in `ExpressApp`, so the one place that knows a
+   * route carries a photograph is the file that serves it. The limit is raised for exactly these
+   * paths and no others: applied globally it would be several megabytes that any caller, on any
+   * endpoint, can make the process buffer before a single authorisation check has run.
+   */
+  largeBodyRoutes(): string[] {
+    return [];
+  }
+
+  /**
    * The session resolver, injected by `ExpressApp.mount` so that every handler gets the same one
    * and no subclass can be constructed without it by accident.
    */

@@ -1211,6 +1211,57 @@ decision rather than made silently, and the duplication is worth noting as more 
 defect: two halves of one response computing source health separately could in principle disagree
 with each other.
 
+### 2.27 Twenty-third subject - photographic evidence (`tests/photo-storage.test.ts`)
+
+Added 2026-09-05, after an independent review found the sharpest defect in the project: **the
+acceptance harness reported the requirement as passing for as long as the requirement was unmet.**
+
+8.3.6 asks for at least one photograph before a work order may be Completed, and 8.3.7 says a
+completion carrying none is rejected. The harness checked that an empty `photoKeys` was refused and
+that a non-empty one succeeded. Both were true; neither had anything to do with a photograph.
+`SupabaseStorageGateway`'s three methods threw `not implemented` and the class was constructed
+nowhere, both screens sent `storageKey: file.name`, `report_photo` held zero rows, and
+`photoKeys: ["not-a-real-file-at-all"]` closed a work order with a 200.
+
+The lesson generalises past this defect and is the reason the section exists: **a test over a
+requirement about a stored object must assert that the object is stored.** Asserting over the
+string that names it tests the caller's spelling.
+
+| # | What it establishes | Requirement | Boundary |
+|---|---|---|---|
+| G1 | An upload sends the bytes and answers a UUID key, not the filename | 5.1.5, 10.3.5 | |
+| G2 | Two uploads of identical bytes get different keys | 10.3.5 | |
+| G3 | `x-upsert: false` — evidence is never silently overwritten | 8.3.6 | |
+| G4 | A PDF, a 5 MB + 1 byte image and a **zero-byte** file are all refused before the network | 5.1.5, 10.3.6 | ✓ |
+| G5 | An unknown bucket is refused rather than created | 10.3.5 | |
+| G6 | `exists()` answers the store; a 404 is `false`, not a throw | 8.3.7 | |
+| G7 | `../`, `a/b.jpg`, `''` and `IMG_4821.jpg` never reach the network | 10.3.5, 10.3.6 | ✓ |
+| G8 | A signed URL is absolute and carries an expiry | 10.3.5 | |
+| G9 | Deleting what is already gone is success, so erasure survives a retry | 10.4.3 | ✓ |
+| G10 | The in-memory twin enforces the same rules, so no test passes on a path production refuses | 10.6.3 | |
+| U1–U3 | A resident's photograph is really stored; a `data:` URL is accepted; the bucket comes from the purpose, never the request | 5.1.5, 2.3.x | |
+| U4, U5 | Crew and resident cannot upload into each other's bucket, and authorisation runs **before** the image is decoded | 2.3.x, 10.3.6 | |
+| U6 | Rubbish that is not base64 is refused rather than stored as a zero-byte object | 10.3.6 | ✓ |
+| U7 | A HEIC and an oversized image are refused with a remedy | 5.1.5, 10.5.3 | ✓ |
+| U8 | The upload is audited by key | 2.4.1 | |
+| E1 | `photoKeys: ["not-a-real-file-at-all"]` is refused and the job stays In Progress | 8.3.7 | |
+| E2 | An uploaded photograph completes the job | 8.3.6 | |
+| E3 | Three photographs of which one failed says **which count** failed | 8.3.7, 10.5.3 | ✓ |
+| E4 | A photograph in the reports bucket is not evidence for a work order | 8.3.7 | ✓ |
+| E5 | Nothing is written before the refusal — no evidence row survives it | 8.3.6 | |
+| R1–R3 | The same gate on the resident's half: a cited photograph must exist, and no photographs at all is still a valid report | 5.1.5 | ✓ |
+
+Four further cases live in `tests/http-boundary.test.ts` (H10–H13), because what they test is a
+**body size limit**, and a limit is enforced by a parser no handler-level test ever runs: a 5 MB
+photograph is ~6.7 MB of base64, so the two upload paths are capped at 8 MB while every other route
+stays at 2 MB. H11 asserts both halves at once — the large body accepted on an upload path and
+refused with 413 elsewhere — so collapsing the two limits into one fails exactly one assertion.
+
+**And the harness was corrected, which is the point.** `src/tools/uat.ts` now uploads a real
+one-pixel PNG through the real endpoint and completes with the key it gets back, and it carries a
+new beat asserting that a completion citing a key that names nothing is **refused**. Against the
+local deployment: 52 passed, 0 failed, 1 documented skip.
+
 ---
 
 ## 3. Basis-path design

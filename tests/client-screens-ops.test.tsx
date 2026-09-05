@@ -486,6 +486,10 @@ describe('Crew screens — §11.2.19–11.2.21, §8.3.x, §8.4.1', () => {
         body: { workOrder: { id: 'w1', taskType: 'Fogging', status: 'InProgress', instructions: 'i' } },
       },
       '/api/crew/work-orders/w1/complete': { body: { id: 'w1', status: 'Completed' } },
+      '/api/uploads/completion-evidence': {
+        status: 201,
+        body: { key: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jpg', contentType: 'image/jpeg', sizeBytes: 4 },
+      },
     });
     render(<JobCompletionScreen {...props({ params: { id: 'w1' }, principal: { accountId: 'cr-1', role: Role.CleaningCrew } }, fetcher)} />);
 
@@ -495,16 +499,31 @@ describe('Crew screens — §11.2.19–11.2.21, §8.3.x, §8.4.1', () => {
     // Refused locally: this screen is used standing in a drain, and a second trip is expensive.
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
 
+    // A real `File`, because choosing a photograph now uploads it: the completion carries the key
+    // the server issued, and this test used to pass while sending the string 'after.jpg' as
+    // evidence for a requirement about photographs.
     const input = screen.getByLabelText('Add a photograph');
-    Object.defineProperty(input, 'files', { value: [{ name: 'after.jpg' }], configurable: true });
+    Object.defineProperty(input, 'files', {
+      value: [new File([new Uint8Array([1, 2, 3, 4])], 'after.jpg', { type: 'image/jpeg' })],
+      configurable: true,
+    });
     fireEvent.change(input);
+    await waitFor(() =>
+      expect(calls.some((c) => c.url === '/api/uploads/completion-evidence')).toBe(true),
+    );
+    // The list shows the crew member's own filename; the key is what travels.
+    await waitFor(() => expect(screen.getByText('after.jpg')).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: 'Submit completion' }));
 
     await waitFor(() => expect(calls.some((c) => c.url === '/api/crew/work-orders/w1/complete')).toBe(true));
     expect(calls.find((c) => c.url === '/api/crew/work-orders/w1/complete')?.body).toEqual({
       notes: 'Fogged the drains',
-      photoKeys: ['after.jpg'],
+      photoKeys: ['aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jpg'],
     });
+    // And the bytes really went, base64-encoded.
+    expect(
+      (calls.find((c) => c.url === '/api/uploads/completion-evidence')?.body as { data: string }).data,
+    ).toBe('AQIDBA==');
   });
 
   it('C6 — the task performed is not an editable field (8.3.7)', async () => {

@@ -30,7 +30,20 @@ export class ExpressApp {
     // Express advertises itself in a header on every response. It tells an attacker which stack
     // and therefore which CVE list to start from, and it does nothing for anyone else.
     this.app.disable('x-powered-by');
-    this.app.use(express.json({ limit: '2mb' }));
+    /**
+     * Two body limits, chosen per route rather than globally.
+     *
+     * Every endpoint in the system takes a small JSON object except the two that take a
+     * photograph, and 5.1.5's 5 MB image is about 6.7 MB once base64-encoded. Raising the limit
+     * everywhere to accommodate them would hand every caller, authenticated or not, eight
+     * megabytes of buffering on any path at all — the parser runs before any handler and therefore
+     * before any authorisation. The set is populated by `mount` from what each handler declares.
+     */
+    const standardBody = express.json({ limit: '2mb' });
+    const largeBody = express.json({ limit: '8mb' });
+    this.app.use((req: ExRequest, res: ExResponse, next: () => void) => {
+      (this.largeBodyPaths.has(req.path) ? largeBody : standardBody)(req, res, next);
+    });
     this.app.use((req: ExRequest, res: ExResponse, next: () => void) => {
       // Behind a proxy or a platform load balancer, TLS terminates upstream and the only evidence
       // of the original scheme is this header. `req.secure` alone reports false for every request
@@ -117,6 +130,9 @@ export class ExpressApp {
         void handler.handle(ExpressApp.toRequest(req, route), ExpressApp.toResponse(res));
       });
     }
+    for (const route of handler.largeBodyRoutes()) {
+      this.largeBodyPaths.add(route);
+    }
     for (const route of handler.writeRoutes()) {
       this.app.post(route, (req: ExRequest, res: ExResponse) => {
         void handler.handle(ExpressApp.toRequest(req, route), ExpressApp.toResponse(res));
@@ -181,6 +197,9 @@ export class ExpressApp {
     });
     this.clientDirectory = directory;
   }
+
+  /** Populated at mount time from each handler's `largeBodyRoutes()`. */
+  private readonly largeBodyPaths = new Set<string>();
 
   private clientDirectory: string | null = null;
 

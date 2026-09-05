@@ -33,6 +33,10 @@ import { LocationRoutes } from './boundary/http/LocationRoutes';
 import { AlertRoutes } from './boundary/http/AlertRoutes';
 import { MapRoutes } from './boundary/http/MapRoutes';
 import { PrivacyRoutes } from './boundary/http/PrivacyRoutes';
+import { UploadRoutes } from './boundary/http/UploadRoutes';
+import { PhotoUploadController } from './control/PhotoUploadController';
+import { SupabaseStorageGateway } from './boundary/gateways/SupabaseStorageGateway';
+import { InMemoryObjectStorage } from './persistence/memory/InMemoryObjectStorage';
 import {
   InMemoryAuditStore,
   InMemoryClusterStore,
@@ -185,6 +189,28 @@ async function main(): Promise<void> {
   const runs = database === null ? new InMemoryIngestionRunStore() : new IngestionRunRepository(database);
   const scores = database === null ? new InMemoryPriorityScoreStore() : new PriorityScoreRepository(database);
   const forecasts = new InMemoryForecastStore();
+
+  /**
+   * 5.1.5, 8.3.6 — where photographs actually go.
+   *
+   * Chosen the same way as every other store: the real one when it is configured, the in-memory
+   * twin otherwise, and which one is in use is printed rather than inferred. The difference here
+   * matters more than elsewhere, because 8.3.7's guard is `exists()` — with the in-memory store a
+   * photograph uploaded before a restart stops existing, and a completion referring to it is
+   * refused. That is the honest behaviour, and it is why the deployment has the buckets.
+   */
+  const storageUrl = config.get('SUPABASE_URL');
+  const storageKey = config.get('SUPABASE_SERVICE_KEY');
+  const objectStorage =
+    storageUrl !== '' && storageKey !== ''
+      ? new SupabaseStorageGateway(storageUrl, storageKey)
+      : new InMemoryObjectStorage();
+  console.log(
+    storageUrl !== '' && storageKey !== ''
+      ? 'Photographs: Supabase Storage (private buckets, signed reads).'
+      : 'Photographs: in-memory (no SUPABASE_URL/SUPABASE_SERVICE_KEY) — a restart loses them, '
+        + 'and a completion citing one is then refused by 8.3.7.',
+  );
   console.log(
     database === null
       ? 'Persistence: in-memory (no DATABASE_URL) — a restart loses cluster history.'
@@ -211,7 +237,8 @@ async function main(): Promise<void> {
   // service denies into, so a refusal and the change it would have made sit in one log.
   const reportLifecycle = new ReportLifecycleController(new ReportTransitionTable(), reports, notifier, auditStore);
   const moderation = new ModerationController(ac0, reports, reportLifecycle);
-  const residentReports = new ReportController(ac0, reports, locator, reportLifecycle, auditStore);
+  // 5.1.5 — the last argument is what makes a cited photograph a photograph rather than a string.
+  const residentReports = new ReportController(ac0, reports, locator, reportLifecycle, auditStore, objectStorage);
   const alertTriggers = new AlertTriggerEvaluator(savedLocations, subscriptions, alertStore, locator);
   // 9.1.x — the map and the trend view read the same stores everything else writes to; nothing
   // here computes a second version of a score or a boundary.
@@ -537,6 +564,10 @@ async function main(): Promise<void> {
     },
     reportLifecycle, // 5.2.7, 8.5.1, 8.5.2
     auditStore, // 2.4.1 — the single write path for status is the single audit point
+    // 8.3.7 — the photograph keys a completion carries are checked against the store that would
+    // hold them. Without this argument the guard degrades to "at least one string was supplied",
+    // which is what it was, and what let a work order close on `["not-a-real-file-at-all"]`.
+    objectStorage,
   );
   const dispatch = new DispatchController(
     ac, lifecycle, workOrders, clusters, scores, notifier, reportLifecycle, 10, auditStore,
@@ -558,6 +589,8 @@ async function main(): Promise<void> {
   app.mount(new LocationRoutes(ac, locations));
   app.mount(new AlertRoutes(ac, notifications, alertPreferences));
   app.mount(new MapRoutes(ac, mapView));
+  // 5.1.5, 8.3.6 — the only path by which an image enters the system.
+  app.mount(new UploadRoutes(ac, new PhotoUploadController(ac, objectStorage, auditStore)));
   // §8's two halves, finally reachable over HTTP. Both were declared skeletons that threw, so the
   // dispatch, work-order and crew screens had controllers behind them and no door to reach them by.
   app.mount(new WorkOrderRoutes(ac, dispatch, lifecycle, staff));

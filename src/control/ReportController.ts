@@ -15,6 +15,17 @@ import { AuditStore, ClusterLocator, ReportStore } from '../ports/Stores';
 import { AccessControlService } from './AccessControlService';
 import { ReportLifecycleController } from './ReportLifecycleController';
 import { Principal } from './Principal';
+import { REPORT_PHOTOS } from '../ports/ObjectStorage';
+
+/**
+ * The one thing this controller needs from object storage: whether a key names anything.
+ *
+ * Narrower than `ObjectStorage` deliberately — a control class that could also upload and delete
+ * would invite a future edit that writes files from inside a submission.
+ */
+export interface PhotoExistence {
+  exists(bucket: string, key: string): Promise<boolean>;
+}
 
 /** 5.1.11 — the two numbers that define a duplicate. Judgement, flagged as such in §13. */
 export const DUPLICATE_RADIUS_METRES = 50;
@@ -60,6 +71,17 @@ export class ReportController {
     /** 2.4.1. Submission and corroboration are writes this class makes itself; the status moves
      *  that follow are recorded by ReportLifecycleController. */
     private readonly audit: AuditStore | null = null,
+    /**
+     * 5.1.5, 10.3.6 — where a photograph key is checked against something that can say whether it
+     * names a real object.
+     *
+     * The same gate 8.3.7 rests on, applied to the resident's half. Without it a report can cite
+     * photographs that were never uploaded, and a moderator opening the report finds nothing there
+     * — which reads as a bug in the viewer rather than as a report that never had a photograph.
+     * Null means "cannot check", which is what every construction site did implicitly before this
+     * parameter existed.
+     */
+    private readonly storage: PhotoExistence | null = null,
   ) {}
 
   /**
@@ -94,6 +116,17 @@ export class ReportController {
       const reason = ReportPhoto.rejectionReasonFor(upload); // 5.1.6
       if (reason !== null) {
         throw new ReportRejected(reason);
+      }
+    }
+    // 5.1.5, 10.3.6 — and the key must name something. Checked before the duplicate test and
+    // before anything is written, so a submission that fails here leaves no half-report behind.
+    if (this.storage !== null) {
+      for (const upload of photos) {
+        if (!(await this.storage.exists(REPORT_PHOTOS, upload.storageKey))) {
+          throw new ReportRejected(
+            'a photograph was not received — add it again before submitting (5.1.5)',
+          );
+        }
       }
     }
 

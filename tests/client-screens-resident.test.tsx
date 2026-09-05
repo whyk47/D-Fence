@@ -259,24 +259,91 @@ describe('Report a Site — §11.2.8, §5.1.4–5.1.6', () => {
     expect(screen.getByRole('alert').textContent).toContain('only JPEG and PNG photographs are accepted');
   });
 
-  it('R6 — the fourth photograph is refused; the third is not (5.1.5, boundary)', () => {
-    render(<ReportSiteScreen {...props()} />);
+  it('R6 — the fourth photograph is refused; the third is not (5.1.5, boundary)', async () => {
+    // Real `File` objects and a real upload response, because adding a photograph now means
+    // sending it: the count is over photographs the *server* accepted, not over rows the browser
+    // drew for itself. A fake `{ name, type, size }` cannot be read by `FileReader`, which is the
+    // whole difference between this feature working and the version that stored `file.name`.
+    let issued = 0;
+    const { fetcher, calls } = router({});
+    const uploading: Fetcher = async (url, init) => {
+      if (url === '/api/uploads/report-photo') {
+        issued += 1;
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ key: `key-${issued}`, contentType: 'image/jpeg', sizeBytes: 4 }),
+        } as Response;
+      }
+      return fetcher(url, init);
+    };
+    render(<ReportSiteScreen {...props({}, uploading)} />);
     const input = screen.getByLabelText('Add a photograph');
+
     for (let i = 0; i < MAX_PHOTOS_PER_REPORT; i += 1) {
       Object.defineProperty(input, 'files', {
-        value: [{ name: `p${i}.jpg`, type: 'image/jpeg', size: 1000 }],
+        value: [new File([new Uint8Array([1, 2, 3, 4])], `p${i}.jpg`, { type: 'image/jpeg' })],
         configurable: true,
       });
       fireEvent.change(input);
+      await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(i + 1));
     }
     expect(screen.queryByRole('alert')).toBeNull();
+    expect(issued).toBe(MAX_PHOTOS_PER_REPORT);
 
     Object.defineProperty(input, 'files', {
-      value: [{ name: 'fourth.jpg', type: 'image/jpeg', size: 1000 }],
+      value: [new File([new Uint8Array([1])], 'fourth.jpg', { type: 'image/jpeg' })],
       configurable: true,
     });
     fireEvent.change(input);
     expect(screen.getByRole('alert').textContent).toContain(`at most ${MAX_PHOTOS_PER_REPORT} photographs`);
+    // Refused before it is sent: the fourth photograph costs no upload at all (5.1.6).
+    expect(issued).toBe(MAX_PHOTOS_PER_REPORT);
+    void calls;
+  });
+
+  it('R7 — the report carries the key the server issued, never the filename (5.1.5, 10.3.5)', async () => {
+    // The defect this whole path exists to close. The screen used to send
+    // `storageKey: file.name`, so a report referred to photographs that had never been sent
+    // anywhere and no reader could tell the difference.
+    const { fetcher, calls } = router({
+      '/api/uploads/report-photo': {
+        status: 201,
+        body: { key: '11111111-2222-3333-4444-555555555555.jpg', contentType: 'image/jpeg', sizeBytes: 4 },
+      },
+      '/api/reports': { body: { reportId: 'r9' } },
+    });
+    render(<ReportSiteScreen {...props({}, fetcher)} />);
+
+    const input = screen.getByLabelText('Add a photograph');
+    Object.defineProperty(input, 'files', {
+      value: [new File([new Uint8Array([1, 2, 3, 4])], 'IMG_4821.jpg', { type: 'image/jpeg' })],
+      configurable: true,
+    });
+    fireEvent.change(input);
+    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(1));
+
+    const upload = calls.find((call) => call.url === '/api/uploads/report-photo');
+    expect(upload?.method).toBe('POST');
+    // The bytes really travelled, base64-encoded, rather than the name of the file that held them.
+    expect((upload?.body as { data: string }).data).toBe('AQIDBA==');
+    expect((upload?.body as { contentType: string }).contentType).toBe('image/jpeg');
+
+    fireEvent.change(screen.getByLabelText('Describe what you saw'), {
+      target: { value: 'Standing water in a discarded pail behind the block.' },
+    });
+    fireEvent.change(screen.getByLabelText('Latitude'), { target: { value: '1.3521' } });
+    fireEvent.change(screen.getByLabelText('Longitude'), { target: { value: '103.8198' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit report' }));
+
+    await waitFor(() => expect(calls.some((call) => call.url === '/api/reports')).toBe(true));
+    const submitted = calls.find((call) => call.url === '/api/reports')?.body as {
+      photos: Array<{ storageKey: string; filename: string }>;
+    };
+    expect(submitted.photos[0]?.storageKey).toBe('11111111-2222-3333-4444-555555555555.jpg');
+    // The filename still travels, because a resident naming their own photograph is useful; it is
+    // simply no longer pretending to be a key.
+    expect(submitted.photos[0]?.filename).toBe('IMG_4821.jpg');
   });
 });
 

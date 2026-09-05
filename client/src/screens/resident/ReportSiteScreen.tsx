@@ -20,6 +20,7 @@ import { evaluate, formIsValid, maxLength, required } from '../../components/Fie
 import { ReportType } from '../../../../src/entity/enums';
 import { MAX_DESCRIPTION_CHARS } from '../../../../src/control/ReportController';
 import { MAX_PHOTOS_PER_REPORT, MAX_PHOTO_BYTES } from '../../../../src/entity/ReportPhoto';
+import { uploadPhoto } from '../../lib/PhotoUpload';
 import { ScreenProps } from '../ScreenProps';
 
 interface PhotoDraft {
@@ -48,6 +49,7 @@ export function ReportSiteScreen(props: ScreenProps): JSX.Element {
   const [photos, setPhotos] = useState<PhotoDraft[]>([]);
   const [failure, setFailure] = useState<{ cause: string; remedy: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const descriptionRules = [required('Description'), maxLength(MAX_DESCRIPTION_CHARS, '5.1.4')];
   // 5.1.2 — a report must carry a location. The Singapore bounds are the server's to enforce;
@@ -63,8 +65,16 @@ export function ReportSiteScreen(props: ScreenProps): JSX.Element {
     evaluate(longitude.value, coordinateRules),
   ]);
 
-  /** 5.1.5, 5.1.6 — refuse locally what the server would refuse, before it costs an upload. */
-  function addPhoto(file: { name: string; type: string; size: number }): void {
+  /**
+   * 5.1.5, 5.1.6 — refuse locally what the server would refuse, before it costs an upload; then
+   * actually upload what survives.
+   *
+   * The three checks below are unchanged and still run first, because their whole value is that
+   * they cost nothing. What changed is the last line: it used to store `storageKey: file.name`,
+   * so a report was filed referring to photographs that had never been sent anywhere. The key now
+   * comes back from the server, and it is the only thing that can.
+   */
+  function addPhoto(file: File): void {
     if (photos.length >= MAX_PHOTOS_PER_REPORT) {
       setFailure({
         cause: `a report may carry at most ${MAX_PHOTOS_PER_REPORT} photographs`,
@@ -87,7 +97,23 @@ export function ReportSiteScreen(props: ScreenProps): JSX.Element {
       return;
     }
     setFailure(null);
-    setPhotos([...photos, { filename: file.name, contentType: file.type, sizeBytes: file.size, storageKey: file.name }]);
+    setUploading(true);
+    void uploadPhoto(props.api, 'report', file).then((outcome) => {
+      if (outcome.ok) {
+        setPhotos((current) => [
+          ...current,
+          {
+            filename: file.name,
+            contentType: file.type,
+            sizeBytes: file.size,
+            storageKey: outcome.photo.key,
+          },
+        ]);
+      } else {
+        setFailure(outcome.failure);
+      }
+      setUploading(false);
+    });
   }
 
   /** 11.6.x — the device's own position, which is what a resident standing at the site has. */
@@ -190,13 +216,21 @@ export function ReportSiteScreen(props: ScreenProps): JSX.Element {
             id="photo"
             type="file"
             accept="image/jpeg,image/png"
+            disabled={uploading}
             onChange={(event) => {
               const file = event.target.files?.[0];
               if (file !== undefined) {
                 addPhoto(file);
               }
+              // Cleared so the same photograph can be chosen again after a failure.
+              event.target.value = '';
             }}
           />
+          {uploading ? (
+            <p role="status" data-part="uploading">
+              Uploading the photograph…
+            </p>
+          ) : null}
           <ul>
             {photos.map((photo, index) => (
               <li key={photo.storageKey}>
@@ -215,7 +249,7 @@ export function ReportSiteScreen(props: ScreenProps): JSX.Element {
             <p>{failure.remedy}</p>
           </div>
         )}
-        <button type="submit" disabled={busy}>
+        <button type="submit" disabled={busy || uploading}>
           {busy ? 'Submitting…' : 'Submit report'}
         </button>
       </form>

@@ -14,6 +14,7 @@ import { Role, WorkOrderStatus } from '../entity/enums';
 import { Uuid, singaporeDate } from '../entity/valueTypes';
 import { WorkOrder } from '../entity/WorkOrder';
 import { CompletionEvidence } from '../entity/CompletionEvidence';
+import { COMPLETION_EVIDENCE } from '../ports/ObjectStorage';
 import { TreatmentRecord } from '../entity/TreatmentRecord';
 import { AuditStore, Notifier, ReportLinkage, Rescorer, TreatmentRecordStore, WorkOrderStore } from '../ports/Stores';
 import { WorkOrderTransitionTable, explainUnmetGuard } from './WorkOrderTransitionTable';
@@ -29,6 +30,17 @@ export class TransitionRefused extends Error {
     super(`transition ${from} -> ${to} refused: ${reason}`);
     this.name = 'TransitionRefused';
   }
+}
+
+/**
+ * The one thing this controller needs from object storage, and nothing else.
+ *
+ * Narrower than `ObjectStorage` on purpose: a control class that could `upload` and `remove` would
+ * invite a future edit that writes files from inside a state transition, and the whole point of
+ * this being the single write path for `WorkOrder.status` is that it does one thing.
+ */
+export interface EvidenceStorage {
+  exists(bucket: string, key: string): Promise<boolean>;
 }
 
 export class WorkOrderLifecycleController {
@@ -47,7 +59,38 @@ export class WorkOrderLifecycleController {
      * status entry.
      */
     private readonly audit: AuditStore | null = null,
+    /**
+     * 8.3.7 — where a photograph key is checked against something that can say whether it names
+     * a real object.
+     *
+     * Null means "cannot check", and that is a deliberately uncomfortable state rather than a
+     * convenience: it is what every construction site did implicitly before this parameter existed,
+     * and it is why `photoKeys: ["not-a-real-file-at-all"]` closed a work order and the acceptance
+     * harness called 8.3.7 met. It is null-able only because the older unit suites construct this
+     * class to exercise the transition table and have no storage to give it — the server passes a
+     * real one, and `completionEvidenceRefused` below says which mode it is in.
+     */
+    private readonly storage: EvidenceStorage | null = null,
   ) {}
+
+  /**
+   * 8.3.7, 10.3.6 — which of these keys name nothing, in the order they were given.
+   *
+   * Separated from `complete` so the refusal can count them: a crew member who uploaded three
+   * photographs and had one fail needs to be told one failed, not that "the evidence is invalid".
+   */
+  async completionEvidenceRefused(photoKeys: string[]): Promise<string[]> {
+    if (this.storage === null) {
+      return [];
+    }
+    const missing: string[] = [];
+    for (const key of photoKeys) {
+      if (!(await this.storage.exists(COMPLETION_EVIDENCE, key))) {
+        missing.push(key);
+      }
+    }
+    return missing;
+  }
 
   /**
    * Pure predicate over the state table — no I/O, no repository, no clock. Kept pure on purpose:
@@ -159,6 +202,29 @@ export class WorkOrderLifecycleController {
    * record of what was submitted, which is what a crew member disputing a refusal will need.
    */
   async complete(id: Uuid, evidence: CompletionEvidence, by: Principal): Promise<WorkOrder> {
+    /**
+     * 8.3.7 — the photographs must exist before the job is closed.
+     *
+     * Checked here, before the evidence row is saved and before the transition, because the order
+     * is the whole point. Saving first and validating after would leave a `completion_evidence` row
+     * referring to keys that name nothing, on a work order still In Progress — a state no screen
+     * renders honestly and nobody can clear.
+     *
+     * The transition table's `HAS_EVIDENCE` guard checks `photoKeys.length > 0` and cannot do more:
+     * it is synchronous and knows nothing about storage. That gap is exactly where the defect
+     * lived, and it is closed here rather than by making every guard asynchronous for one rule.
+     */
+    const missing = await this.completionEvidenceRefused(evidence.photoKeys ?? []);
+    if (missing.length > 0) {
+      const wo = await this.workOrders.findById(id);
+      throw new TransitionRefused(
+        wo?.currentStatus() ?? WorkOrderStatus.InProgress,
+        WorkOrderStatus.Completed,
+        missing.length === (evidence.photoKeys ?? []).length
+          ? 'the photograph was not received — upload it again before completing (8.3.7)'
+          : `${missing.length} of ${(evidence.photoKeys ?? []).length} photographs were not received — upload them again before completing (8.3.7)`,
+      );
+    }
     evidence.workOrderId = id;
     await this.workOrders.saveEvidence(evidence);
     return this.transition(id, WorkOrderStatus.Completed, by);

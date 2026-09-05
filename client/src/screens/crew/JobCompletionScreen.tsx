@@ -1,8 +1,8 @@
 /**
  * D-Fence — Job Completion (REQUIREMENTS.md 11.2.21).
- * Stereotype: <<boundary>>. Traces: 11.2.21, 8.3.6, 8.3.7, 8.3.10, 8.3.16, 11.5.x, 11.6.x, 10.5.3.
+ * Stereotype: <<boundary>>. Traces: 11.2.21, 8.3.6, 8.3.7, 8.3.16, 11.5.x, 11.6.x, 10.5.3.
  *
- * 8.3.10 requires at least one photograph, and the submit button says so before it is pressed
+ * 8.3.6 requires at least one photograph, and 8.3.7 refuses a completion without one, and the submit button says so before it is pressed
  * rather than after. This is the screen used standing in a drain in the rain, on a phone, and a
  * form that accepted the notes and then refused for a reason it knew about from the start is the
  * form that costs someone a second trip.
@@ -19,6 +19,7 @@ import { Field, field, FormField } from '../../components/Field';
 import { evaluate, formIsValid, maxLength, required } from '../../components/FieldValidation';
 import { link } from '../../components/Link';
 import { ScreenProps } from '../ScreenProps';
+import { UploadedPhoto, uploadPhoto } from '../../lib/PhotoUpload';
 
 const NOTES_MAX = 500;
 
@@ -30,13 +31,17 @@ export function JobCompletionScreen(props: ScreenProps): JSX.Element {
   const id = props.params['id'] ?? '';
   const { state, value, retry } = useLoad<JobPayload>(props.api, `/api/crew/work-orders/${id}`);
   const [notes, setNotes] = useState<FormField>(field());
-  const [photoKeys, setPhotoKeys] = useState<string[]>([]);
+  // 8.3.7 — what is held is the server's key, obtained by actually uploading the file. This used
+  // to be `file.name`, which meant the completion carried a string the server could not check and
+  // the photograph itself never left the phone.
+  const [photos, setPhotos] = useState<UploadedPhoto[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [failure, setFailure] = useState<{ cause: string; remedy: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const notesRules = [required('Notes'), maxLength(NOTES_MAX, '8.3.6')];
-  // 8.3.10 — at least one photograph. Held as a form rule so the reason is stated in one place.
-  const hasPhoto = photoKeys.length > 0;
+  // 8.3.6 — at least one photograph. Held as a form rule so the reason is stated in one place.
+  const hasPhoto = photos.length > 0;
   const valid = formIsValid([evaluate(notes.value, notesRules)]) && hasPhoto;
 
   async function submit(event: { preventDefault: () => void }): Promise<void> {
@@ -50,7 +55,7 @@ export function JobCompletionScreen(props: ScreenProps): JSX.Element {
     try {
       await props.api.post(`/api/crew/work-orders/${id}/complete`, {
         notes: notes.value.trim(),
-        photoKeys,
+        photoKeys: photos.map((photo) => photo.key),
       });
       props.onNavigate(`/crew/jobs/${id}`);
     } catch (error) {
@@ -99,19 +104,43 @@ export function JobCompletionScreen(props: ScreenProps): JSX.Element {
                 id="photo"
                 type="file"
                 accept="image/jpeg,image/png"
+                disabled={uploading}
                 onChange={(event) => {
                   const file = event.target.files?.[0];
-                  if (file !== undefined) {
-                    setPhotoKeys([...photoKeys, file.name]);
+                  const input = event.target;
+                  if (file === undefined) {
+                    return;
                   }
+                  setUploading(true);
+                  setFailure(null);
+                  void uploadPhoto(props.api, 'completion', file).then((outcome) => {
+                    if (outcome.ok) {
+                      setPhotos((current) => [...current, outcome.photo]);
+                    } else {
+                      setFailure(outcome.failure);
+                    }
+                    // Cleared either way, so choosing the same file again re-fires the event —
+                    // otherwise a failed upload cannot be retried without picking a different file.
+                    input.value = '';
+                    setUploading(false);
+                  });
                 }}
               />
+              {uploading ? (
+                <p role="status" data-part="uploading">
+                  Uploading the photograph…
+                </p>
+              ) : null}
               <ul>
-                {photoKeys.map((key, index) => (
-                  <li key={key}>
-                    {key}
-                    <button type="button" onClick={() => setPhotoKeys(photoKeys.filter((_, i) => i !== index))}>
-                      Remove {key}
+                {photos.map((photo, index) => (
+                  // The file's own name, not the key: a crew member has no use for a UUID.
+                  <li key={photo.key} data-key={photo.key}>
+                    {photo.label}
+                    <button
+                      type="button"
+                      onClick={() => setPhotos(photos.filter((_, i) => i !== index))}
+                    >
+                      Remove {photo.label}
                     </button>
                   </li>
                 ))}
@@ -130,7 +159,7 @@ export function JobCompletionScreen(props: ScreenProps): JSX.Element {
               </div>
             )}
 
-            <button type="submit" disabled={busy}>
+            <button type="submit" disabled={busy || uploading}>
               {busy ? 'Recording…' : 'Submit completion'}
             </button>
           </form>

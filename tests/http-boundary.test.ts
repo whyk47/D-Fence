@@ -20,6 +20,10 @@ import { AccessControlService, NotAuthenticated, NotAuthorised } from '../src/co
 import { AccessPolicy } from '../src/control/AccessPolicy';
 import { Principal } from '../src/control/Principal';
 import { InMemoryAuditStore } from '../src/persistence/memory/InMemoryStores';
+import { InMemoryObjectStorage } from '../src/persistence/memory/InMemoryObjectStorage';
+import { PhotoUploadController } from '../src/control/PhotoUploadController';
+import { UploadRoutes } from '../src/boundary/http/UploadRoutes';
+import { COMPLETION_EVIDENCE } from '../src/boundary/gateways/SupabaseStorageGateway';
 import { Role } from '../src/entity/enums';
 
 /** One route that answers, and two that throw the two refusals, so both can be seen from outside. */
@@ -168,5 +172,100 @@ describe('The HTTP boundary as seen from outside — §10.3.x, §10.5.3', () => 
     expect(headers.get('x-content-type-options')).toBe('nosniff');
     expect(headers.get('x-frame-options')).toBe('DENY');
     expect(headers.get('referrer-policy')).toBe('no-referrer');
+  });
+});
+
+/**
+ * The upload path, over a real socket, because the thing worth testing about it is a **body size
+ * limit** — and a body size limit is enforced by a parser that a handler-level test never runs.
+ *
+ * 5.1.5 permits a 5 MB photograph, which is about 6.7 MB of base64. Every other endpoint takes a
+ * small JSON object and is capped far below that, on purpose: the parser runs before any handler
+ * and therefore before any authorisation, so a limit raised globally is megabytes of buffering
+ * that any caller can demand on any path.
+ */
+describe('Uploading a photograph over HTTP — §5.1.5, §8.3.6, §10.3.6', () => {
+  let uploadBase = '';
+  let uploadServer: Server;
+  let storage: InMemoryObjectStorage;
+
+  beforeAll(async () => {
+    storage = new InMemoryObjectStorage();
+    const access = new AccessControlService(new AccessPolicy(), new InMemoryAuditStore());
+    const app = new ExpressApp(
+      { resolve: async () => new Principal('crew-1', Role.CleaningCrew, 'sess-c') },
+      false,
+    );
+    app.mount(new ProbeRoutes(access));
+    app.mount(new UploadRoutes(access, new PhotoUploadController(access, storage)));
+    const express = (app as unknown as { app: { listen: (p: number, cb: () => void) => Server } }).app;
+    uploadServer = await new Promise<Server>((resolve) => {
+      const listening = express.listen(0, () => {
+        uploadBase = `http://127.0.0.1:${(listening.address() as AddressInfo).port}`;
+        resolve(listening);
+      });
+    });
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => uploadServer.close(() => resolve()));
+  });
+
+  // No return annotation: `Response` in this file is the handler's response shape, imported at the
+  // top, not the DOM's — naming it here would silently type the wrong thing.
+  async function post(path: string, body: unknown) {
+    return fetch(`${uploadBase}${path}`, {
+      method: 'POST',
+      // A token is required even though the stub resolver ignores its value: `resolvePrincipal`
+      // refuses a request carrying none, which is 2.3.6 working rather than a test inconvenience.
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tok' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('H10 — a photograph posted as base64 is stored, and the answer is a key', async () => {
+    const response = await post('/api/uploads/completion-evidence', {
+      contentType: 'image/png',
+      data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64'),
+    });
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { key: string; sizeBytes: number };
+    expect(body.sizeBytes).toBe(4);
+    // The bytes are really in the store — which is the entire difference between this feature and
+    // the version that reported 8.3.7 as passing while nothing was stored.
+    expect(await storage.exists(COMPLETION_EVIDENCE, body.key)).toBe(true);
+  });
+
+  it('H11 — a body too large for an ordinary endpoint is still accepted on an upload path', async () => {
+    // 4 MB of base64: comfortably over the 2 MB every other route is capped at, comfortably under
+    // the 5 MB image limit. If the two limits were ever collapsed into one, exactly one of these
+    // two assertions would fail, which is the point of asserting both.
+    const data = Buffer.alloc(3 * 1024 * 1024).toString('base64');
+    const accepted = await post('/api/uploads/completion-evidence', { contentType: 'image/png', data });
+    expect(accepted.status).toBe(201);
+
+    const refused = await post('/api/probe/ok', { data });
+    expect(refused.status).toBe(413);
+  });
+
+  it('H12 — an unsupported type is 422 with a remedy, not a 500 (10.5.3)', async () => {
+    const response = await post('/api/uploads/completion-evidence', {
+      contentType: 'application/pdf',
+      data: Buffer.from('%PDF').toString('base64'),
+    });
+
+    expect(response.status).toBe(422);
+    const body = (await response.json()) as Record<string, string>;
+    expect(body.error).toContain('application/pdf');
+    expect(body.remedy).toContain('JPEG or PNG');
+  });
+
+  it('H13 — a crew member may not upload into the reports bucket (2.3.x)', async () => {
+    const response = await post('/api/uploads/report-photo', {
+      contentType: 'image/png',
+      data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64'),
+    });
+    expect(response.status).toBe(403);
   });
 });
