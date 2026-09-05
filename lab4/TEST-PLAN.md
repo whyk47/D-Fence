@@ -1106,7 +1106,7 @@ live database**, over HTTP, in the order a person would. They are how §3.2.4's 
 and record the results" is answered for the paths no unit test reaches - the ones where the defect
 is in the wiring rather than in any one class.
 
-**`uat.ts` - 53 checks, executed 2026-09-05 against the deployment: 52 passed, 0 failed, 1 skipped.** Organised as beats:
+**`uat.ts` - 56 checks, executed 2026-09-05 against the deployment: 55 passed, 0 failed, 1 skipped.** Organised as beats:
 A (the system is up and credits its sources publicly), B (a resident registers, verifies, saves a
 location, submits a report), C (a manager reads the dashboard, the priority table, source health,
 the analytics, the CSV export, and moderates), D (dispatch, assignment, the crew's day, verification
@@ -1261,6 +1261,53 @@ refused with 413 elsewhere — so collapsing the two limits into one fails exact
 one-pixel PNG through the real endpoint and completes with the key it gets back, and it carries a
 new beat asserting that a completion citing a key that names nothing is **refused**. Against the
 local deployment: 52 passed, 0 failed, 1 documented skip.
+
+### 2.28 Twenty-fourth subject - the audit trail, persisted (`tests/audit.test.ts`, `tests/repository.test.ts`)
+
+Added 2026-09-05. §2.18 already covered the *writing* of audit rows and it was right about all of
+it: the single write path is the single audit point, so a future caller cannot forget the hook.
+What none of those cases could see is that in the deployment the rows went into an array.
+`server.ts` constructed `InMemoryAuditStore` in production, `AuditRecordRepository.save()` threw
+`not implemented`, `audit_record` held **zero rows**, and there was no route, so 2.4.1 and 2.3.8
+were unsatisfiable through the API however carefully the hooks had been placed.
+
+**The shape of the defect is the same one §2.27 records**, which is why they arrived together: a
+suite that tests a store through its port cannot tell which store it is testing. That is the
+property the port exists to give and it is worth having; the cost is that the *binding* — which
+implementation the composition root chooses — is untested by construction, and both of this
+project's silent production defects lived exactly there.
+
+| # | What it establishes | Requirement | Boundary |
+|---|---|---|---|
+| A11 | A manager reads the trail; a resident and a crew member are refused | 2.3.4, 2.3.7 | |
+| A12 | One work order's history is its own rows, not the trail filtered by eye | 2.4.1, 8.3.x | |
+| A13 | The filter runs **before** the limit, so an old entity still has a history | 2.4.1 | ✓ |
+| A14 | An entity nothing has happened to is an empty list, not a 404 | 2.3.7 | ✓ |
+| A15 | A refusal is a boolean, not a `DENIED:` prefix the client string-matches | 2.3.8 | |
+| A16 | The limit is bounded: absent, negative and 10,000,000 all land somewhere sane | 10.1.x | ✓ |
+| A17 | Reading the trail without the right is itself refused **and logged** | 2.3.8 | |
+
+**And five cases against live Postgres** (`tests/repository.test.ts`, skipped without
+`DATABASE_URL`), because the guarantee that matters is not a property of the port:
+
+| # | What it establishes | Requirement |
+|---|---|---|
+| U1, U2 | A row written through the port returns through it; a denial stays distinguishable | 2.4.1, 2.3.8 |
+| U3 | A non-uuid actor (`'system'`) and a non-uuid target (a photograph's storage key) are stored rather than silently dropped | 2.4.1 |
+| U4 | **Postgres itself refuses an UPDATE and a DELETE**, against the application's own connection | 2.4.2 |
+| U5 | Newest first, with ties broken in insertion order rather than left to the planner | 2.4.1 |
+
+U3 is the case worth reading twice. 001 typed both identifier columns as `uuid`; `SYSTEM_ACTOR_ID`
+is the literal string `'system'` and a photograph's key is a UUID *plus an extension*, so both were
+rejected by the column. And because `AuditRepository.append` swallows its failures **on purpose** —
+a logging error must not turn a clean 403 into a 500, nor roll back a transition the caller has
+already been told succeeded — the rejection produced a log line and a missing row rather than an
+error anyone would notice. A constraint that quietly drops the rows it dislikes is worse than no
+constraint, and worst of all in the one table whose entire value is completeness. Migration 003 is
+the fix; U3 is what stops it coming back.
+
+**These rows are never cleaned up**, which is not an oversight: `afterAll` *cannot* delete them.
+That is the behaviour under test.
 
 ---
 

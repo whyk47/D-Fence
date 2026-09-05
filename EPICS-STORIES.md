@@ -692,6 +692,27 @@ cascade its own trail away. Both refusals are checked live by `schema-verify`. T
 is still in-memory — the schema guarantee is real, the repository that writes into it is not yet
 written.*
 
+*Closed 2026-09-05, commit `f89d102`. The repository now exists and is wired, which is what turns
+every careful hook above into an actual trail: `AuditRepository` writes through the same
+`DATABASE_URL` choice as every other store, and `audit_record` — which held **zero rows** in the
+deployment until today — fills. Two things had to change beyond writing the class. First,
+migration 003 retypes `account_id` and `target_id` from `uuid` to `text`: `SYSTEM_ACTOR_ID` is the
+string `'system'` and a photograph's audit row names its storage key, which is a UUID *plus an
+extension*, so the column was rejecting exactly the rows this story went out of its way to specify
+— and because `append` swallows its failures on purpose (a logging error must not turn a clean 403
+into a 500, nor roll back a transition already reported as successful), it rejected them
+invisibly. Second, the trail became **readable**, which the 2026-09-03 note explicitly declined on
+scope grounds. That reasoning has been overtaken: `WorkOrderRoutes` documents that a work order
+keeps no second copy of who moved it *because* the audited copy is the one that may not be edited,
+and names an audit endpoint the client should read history from. The endpoint did not exist, so a
+correct design decision was resting on an unkept promise, and 2.4.1 could not be demonstrated at
+all. `GET /api/ops/audit` plus per-entity history for a work order and a report, `audit:read` given
+to the Operations Manager alone (the trail names every actor and target in the system, so open
+access to it is the oracle 2.3.7 refuses to be), and the Work Order Detail screen renders the
+history with refusals marked. 7 new control cases and 5 against live Postgres — including that the
+trigger refuses UPDATE and DELETE against the application's own connection. **651 tests across 32
+files**, `tsc --strict` clean, UAT 55/0/1 against the deployment.*
+
 ---
 
 # E3 — Saved locations and exposure
