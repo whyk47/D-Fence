@@ -18,7 +18,7 @@
     { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "Report a site", "short_name": "Report", "url": "/reports/new", "description": "Report standing water or a breeding site where you are standing" },
-    { "name": "My jobs", "short_name": "Jobs", "url": "/crew/jobs", "description": "The jobs assigned to you today" }
+    { "name": "Report a site", "short_name": "Report", "url": "/report", "description": "Report standing water or a breeding site where you are standing" },
+    { "name": "My jobs", "short_name": "Jobs", "url": "/crew", "description": "The jobs assigned to you today" }
   ]
 }

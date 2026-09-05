@@ -372,6 +372,50 @@ describe('Dispatch, clusters and work orders — §11.2.16, §11.2.13, §11.2.17
 });
 
 describe('Staff and sources — §11.2.22, §11.2.23, §2.2.5, §1.4.3, §1.4.4', () => {
+  it('S0 — a manager can create the crew account, on the screen that lists them (2.2.3)', async () => {
+    // The API enforced 2.2.3 correctly and no screen could reach it, so the only way to create the
+    // crew member who does the work was `curl`. The same defect that produced 11.2.26.
+    const { fetcher, calls } = router({
+      '/api/ops/staff': { body: { staff: [] } },
+    });
+    render(<StaffAccountsScreen {...props({}, fetcher)} />);
+
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'crew-1@d-fence.local' } });
+    fireEvent.change(screen.getByLabelText('Temporary password'), { target: { value: 'FieldWork2026' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    const posted = calls.find((c) => c.method === 'POST')?.body as Record<string, string>;
+    expect(posted.email).toBe('crew-1@d-fence.local');
+    // Cleaning Crew is the default, because it is the account a manager actually creates.
+    expect(posted.role).toBe(Role.CleaningCrew);
+    expect(posted.password).toBe('FieldWork2026');
+  });
+
+  it('S0b — Resident is not offered, because 2.2.2 says a resident registers themselves', async () => {
+    const { fetcher } = router({ '/api/ops/staff': { body: { staff: [] } } });
+    render(<StaffAccountsScreen {...props({}, fetcher)} />);
+
+    const options = (await screen.findByLabelText('Role')).querySelectorAll('option');
+    const values = [...options].map((o) => o.getAttribute('value'));
+    expect(values).toEqual([Role.CleaningCrew, Role.OperationsManager]);
+    // Offering it here would be a second way to make one, and the two ways would diverge.
+    expect(values).not.toContain(Role.Resident);
+  });
+
+  it('S0c — a weak password is refused before it costs a round trip (2.1.2, 2.1.3)', async () => {
+    const { fetcher, calls } = router({ '/api/ops/staff': { body: { staff: [] } } });
+    render(<StaffAccountsScreen {...props({}, fetcher)} />);
+
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'crew-2@d-fence.local' } });
+    fireEvent.change(screen.getByLabelText('Temporary password'), { target: { value: 'short' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
+
+    // A staff password is a real credential and gets no weaker treatment for being typed by a
+    // manager rather than by its owner.
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+  });
+
   it('S1 — deactivation warns about the sessions it ends, then reports how many (2.2.5)', async () => {
     const { fetcher } = router({
       '/api/ops/staff': { body: { staff: [{ id: 'a1', email: 'ah.seng@example.com', role: 'CleaningCrew', isActive: true }] } },

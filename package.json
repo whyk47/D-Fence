@@ -24,7 +24,8 @@
     "uat:client": "tsx src/tools/client-uat.ts",
     "load:check": "tsx src/tools/load-check.ts",
     "peek": "tsx src/tools/audit-peek.ts",
-    "demo:clean": "tsx src/tools/demo-clean.ts"
+    "demo:clean": "tsx src/tools/demo-clean.ts",
+    "demo:drive": "tsx src/tools/demo-drive.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
@@ -45,6 +46,7 @@
     "@types/react-dom": "^18.3.7",
     "esbuild": "^0.28.2",
     "jsdom": "^25.0.1",
+    "playwright-core": "^1.63.0",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
