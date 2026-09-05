@@ -165,9 +165,26 @@ async function settle(
   }
 }
 
+/**
+ * Content, meaning the screen — not the placeholder standing in for it.
+ *
+ * This used to return true as soon as `<main>` held any text at all, and "Loading…" is text. On
+ * localhost the first fetch resolved inside the first fifty-millisecond tick, so the distinction
+ * never showed; against a server across the internet it returns while the data is still in flight,
+ * and every assertion then reads a screen that has not arrived. The harness reported the landing
+ * page as failing 10.4.5 when the endpoint was answering correctly all along — a defect in the
+ * test that is indistinguishable, from the outside, from a defect in the product.
+ *
+ * `States.tsx` marks every pending region `data-state="loading"`, so the wait can be for the real
+ * thing. If one never resolves, `settle` still returns at its timeout and the beat fails on what it
+ * actually asserts, which is the honest outcome.
+ */
 function hasContent(dom: JSDOM): boolean {
   const main = dom.window.document.querySelector('main');
-  return main !== null && (main.textContent ?? '').trim().length > 0;
+  if (main === null || (main.textContent ?? '').trim().length === 0) {
+    return false;
+  }
+  return main.querySelector('[data-state="loading"]') === null;
 }
 
 function text(dom: JSDOM): string {

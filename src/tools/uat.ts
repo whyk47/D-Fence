@@ -164,16 +164,27 @@ function uniqueEmail(prefix: string): string {
 const PASSWORD = 'UatPass2026';
 
 /**
- * A fresh point for every run, about a kilometre from the last one.
+ * A fresh point for every run, far enough from every previous run's point to clear 5.1.11.
  *
  * Before the stores moved onto Postgres this was unnecessary: every run met an empty server. Now
  * yesterday's report is still there, and 5.1.11 refuses a second report of the same type within
  * fifty metres for twenty-four hours — correctly. A harness that can only pass once is a harness
  * nobody runs twice, so the site being reported moves with the run rather than the rule being
  * weakened to accommodate the test.
+ *
+ * This used to add ONE offset to BOTH axes, which put every run in history on a single diagonal
+ * line, spaced by the millisecond digits of the clock — about 1.1 metres apart against a 50 metre
+ * radius. Each surviving report therefore sterilised roughly ninety of the thousand available
+ * slots, and after a dozen runs a collision was likelier than not: the run would be refused as a
+ * duplicate of its own predecessor and report a defect in 5.1.11 that was not there. The two axes
+ * now move independently, which spreads the same thousand steps over an area instead of a line.
  */
-const RUN_OFFSET = ((Date.now() % 1_000) / 100_000) - 0.005;
-const SITE = { latitude: 1.3966 + RUN_OFFSET, longitude: 103.8721 + RUN_OFFSET };
+const RUN_CLOCK = Date.now();
+const runOffset = (steps: number): number => (steps % 1_000) / 100_000 - 0.005;
+const SITE = {
+  latitude: 1.3966 + runOffset(RUN_CLOCK),
+  longitude: 103.8721 + runOffset(Math.floor(RUN_CLOCK / 1_000)),
+};
 const logPath = argument('log') ?? null;
 
 /**
