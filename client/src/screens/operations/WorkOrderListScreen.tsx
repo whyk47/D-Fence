@@ -18,6 +18,11 @@ import { link } from '../../components/Link';
 import { WorkOrderStatus } from '../../../../src/entity/enums';
 import { ScreenProps } from '../ScreenProps';
 
+/** 11.2.22 — the crew accounts a manager may assign to, used here only to put a name to an id. */
+interface CrewPayload {
+  crew: Array<{ accountId: string; email: string }>;
+}
+
 interface ListPayload {
   workOrders: Array<{
     id: string;
@@ -43,23 +48,43 @@ export function WorkOrderListScreen(props: ScreenProps): JSX.Element {
     refreshMs: QUEUE_REFRESH_MS,
   });
 
+  /*
+   * The Assigned column read `assigneeId`, so a manager scanning this list was shown a column of
+   * raw UUIDs — "282c0058-ce23-4556-a2f3-033aa2938f49" — which answers the question "is it
+   * assigned" and nothing else. The crew roster is a list the manager is already authorised for
+   * and already loads on the dispatch screen, so it is read here too and used to put an address
+   * against the id.
+   *
+   * Not polled: a crew roster changes when someone is hired, and the id is still shown when the
+   * lookup misses, so a stale roster degrades to exactly the previous behaviour rather than to a
+   * blank cell.
+   */
+  const roster = useLoad<CrewPayload>(props.api, '/api/ops/staff/crew');
+  const crewById = new Map((roster.value?.crew ?? []).map((member) => [member.accountId, member.email]));
+
   return (
     <section data-screen="WOList" data-requirement="11.2.25">
       <h1>Work orders</h1>
       <Freshness at={lastLoadedAt} everyMs={QUEUE_REFRESH_MS} onRefresh={retry} />
-      <a href="/ops/work-orders/new" onClick={link(props, '/ops/work-orders/new')}>
-        New work order
-      </a>
+      {/* The action and the filter were adjacent inline elements with no separator, so they ran
+          together as "New work orderFilter by status". They are now a toolbar row. */}
+      <div data-part="toolbar">
+        <a href="/ops/work-orders/new" data-variant="primary" onClick={link(props, '/ops/work-orders/new')}>
+          New work order
+        </a>
 
-      <label htmlFor="status-filter">Filter by status</label>
-      <select id="status-filter" value={status} onChange={(event) => setStatus(event.target.value)}>
-        <option value="">All statuses</option>
-        {Object.values(WorkOrderStatus).map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+        <div data-component="field" data-part="filter">
+          <label htmlFor="status-filter">Filter by status</label>
+          <select id="status-filter" value={status} onChange={(event) => setStatus(event.target.value)}>
+            <option value="">All statuses</option>
+            {Object.values(WorkOrderStatus).map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       <StateView state={state} onRetry={retry}>
         <table>
@@ -88,7 +113,11 @@ export function WorkOrderListScreen(props: ScreenProps): JSX.Element {
                 </td>
                 <td>{order.scheduledDate}</td>
                 <td>{order.priority}</td>
-                <td>{order.assigneeId ?? 'unassigned'}</td>
+                <td>
+                  {order.assigneeId === null
+                    ? 'unassigned'
+                    : crewById.get(order.assigneeId) ?? order.assigneeId}
+                </td>
               </tr>
             ))}
           </tbody>

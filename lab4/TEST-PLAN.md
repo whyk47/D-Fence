@@ -1557,6 +1557,30 @@ Four rules were applied, and each one removed cases:
 
 ---
 
+### 2.33 Twenty-ninth subject - the shell's chrome (`tests/mobile-app.test.tsx`, M15-M19)
+
+Added 2026-09-06, with §11.9. The Figma screens are two designs rather than one: the Operations
+Manager works at 1440x1024 with a dark rail down the left, the Resident and the Crew at 390x844 with
+a tab bar across the bottom. The shell now honours that with a single `data-chrome` attribute and
+one set of markup, and these five cases guard the seam.
+
+**None of them asserts a pixel either**, for the same reason as §2.32: the arrangement is entirely a
+stylesheet's work and jsdom lays out nothing. What they assert is the three facts the CSS keys off -
+that the attribute is `rail` for a manager, `bar` for a resident and `none` for a signed-out visitor
+(M15, M16) - and the two guarantees the requirements do not let a redesign quietly take away: that
+every destination carries its **word** and not only its glyph, with the glyph marked `aria-hidden`
+so a screen reader announces the label alone (M17, 11.7.5, 11.9.4), and that exactly one item is
+marked `aria-current="page"` (M18, 11.1.4).
+
+**M19 is a regression, and it is the one worth reading.** The tab-bar rules were first written as
+`[data-chrome='bar'] nav`, a descendant selector - which also matched the `<nav>` of actions a
+screen renders at the foot of its own content. Both were then `position: fixed` at the bottom of the
+viewport, the screen's own nav won, and on every phone-sized screen the navigation appeared simply
+to have vanished. It was found by taking a screenshot in a real browser, which no test in this suite
+would have done; the selectors now say `> header nav`, and M19 asserts the structural fact they
+depend on. The lesson is recorded rather than the fix: **a stylesheet change is not verified by a
+green suite**, because nothing here renders.
+
 ## 5. What still needs tests, and what blocks each
 
 | Area | Blocked on |
@@ -1567,6 +1591,7 @@ Four rules were applied, and each one removed cases:
 | ~~`WorkOrderLifecycleController.transition` end to end~~ | **Done 2026-09-03** — §2.8 |
 | ~~Dialog map ↔ router agreement (11.3.2)~~ | **Done 2026-09-03** — §2.14, case D2. The diagram is parsed and the route table checked against it in both directions |
 | One end-to-end path (Playwright) | **Largely answered 2026-09-04** — §2.25. `uat.ts` walks the whole API path over HTTP and `client-uat.ts` drives the served bundle in jsdom. What a real browser would still add is rendering: layout, contrast and tap targets, which is the same gap as the row below |
+| **Visual regressions in the stylesheet (11.9.x)** | Rendering. The `> header nav` defect (§2.33, M19) was invisible to 704 green tests and obvious in the first screenshot. Until something renders in CI, a layout change is verified by a human looking at a browser - which is now a step in the demo-drive run rather than an intention |
 | **Contrast, tap-target size, sunlight legibility (11.7.1, 11.7.4, 11.7.7)** | A human with a phone, outdoors. jsdom renders no pixels, and no test in this suite can substitute — recorded here rather than left implied by the screen tests' green results |
 | **10.1.5 does not hold: p95 2125 ms against a 1000 ms budget** | Nothing — it is measured (§2.26). What it needs is a *fix*: `/api/ops/dashboard` computes `reportSourceHealth()` and `findAllOpen()` twice per request across its two halves, in fifteen-odd serial round trips. Awaiting a decision rather than blocked |
 | The manual run's `1.1.12` ingestion-failure **event** | Implementation. `DomainEventPublisher` is still a `not implemented` skeleton; the failure is recorded as a FAILED run and surfaces on the health and attention panels, but no event is raised, so there is nothing to test yet |

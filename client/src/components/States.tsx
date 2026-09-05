@@ -144,8 +144,13 @@ export function Toast(props: { message: string }): JSX.Element {
 export function StatTile(props: { label: string; value: number | null; hint?: string }): JSX.Element {
   return (
     <div data-component="stat" title={props.hint ?? ''}>
-      <div data-part="value">{props.value === null ? '—' : props.value}</div>
+      {/*
+        Label first, then the number — the order the Figma tile uses, and the order a screen reader
+        needs: "Active clusters, 34" is a fact, "34, active clusters" is a guess followed by its
+        subject. The tile was the other way round and read as the latter.
+      */}
       <div data-part="label">{props.label}</div>
+      <div data-part="value">{props.value === null ? '—' : props.value}</div>
     </div>
   );
 }

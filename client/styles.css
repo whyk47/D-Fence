@@ -15,11 +15,23 @@
 
 :root {
   --ground: #fbfbf9;
-  --ink: #1a1a18;
-  --ink-quiet: #55554e;
-  --line: #dcdcd4;
+  --surface: #fff;
+  /*
+   * Ink and line moved onto the Figma screens' exact values. They were within a few points of
+   * these already — the palette was agreed before either was drawn — but "nearly the same grey"
+   * across two artefacts is a thing somebody has to keep reconciling, so they are now one value.
+   */
+  --ink: #12151a;
+  --ink-quiet: #5c6470;
+  --line: #e3e5e1;
   --accent: #1b5e56;
+  --accent-dark: #164b45;
   --accent-quiet: #e8f0ee;
+
+  /* The operations rail: near-black, so a dense table reads as the lit part of the screen. */
+  --rail: #12151a;
+  --rail-muted: #8c9099;
+  --rail-line: rgb(255 255 255 / 7%);
 
   /* The three priority tiers, and one for a refusal. */
   --tier-high: #a4342b;
@@ -33,6 +45,10 @@
   --s3: 24px;
   --s4: 32px;
   --s5: 48px;
+
+  /* 6px everywhere the design has a corner — one radius, not four opinions. */
+  --radius: 6px;
+  --rail-w: 240px;
 
   --font: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
@@ -68,6 +84,25 @@ body {
 }
 
 /* --- the shell ------------------------------------------------------------------------------ */
+/*
+ * Two chromes, one markup (see `AppShell.tsx` for why).
+ *
+ *   [data-chrome='rail'] — the Operations Manager. A dark 240px rail down the left, as the Figma
+ *                          desktop screens draw it: brand, navigation, account at the foot.
+ *   [data-chrome='bar']  — the Resident and the Crew. A light top bar on a wide screen, becoming
+ *                          a bottom tab bar under the phone breakpoint, where a thumb is.
+ *   [data-chrome='none'] — signed out. Brand only; there is nowhere to go yet (11.1.9).
+ *
+ * Both are `position: fixed`, which is the point of the rail: a manager scrolling thirty clusters
+ * keeps the navigation, and a crew member scrolling a job keeps the tab bar.
+ *
+ * **Every selector below says `> header nav`, and the child combinator is load-bearing.** Screens
+ * have their own `<nav>` of actions at the foot of the content, and a descendant selector matched
+ * those too — so the tab-bar rules pinned a screen's action links to the bottom of the viewport on
+ * top of the real bar. It looked like the navigation had simply vanished. The generic rules had
+ * always been over-broad in the same way; they were only harmless while they set nothing
+ * positional.
+ */
 
 [data-component='shell'] > header {
   display: flex;
@@ -75,8 +110,15 @@ body {
   align-items: center;
   gap: var(--s2);
   padding: var(--s2) var(--s3);
-  background: #fff;
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
+}
+
+[data-part='brand-block'] {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
 }
 
 [data-part='brand'] {
@@ -87,33 +129,48 @@ body {
   letter-spacing: 0.01em;
 }
 
-[data-component='shell'] nav {
+[data-part='brand-sub'] {
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-quiet);
+}
+
+[data-component='shell'] > header nav {
   display: flex;
   flex-wrap: wrap;
   gap: var(--s1);
   flex: 1;
 }
 
-[data-component='shell'] nav a {
+[data-component='shell'] > header nav a {
   display: inline-flex;
   align-items: center;
+  gap: var(--s1);
   min-height: 44px;
   padding: 0 var(--s2);
-  border-radius: 4px;
+  border-radius: var(--radius);
   color: var(--ink-quiet);
   text-decoration: none;
 }
 
-[data-component='shell'] nav a:hover {
+[data-component='shell'] > header nav a:hover {
   background: var(--accent-quiet);
   color: var(--accent);
 }
 
 /* 11.1.4 — the current screen is indicated by weight and a rule, not by colour alone. */
-[data-component='shell'] nav a[aria-current='page'] {
+[data-component='shell'] > header nav a[aria-current='page'] {
   color: var(--accent);
   font-weight: 600;
   box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* The glyph inherits the link's colour, so it can never disagree with the label beside it. */
+.nav-icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
 }
 
 [data-part='account'] {
@@ -122,9 +179,139 @@ body {
   gap: var(--s2);
 }
 
+[data-part='avatar'] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
 [data-part='role'] {
   color: var(--ink-quiet);
   font-size: 0.875rem;
+}
+
+/* --- the operations rail --------------------------------------------------------------------- */
+
+@media (min-width: 900px) {
+  [data-chrome='rail'] > header {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 5;
+    width: var(--rail-w);
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    background: var(--rail);
+    border-bottom: none;
+  }
+
+  [data-chrome='rail'] [data-part='brand-block'] {
+    padding: 28px var(--s3) var(--s3);
+    border-bottom: 1px solid var(--rail-line);
+  }
+
+  [data-chrome='rail'] [data-part='brand'] {
+    font-size: 0.875rem;
+    color: #fff;
+    letter-spacing: -0.01em;
+  }
+
+  [data-chrome='rail'] [data-part='brand-sub'] {
+    margin-top: 2px;
+    color: var(--rail-muted);
+  }
+
+  [data-chrome='rail'] > header nav {
+    flex: 1;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 2px;
+    padding: var(--s2) 12px 0;
+    overflow-y: auto;
+  }
+
+  [data-chrome='rail'] > header nav a {
+    gap: 10px;
+    padding: 0 10px;
+    font-size: 0.875rem;
+    color: var(--rail-muted);
+    /* A transparent border of the same width the active item uses, so nothing shifts on arrival. */
+    border-left: 2px solid transparent;
+  }
+
+  [data-chrome='rail'] > header nav a:hover {
+    background: rgb(255 255 255 / 6%);
+    color: #fff;
+  }
+
+  [data-chrome='rail'] > header nav a[aria-current='page'] {
+    background: rgb(27 94 86 / 30%);
+    border-left-color: var(--accent);
+    color: #fff;
+    font-weight: 500;
+    /* The rail marks the current item with its own left rule; the bar's underline would be a
+       second, contradicting indicator. */
+    box-shadow: none;
+  }
+
+  [data-chrome='rail'] [data-part='account'] {
+    flex-wrap: wrap;
+    gap: var(--s1) 10px;
+    padding: var(--s2) var(--s3) 28px;
+    border-top: 1px solid var(--rail-line);
+  }
+
+  [data-chrome='rail'] [data-part='role'] {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #fff;
+  }
+
+  [data-chrome='rail'] [data-part='account'] button,
+  [data-chrome='rail'] [data-part='install'] {
+    width: 100%;
+    min-height: 36px;
+    background: transparent;
+    border-color: var(--rail-muted);
+    color: var(--rail-muted);
+  }
+
+  [data-chrome='rail'] [data-part='account'] button:hover,
+  [data-chrome='rail'] [data-part='install']:hover {
+    border-color: #fff;
+    background: rgb(255 255 255 / 6%);
+    color: #fff;
+  }
+
+  [data-chrome='rail'] [data-part='install'] {
+    margin: 0 var(--s3);
+  }
+
+  /* The rail is fixed and out of flow, so the page has to be moved off it. */
+  [data-chrome='rail'] > main,
+  [data-chrome='rail'] > [data-part='offline'] {
+    margin-left: var(--rail-w);
+  }
+
+  /* A manager's tables want the width; 1100px centred in 1440 leaves it unused. */
+  [data-chrome='rail'] > main {
+    max-width: none;
+    padding-left: var(--s4);
+    padding-right: var(--s4);
+  }
 }
 
 main {
@@ -135,8 +322,14 @@ main {
 
 h1 {
   font-size: 1.75rem;
-  line-height: 1.25;
-  margin: 0 0 var(--s2);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  /* The rule under the page title, as every Figma screen draws it: it separates the title from
+     the content without needing a card around either. */
+  margin: 0 0 var(--s3);
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--line);
 }
 
 h2 {
@@ -382,8 +575,24 @@ ul[data-part='list'] > li {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--s2);
+  gap: var(--s1);
   margin-bottom: var(--s1);
+}
+
+/*
+ * The layer switches as chips, which is the Figma filter-chip treatment applied to the control it
+ * fits. On a phone the toolbar was three stacked full-width rows above a map that then had no room
+ * left; as chips on one scrolling row it costs 44px once.
+ */
+.map-toggle {
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.map-toolbar button {
+  border-radius: var(--radius);
 }
 
 .map-toggle {
@@ -537,24 +746,41 @@ ul[data-part='list'] > li {
 }
 
 [data-component='stat'] {
-  padding: var(--s2) var(--s3);
+  padding: var(--s2) 20px 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fff;
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/*
+ * The label is the small uppercase line and the number is the large monospaced one, which is the
+ * Figma tile exactly. The size difference is doing real work: five tiles in a row are scanned for
+ * the number, and the number has to win at a glance while the label stays available to whoever
+ * needs it. Tabular figures so the columns of digits line up between tiles.
+ */
+[data-component='stat'] [data-part='label'] {
+  /*
+   * Two lines' worth of height whether the label needs them or not. "Open verified reports" wraps
+   * and "Active cases" does not, and without this the numbers in a row of six tiles sit at two
+   * different heights — which is exactly the comparison the row exists to make easy.
+   */
+  min-height: calc(2 * 1.4em);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  color: var(--ink-quiet);
 }
 
 [data-component='stat'] [data-part='value'] {
+  margin-top: 4px;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: 1.9rem;
+  font-size: 2.25rem;
+  letter-spacing: -0.02em;
   line-height: 1.15;
   color: var(--ink);
-}
-
-[data-component='stat'] [data-part='label'] {
-  margin-top: 2px;
-  font-size: 0.875rem;
-  color: var(--ink-quiet);
 }
 
 /* 7.1.9 — the age of the data, set apart so it is read rather than skimmed past. */
@@ -580,33 +806,55 @@ ul[data-part='list'] > li {
   color: var(--ink);
 }
 
+/*
+ * One panel of rows rather than a stack of separate cards — the Figma treatment, and the better
+ * one: these are a queue of decisions to work down, and eight detached cards read as eight
+ * unrelated notices. Each row keeps a coloured rule at its left and a faint wash of the same
+ * colour, so severity is visible before the sentence is read but is never the only way to know it.
+ */
 [data-part='attention-list'] {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  gap: var(--s1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
 }
 
 [data-part='attention-list'] > li {
+  --row: var(--accent);
+
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: var(--s2);
-  padding: var(--s2);
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--accent);
-  border-radius: 6px;
-  background: #fff;
+  padding: 13px var(--s2);
+  border-bottom: 1px solid var(--line);
+  /* `color-mix` rather than an eight-digit hex: the wash then follows whatever `--row` becomes. */
+  background: color-mix(in srgb, var(--row) 4%, var(--surface));
+  box-shadow: inset 3px 0 0 var(--row);
+}
+
+[data-part='attention-list'] > li:last-child {
+  border-bottom: none;
 }
 
 [data-part='attention-list'] > li[data-kind='overdueWorkOrder'],
 [data-part='attention-list'] > li[data-kind='workOrderIssue'] {
-  border-left-color: var(--tier-high);
+  --row: var(--tier-high);
+}
+
+[data-part='attention-list'] > li[data-kind='staleSource'],
+[data-part='attention-list'] > li[data-kind='sourceStale'] {
+  --row: var(--tier-medium);
 }
 
 [data-part='attention-list'] > li [data-part='detail'] {
   flex: 1;
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
 }
 
 /*
@@ -626,24 +874,45 @@ table {
 thead th {
   position: sticky;
   top: 0;
-  background: var(--accent-quiet);
-  color: var(--ink);
-  font-size: 0.8125rem;
-  letter-spacing: 0.04em;
+  background: #f5f6f4;
+  border-bottom: 1.5px solid var(--line);
+  color: var(--ink-quiet);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
+/* Zebra striping, faint. Ten columns of small numerals need the eye held on one row. */
+tbody tr:nth-child(even) {
+  background: #fafaf9;
+}
+
 tbody tr:hover {
-  background: #f6f8f7;
+  background: #edf3f1;
+}
+
+/* Figures are monospaced and tabular so a column of scores is comparable down its length. */
+td.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.875rem;
 }
 
 tbody tr:last-child td {
   border-bottom: none;
 }
 
-td[data-part='degraded'] {
+/* The note sits under the number it qualifies, in the amber the design reserves for "attention,
+   not failure" — the score is usable, it is just not comparable with an undegraded one. */
+td [data-part='degraded'] {
+  display: block;
+  max-width: 15ch;
+  margin-left: auto;
   color: var(--tier-medium);
-  font-size: 0.8125rem;
+  font-family: var(--font);
+  font-size: 0.6875rem;
+  line-height: 1.3;
 }
 
 /* The tier cell, as a pill. `[data-tier]` on the row keeps colouring the row's text as before. */
@@ -651,13 +920,91 @@ tbody td[data-cell='tier'] {
   white-space: nowrap;
 }
 
+/*
+ * Solid rather than outlined, which is what the Figma table uses and what a dense grid needs: an
+ * outlined pill at 13px disappears among ten other bordered cells. White on all three tier
+ * colours clears 4.5:1. The word is still the cell's text (11.7.5) — the pill is around it.
+ *
+ * The row's own text is reset to ink here. `[data-tier]` colours its element's text, and the
+ * attribute sits on the `<tr>`, so every cell of a High row — rank, locality, cases, score — was
+ * being drawn in the tier's red at weight 600. That made the whole table shout and left the pill
+ * with nothing to add; the tier now reads in one place, which is what makes it readable.
+ */
+tbody tr[data-tier] {
+  color: var(--ink);
+  font-weight: 400;
+}
+
 tbody td[data-cell='tier'] span {
   display: inline-block;
-  padding: 2px 10px;
+  padding: 2px 9px;
   border-radius: 999px;
-  border: 1px solid currentColor;
-  font-size: 0.8125rem;
+  background: var(--pill, var(--ink-quiet));
+  color: #fff;
+  font-size: 0.75rem;
   font-weight: 600;
+  line-height: 1.5;
+}
+
+tbody tr[data-tier='High'] {
+  --pill: var(--tier-high);
+}
+
+tbody tr[data-tier='Medium'] {
+  --pill: var(--tier-medium);
+}
+
+tbody tr[data-tier='Low'] {
+  --pill: var(--tier-low);
+}
+
+/*
+ * ─── Screen toolbars ────────────────────────────────────────────────────────────────────────────
+ *
+ * The row of actions and filters that sits between a page title and its table. The Figma screens
+ * put the primary action and the filters on one line above the table, and several screens here had
+ * the elements but no row — an anchor immediately followed by a `<label>` renders as one run-on
+ * sentence, which is what "New work orderFilter by status" was.
+ */
+[data-part='toolbar'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+
+/* An anchor that acts as a button gets the button's shape, so a row of actions lines up. */
+[data-part='toolbar'] > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+[data-part='toolbar'] > a:hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+[data-part='toolbar'] [data-component='field'] {
+  margin: 0;
+}
+
+/*
+ * A `<select>` stretched to the full width of a 1136px table is not a wider control, it is a
+ * harder one to aim at: the label is at the left and the chevron a metre away at the right.
+ */
+[data-part='toolbar'] select,
+[data-part='filter'] select {
+  width: auto;
+  min-width: 200px;
 }
 
 /*
@@ -697,9 +1044,15 @@ main > section > nav a:hover {
 /*
  * ─── The resident's phone ───────────────────────────────────────────────────────────────────────
  *
- * Below 640px the header was wrapping into three rows before the page began: brand, then the
- * navigation on two lines, then the account. The navigation now scrolls sideways on one line, which
- * is the pattern a phone user already knows from every other application on the device.
+ * The Figma phone screens put navigation in a bottom tab bar, and that is what this does below
+ * 640px. It is not decoration: the header nav previously wrapped into three rows before the page
+ * began, and even once it scrolled sideways it sat at the top of a 844px-tall screen, which is the
+ * part of a phone a thumb cannot reach. The bar is fixed to the bottom, five items wide, glyph
+ * over label — the pattern the device's own applications use.
+ *
+ * The label is shrunk, never dropped. An icon-only bar would make the meaning colour-and-shape
+ * alone, which 11.7.5 does not allow, and would leave a crew member guessing at which of two
+ * clipboards they wanted.
  */
 @media (max-width: 640px) {
   [data-component='shell'] > header {
@@ -708,20 +1061,9 @@ main > section > nav a:hover {
     padding: var(--s1) var(--s2);
   }
 
-  [data-component='shell'] nav {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    /* No scrollbar gutter stealing height on a phone; the overflow is discoverable by dragging. */
-    scrollbar-width: none;
-  }
-
-  [data-component='shell'] nav::-webkit-scrollbar {
+  /* Signed out there is no bar, so nothing needs moving anywhere. */
+  [data-chrome='none'] > header nav {
     display: none;
-  }
-
-  [data-component='shell'] nav a {
-    white-space: nowrap;
-    padding: 0 var(--s1);
   }
 
   [data-part='role'] {
@@ -736,6 +1078,92 @@ main > section > nav a:hover {
   .map-canvas[data-size='short'] {
     height: 58vh;
     min-height: 320px;
+  }
+
+  .map-toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .map-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .map-toggle,
+  .map-toolbar button {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  /* --- the bottom tab bar --- */
+
+  [data-chrome='rail'] > header nav,
+  [data-chrome='bar'] > header nav {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 5;
+    flex: none;
+    flex-wrap: nowrap;
+    gap: 0;
+    padding: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    /* Clear of the home indicator on a phone that has one; zero on every other device. */
+    padding-bottom: env(safe-area-inset-bottom, 0);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  [data-chrome='rail'] > header nav::-webkit-scrollbar,
+  [data-chrome='bar'] > header nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  [data-chrome='rail'] > header nav a,
+  [data-chrome='bar'] > header nav a {
+    flex: 1 0 20%;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    min-width: 0;
+    min-height: 56px;
+    padding: 6px 2px 8px;
+    border-radius: 0;
+    border-left: none;
+    text-align: center;
+  }
+
+  [data-chrome='rail'] > header nav a[aria-current='page'],
+  [data-chrome='bar'] > header nav a[aria-current='page'] {
+    background: none;
+    color: var(--accent);
+    /* The rule moves to the top edge, where the bar meets the page. */
+    box-shadow: inset 0 2px 0 var(--accent);
+  }
+
+  [data-chrome='rail'] > header nav a .nav-icon,
+  [data-chrome='bar'] > header nav a .nav-icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  [data-chrome='rail'] > header nav a [data-part='label'],
+  [data-chrome='bar'] > header nav a [data-part='label'] {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    font-size: 0.625rem;
+    line-height: 1.1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The bar is fixed, so the page has to end above it rather than behind it. */
+  [data-chrome='rail'] > main,
+  [data-chrome='bar'] > main {
+    margin-left: 0;
+    padding-bottom: calc(56px + var(--s4) + env(safe-area-inset-bottom, 0px));
   }
 }
 

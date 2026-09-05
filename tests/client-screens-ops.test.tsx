@@ -87,7 +87,9 @@ describe('Operations Dashboard — §11.2.12, §7.1.x, §7.2.x, §1.4.4', () => 
     await waitFor(() => expect(screen.getByText('Open verified reports')).toBeTruthy());
     // "0 open reports" and "we could not count them" are different facts; a manager acts on one.
     expect(screen.getByText('—')).toBeTruthy();
-    expect(screen.getByText('Overdue work orders').previousSibling?.textContent).toBe('0');
+    // `nextSibling`, not `previousSibling`: the tile now renders its label above its value, which
+    // is both the Figma order and the order a screen reader needs ("Overdue work orders, 0").
+    expect(screen.getByText('Overdue work orders').nextSibling?.textContent).toBe('0');
   });
 
   it('O2 — a stale source is announced, not silently reflected in the numbers (1.4.4, 10.5.7)', async () => {

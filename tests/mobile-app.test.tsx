@@ -284,6 +284,100 @@ describe('Being offline is said in the application own words — §11.8.9, §11.
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Install app' })).toBeNull());
   });
 
+  /**
+   * The chrome the shell chooses, and the guarantees that survive the choice.
+   *
+   * The rail and the tab bar are a stylesheet's work, so none of this asserts a pixel. What it does
+   * assert is the three things the CSS keys off and the two the requirements do not let the design
+   * take away: the attribute is right for the role, the navigation is still a list of links with
+   * the current one marked, and every item still carries its **word** and not only its glyph.
+   */
+  function shellFor(role: Role, url: string): JSX.Element {
+    return (
+      <AppShell
+        url={url}
+        principal={{ accountId: 'm-1', role }}
+        onNavigate={vi.fn()}
+        onSignOut={vi.fn()}
+        renderScreen={() => <section data-screen="Stub" />}
+      />
+    );
+  }
+
+  it('M15 — the manager gets the rail and the resident the bar, from the same markup', () => {
+    const { unmount } = render(shellFor(Role.OperationsManager, '/ops'));
+    expect(document.querySelector('[data-component="shell"]')?.getAttribute('data-chrome')).toBe('rail');
+    unmount();
+
+    render(shellFor(Role.Resident, '/map'));
+    // The crew share the resident's arrangement: both work one-handed on a phone.
+    expect(document.querySelector('[data-component="shell"]')?.getAttribute('data-chrome')).toBe('bar');
+  });
+
+  it('M16 — a signed-out visitor gets no chrome at all (11.1.9)', () => {
+    render(
+      <AppShell
+        url="/signin"
+        principal={null}
+        onNavigate={vi.fn()}
+        onSignOut={vi.fn()}
+        renderScreen={() => <section data-screen="Stub" />}
+      />,
+    );
+    expect(document.querySelector('[data-component="shell"]')?.getAttribute('data-chrome')).toBe('none');
+    expect(document.querySelectorAll('[data-component="shell"] > header nav a')).toHaveLength(0);
+  });
+
+  it('M17 — every navigation item carries its word, not only its glyph (11.7.5)', () => {
+    render(shellFor(Role.Resident, '/map'));
+    const links = [...document.querySelectorAll('[data-component="shell"] > header nav a')];
+    expect(links.length).toBeGreaterThan(0);
+
+    for (const link of links) {
+      // The glyph is decorative and says so, so a screen reader announces the label and nothing
+      // else. An icon-only bar would make the destination shape-alone, which 11.7.5 forbids.
+      expect(link.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+      expect(link.querySelector('[data-part="label"]')?.textContent?.trim()).toBeTruthy();
+    }
+    expect(screen.getByText('Dengue map')).toBeTruthy();
+  });
+
+  it('M18 — the current screen is marked, and only the current one (11.1.4)', () => {
+    render(shellFor(Role.Resident, '/map'));
+    const current = [...document.querySelectorAll('[data-component="shell"] > header nav a')].filter(
+      (a) => a.getAttribute('aria-current') === 'page',
+    );
+    expect(current).toHaveLength(1);
+    expect(current[0]?.getAttribute('href')).toBe('/map');
+  });
+
+  it("M19 — a screen's own action nav is not the shell's navigation", () => {
+    // The regression this exists for: the tab-bar rules were written as `[data-chrome] nav`, which
+    // also matched the `<nav>` of actions a screen renders at the foot of its content. Both were
+    // pinned to the bottom of the viewport, the screen's won, and the navigation appeared to have
+    // vanished on every phone-sized screen. The selectors now say `> header nav`; this asserts the
+    // structural fact they depend on.
+    render(
+      <AppShell
+        url="/map"
+        principal={{ accountId: 'r-1', role: Role.Resident }}
+        onNavigate={vi.fn()}
+        onSignOut={vi.fn()}
+        renderScreen={() => (
+          <section data-screen="Stub">
+            <nav aria-label="Screen actions">
+              <a href="/report">Report a site</a>
+            </nav>
+          </section>
+        )}
+      />,
+    );
+    const header = document.querySelectorAll('[data-component="shell"] > header nav a');
+    const all = document.querySelectorAll('[data-component="shell"] nav a');
+    expect(all.length).toBeGreaterThan(header.length);
+    expect([...header].some((a) => a.textContent?.includes('Report a site'))).toBe(false);
+  });
+
   it('M14 — a browser with no matchMedia and no standalone flag is simply not installed', () => {
     // jsdom is that browser. `isInstalled` must answer false rather than throwing, because it runs
     // before anything else on every load.

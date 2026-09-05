@@ -206,19 +206,26 @@ export function OperationsDashboardScreen(props: ScreenProps): JSX.Element {
                   </td>
                   <td className="num">{row.caseSize}</td>
                   <td className="num">{row.caseDelta > 0 ? `+${row.caseDelta}` : row.caseDelta}</td>
-                  <td className="num">{row.score.toFixed(1)}</td>
+                  {/* 7.2.8, 7.2.9 — a degraded score says so, and names what was left out. A
+                      score computed without rainfall is not the same number as one computed with
+                      it, and presenting them identically invites the manager to compare them.
+                      The note belongs in the score's own cell: it was an eighth `<td>` on a
+                      seven-column table, so every degraded row pushed a cell out past the table's
+                      right border and the note appeared to belong to no column at all. */}
+                  <td className="num">
+                    {row.score.toFixed(1)}
+                    {row.isDegraded ? (
+                      <span data-part="degraded">
+                        Degraded — excluded: {row.excludedDrivers.join(', ')}
+                      </span>
+                    ) : null}
+                  </td>
                   {/* 11.7.5 — the tier as a WORD in the cell. The pill around it is decoration on
                       top of the word; remove the styling and the cell still says "High". */}
                   <td data-cell="tier">
                     <span>{row.tier}</span>
                   </td>
                   <td>{row.workOrderStatus ?? 'none'}</td>
-                  {/* 7.2.8, 7.2.9 — a degraded score says so, and names what was left out. A
-                      score computed without rainfall is not the same number as one computed with
-                      it, and presenting them identically invites the manager to compare them. */}
-                  {row.isDegraded ? (
-                    <td data-part="degraded">Degraded — excluded: {row.excludedDrivers.join(', ')}</td>
-                  ) : null}
                 </tr>
               ))}
             </tbody>

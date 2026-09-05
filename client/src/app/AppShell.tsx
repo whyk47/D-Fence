@@ -14,6 +14,7 @@
  * rather than an empty element.
  */
 import { Role } from '../../../src/entity/enums';
+import { NavIcon } from '../components/NavIcon';
 import { useInstallPrompt, useOnline } from '../lib/InstallableApp';
 import { chromeFor, isCurrent, NavItem, navigationFor } from './Navigation';
 import { ClientPrincipal, guard } from './RouteGuard';
@@ -44,12 +45,39 @@ export function AppShell(props: AppShellProps): JSX.Element {
     return <main data-screen="Redirecting" />;
   }
 
+  /**
+   * Which chrome this role gets — the one branch, decided here and drawn entirely by the
+   * stylesheet.
+   *
+   * The Figma screens are not one design: the Operations Manager works at 1440×1024 with a dark
+   * rail down the left, while the Resident and the Crew work at 390×844 with a tab bar across the
+   * bottom. That is a real difference in the job, not a stylistic one — a manager scans a table of
+   * thirty clusters, a crew member holds a phone in one hand in the rain — so the shell honours it.
+   *
+   * It is an attribute rather than three blocks of JSX because the markup underneath is genuinely
+   * the same: a brand, a set of links, an account block. Only the arrangement differs, and
+   * arrangement is the stylesheet's job. `data-chrome="bar"` still collapses to the bottom bar
+   * under the phone breakpoint, so a manager on a phone is not stranded.
+   */
+  const chromeKind = chrome.items.length === 0 ? 'none' : props.principal?.role === Role.OperationsManager ? 'rail' : 'bar';
+
   return (
-    <div data-component="shell">
+    <div data-component="shell" data-chrome={chromeKind}>
       <header>
-        <a href="/" data-part="brand">
-          D-Fence
-        </a>
+        <div data-part="brand-block">
+          <a
+            href="/"
+            data-part="brand"
+            onClick={(event) => {
+              event.preventDefault();
+              props.onNavigate('/');
+            }}
+          >
+            D-Fence
+          </a>
+          {/* The rail's second line, naming the workspace rather than repeating the product. */}
+          {chrome.showSignOut ? <span data-part="brand-sub">{chrome.roleLabel}</span> : null}
+        </div>
         <nav aria-label="Main">
           {chrome.items.map((item) => (
             <a
@@ -63,7 +91,8 @@ export function AppShell(props: AppShellProps): JSX.Element {
                 props.onNavigate(item.route);
               }}
             >
-              {item.label}
+              <NavIcon screenId={item.screenId} />
+              <span data-part="label">{item.label}</span>
             </a>
           ))}
         </nav>
@@ -76,6 +105,16 @@ export function AppShell(props: AppShellProps): JSX.Element {
         ) : null}
         {chrome.showSignOut ? (
           <div data-part="account">
+            {/*
+              The initials stand in for the avatar the design puts here. The design fills it with a
+              person's name; a `ClientPrincipal` carries an account id and a role and nothing else,
+              and inventing "Priya Raman" to fill the space would be putting a fiction on a live
+              screen. The role's own initials are true and are already the thing 11.1.6 requires be
+              shown.
+            */}
+            <span data-part="avatar" aria-hidden="true">
+              {initialsOf(chrome.roleLabel)}
+            </span>
             {/* 11.1.6 — the signed-in user's role, in the data dictionary's words. */}
             <span data-part="role">{chrome.roleLabel}</span>
             <button type="button" onClick={props.onSignOut}>
@@ -125,6 +164,19 @@ function renderDecision(
         </section>
       );
   }
+}
+
+/**
+ * The first letter of each word of a role label, capped at two — "Operations Manager" is "OM",
+ * "Resident" is "R". Decorative only; the label itself is next to it.
+ */
+function initialsOf(label: string): string {
+  return label
+    .split(/\s+/)
+    .filter((word) => word.length > 0)
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase() ?? '')
+    .join('');
 }
 
 /** 11.1.5 — the roles, for a role switcher in development only. Never a control a user sees. */

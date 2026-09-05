@@ -70,10 +70,64 @@ for (const name of await readdir(leafletImages)) {
   await copyFile(resolve(leafletImages, name), resolve(outdir, 'images', name));
 }
 
+/**
+ * IBM Plex, self-hosted.
+ *
+ * `styles.css` has named IBM Plex Sans and IBM Plex Mono in `--font` and `--mono` since the tokens
+ * were fixed in `lab1/FIGMA-PROMPTS.md`, but nothing ever loaded them - so every screen has been
+ * rendering in whatever the system fallback happened to be, and the build did not match the
+ * mockups it was written from. The Figma screens use the same two families, so this closes the gap
+ * rather than introducing a new dependency.
+ *
+ * Copied from npm and served from our own origin, for the same reason Leaflet is: the CSP names no
+ * external font host, and `@import url(https://fonts.googleapis.com/...)` - which is what the Figma
+ * source does - would need one. Self-hosting keeps `font-src 'self'` intact.
+ *
+ * Latin only, and only the weights the stylesheet actually asks for (400/500/600 sans, 400/500
+ * mono). woff2 alone: every browser in the `target` list above has supported it for years, and the
+ * woff fallback would double the bytes for nobody.
+ */
+const FONT_FACES = [
+  { family: 'IBM Plex Sans', pkg: 'ibm-plex-sans', weights: [400, 500, 600] },
+  { family: 'IBM Plex Mono', pkg: 'ibm-plex-mono', weights: [400, 500] },
+];
+
+await mkdir(resolve(outdir, 'fonts'), { recursive: true });
+let fontCss = '';
+for (const { family, pkg, weights } of FONT_FACES) {
+  for (const weight of weights) {
+    const file = `${pkg}-latin-${weight}-normal.woff2`;
+    await copyFile(
+      resolve(here, '..', 'node_modules', '@fontsource', pkg, 'files', file),
+      resolve(outdir, 'fonts', file),
+    );
+    // `font-display: swap` - the text is readable in the fallback while the face downloads, which
+    // matters more here than avoiding the reflow: 10.1.2 budgets one second, and a blocking font
+    // spends it on a blank screen.
+    fontCss +=
+      `@font-face {
+` +
+      `  font-family: '${family}';
+` +
+      `  font-style: normal;
+` +
+      `  font-weight: ${weight};
+` +
+      `  font-display: swap;
+` +
+      `  src: url('/fonts/${file}') format('woff2');
+` +
+      `}
+`;
+  }
+}
+
 const ourCss = await readFile(resolve(here, 'styles.css'), 'utf8');
 await writeFile(
   resolve(outdir, 'styles.css'),
-  `${ourCss}
+  `/* --- IBM Plex, self-hosted rather than fetched from Google Fonts --- */
+${fontCss}
+${ourCss}
 
 /* --- Leaflet 1.9.4, bundled rather than fetched from a CDN --- */
 ${leafletCss}
