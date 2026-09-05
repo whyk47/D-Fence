@@ -53,7 +53,13 @@ $forward = @(
     'TELEGRAM_CHAT_ID',
     'SUPABASE_URL',
     'SUPABASE_ANON_KEY',
-    'SUPABASE_SERVICE_KEY'
+    'SUPABASE_SERVICE_KEY',
+    # 2.1.4, 2.2.2 - a verified Resident, so the resident half of the product can be shown on a
+    # deployed instance where verification has no email to arrive by. Its own credential, never
+    # the manager's: sharing would give the self-service account and the account that creates
+    # staff the same password. Absent, the server seeds no resident and says so.
+    'DFENCE_SEED_RESIDENT_EMAIL',
+    'DFENCE_SEED_RESIDENT_PASSWORD'
 )
 
 $missing = $forward | Where-Object { -not $env_values.ContainsKey($_) }
