@@ -115,8 +115,18 @@ export class DashboardController {
       [PriorityTier.Medium]: 0,
       [PriorityTier.Low]: 0,
     };
+    // 7.1.x — the tiers must describe the SAME clusters the counts above describe.
+    //
+    // `scores.latest()` returns the most recent score for every cluster it has ever scored,
+    // including ones since closed under 1.1.10, while `activeClusters` and `totalActiveCases` come
+    // from `findActive()`. The two disagreed the moment anything closed: a dashboard reading
+    // "16 active clusters" alongside a tier distribution summing to 43 is not a rounding
+    // difference, it is two different questions answered under one heading.
+    const activeIds = new Set(active.map((c) => c.id));
     for (const score of latest) {
-      tierDistribution[score.tier] += 1;
+      if (activeIds.has(score.clusterId)) {
+        tierDistribution[score.tier] += 1;
+      }
     }
 
     return {

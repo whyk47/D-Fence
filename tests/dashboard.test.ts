@@ -158,6 +158,26 @@ describe('DashboardController — §7', () => {
     await expect(dashboard.buildPriorityTable(principalFor(Role.Resident))).rejects.toBeInstanceOf(NotAuthorised);
   });
 
+  it('X8 — a closed cluster leaves the tier distribution, so it agrees with the cluster count (7.1.x)', async () => {
+    // `scores.latest()` returns the most recent score for every cluster ever scored, including the
+    // ones since closed under 1.1.10, while the counts beside it come from `findActive()`. On the
+    // live deployment that produced "16 active clusters" beside a tier distribution summing to 43.
+    const before = await dashboard.buildOverview(manager);
+    expect(before.activeClusters).toBe(3);
+    expect(Object.values(before.tierDistribution).reduce((a, b) => a + b, 0)).toBe(3);
+    expect(before.highTierClusters).toBe(1);
+
+    // Close the High one. Its score row stays — priority history is append-only.
+    const stored = await clusters.findActive();
+    const survivors = new Set(stored.slice(0, 2).map((c) => c.objectId));
+    await clusters.deactivateAbsent(survivors);
+
+    const after = await dashboard.buildOverview(manager);
+    expect(after.activeClusters).toBe(2);
+    expect(Object.values(after.tierDistribution).reduce((a, b) => a + b, 0)).toBe(2);
+    expect(after.highTierClusters).toBe(0);
+  });
+
   it('D4 — the table carries every 7.2.2 column and the 7.2.6 breakdown', async () => {
     const rows = await dashboard.buildPriorityTable(manager);
     const top = rows.find((r) => r.caseSize === 258) as PriorityRow;

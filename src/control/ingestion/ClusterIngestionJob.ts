@@ -80,12 +80,16 @@ export class ClusterIngestionJob extends AbstractIngestionJob {
     const records: Cluster[] = [];
     // Read once, before the loop: sixteen features would otherwise mean sixteen full scans.
     const activeByLocality = new Map<string, Cluster>();
-    for (const active of await this.clusters.findActive()) {
-      // First writer wins, so the oldest surviving row for a locality is the one identity carries
-      // to. The duplicates already in the table are absent from this feed's object ids and close on
-      // their own through 1.1.10 below.
-      if (!activeByLocality.has(active.locality)) {
-        activeByLocality.set(active.locality, active);
+    // Oldest first, explicitly. Identity must land on the SAME row every cycle, and `findActive`
+    // promises no ordering — leaving it to the database would let two cycles disagree about which
+    // duplicate is the real one and write the feed alternately into each. Oldest is also the row
+    // with the longest snapshot history behind it, which is what 9.1.9's trend reads.
+    const active = [...(await this.clusters.findActive())].sort(
+      (a, b) => a.firstSeenAt.getTime() - b.firstSeenAt.getTime(),
+    );
+    for (const cluster of active) {
+      if (!activeByLocality.has(cluster.locality)) {
+        activeByLocality.set(cluster.locality, cluster);
       }
     }
 

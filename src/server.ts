@@ -432,6 +432,46 @@ async function main(): Promise<void> {
     await accounts.save(account);
     return account.id;
   }
+  /**
+   * 2.1.4, 2.2.2 — a Resident who can actually sign in on a deployed instance.
+   *
+   * Registration works on the deployment and verification does not: 2.1.4's token stands in for an
+   * email, nothing sends email, and the token is printed to a console that App Service does not
+   * hand back. So a third of the user population is unreachable on the deployed system — the
+   * resident journey cannot be shown at all, and it is half the product.
+   *
+   * Seeded with its OWN credential rather than the manager's. Sharing one would mean the
+   * lowest-value, self-service account and the account that can create staff have the same
+   * password, so compromising the first hands over the second. Absent that setting the resident is
+   * simply not seeded, and the reason is printed: a silent fallback to the manager's password is
+   * exactly the kind of convenience that ends up in production.
+   */
+  const seedResidentEmail = firstConfigured(process.env.DFENCE_SEED_RESIDENT_EMAIL, config.get('DFENCE_SEED_RESIDENT_EMAIL'), 'resident@d-fence.local');
+  const seedResidentPassword = firstConfigured(process.env.DFENCE_SEED_RESIDENT_PASSWORD, config.get('DFENCE_SEED_RESIDENT_PASSWORD'));
+  if (seedResidentPassword === '') {
+    console.log('  no DFENCE_SEED_RESIDENT_PASSWORD, so no resident is seeded (2.2.2)');
+  } else {
+    const existingResident = await accounts.findByEmail(seedResidentEmail);
+    if (existingResident === null) {
+      const resident = await authentication.register(seedResidentEmail, seedResidentPassword);
+      // Registered through the real path so it is a real Resident (2.2.2), then verified, because
+      // the thing standing in the way is the missing email rather than the missing consent.
+      resident.emailVerified = true;
+      await accounts.save(resident);
+    } else {
+      // Same reason the manager rebinds: the account survives a restart and the credential does not.
+      existingResident.authUserId = await authProvider.createUser({
+        email: seedResidentEmail,
+        password: seedResidentPassword,
+      });
+      existingResident.emailVerified = true;
+      existingResident.isActive = true;
+      existingResident.clearFailedAttempts();
+      await accounts.save(existingResident);
+    }
+    console.log(`  sign in as ${seedResidentEmail} (resident; password not printed)`);
+  }
+
   // 1.4.1-1.4.4 — all four sources, with the intervals 1.4.3 counts taken from configuration
   // (10.6.2) rather than from constants, and the geocoder reporting for itself (3.1.16).
   const sourceHealth = new SourceHealthController(runs, config.ingestionIntervals, geocoding);
