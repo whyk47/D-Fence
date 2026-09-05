@@ -1309,6 +1309,49 @@ the fix; U3 is what stops it coming back.
 **These rows are never cleaned up**, which is not an oversight: `afterAll` *cannot* delete them.
 That is the behaviour under test.
 
+### 2.29 Twenty-fifth subject - what a restart used to lose (`tests/repository.test.ts`)
+
+Added 2026-09-05. Three stores moved onto Postgres in one afternoon - saved locations and alert
+subscriptions, then local credentials - and the cases for them are grouped here because they share
+a subject: **the behaviour that only appears the second time the process starts.** Nothing in the
+suite had ever restarted anything, so nothing had ever noticed.
+
+The three defects were different sizes and the same shape:
+
+| What was lost | What the user saw |
+|---|---|
+| Saved locations | Three confirmed geocoding round trips gone; 3.1.11's five-location limit counted against a list that could silently empty |
+| Alert subscriptions | 6.1.1's switch silently off, so alerts stopped without anything saying so |
+| **Credentials** | The account still existed, still had a role, still appeared in the staff list - and nobody could sign in to it |
+
+The third is the worst and it is worth saying why. "Your account does not exist" is a bad outcome.
+"Your account exists and your password is wrong" is worse: the user retries, trips 2.1.10's
+lock-out after five attempts, and now has evidence that the system is lying to them.
+
+**Eight cases for §3's data** (L1-L8), covering the three things an in-memory double cannot get
+wrong on your behalf: `ST_MakePoint` takes (longitude, latitude) while the entity is (latitude,
+longitude); `numeric` columns arrive from `pg` as **strings**, so an uncoerced distance comparison
+compares text; and `alert_subscription` is UNIQUE on `saved_location_id`, so the obvious id-keyed
+upsert violates the constraint the second time a resident changes a setting. L2 additionally pins
+the `numeric(7,1)` rounding - 18.25 mm is stored as 18.3 - which is invisible in every other test
+and would otherwise surface as a stored total disagreeing with a freshly computed one.
+
+**Nine cases for the credentials** (C1-C9). C1 is the whole point: register through one provider,
+build a second provider over the same table - which is precisely what a restart produces - and sign
+in. C2 checks that a `bytea` round trip returns the same bytes, because a hash re-encoded through a
+string under the wrong encoding compares unequal to itself and the symptom ("the password I just
+set does not work") points at the hashing rather than at the storage. C8 covers the consequence
+nobody would predict: **persistence broke start-up.** The seeded manager and resident are
+re-established from configuration on every boot, which was `createUser` every time; the moment
+credentials survived, the second boot hit 2.1.4's duplicate and aborted. `ensureUser` is the fix,
+and `createUser` stays strict - a *registration* that quietly overwrote a password would be an
+account takeover.
+
+**Also proven outside the suite**, because a test that restarts a server is a test that owns a
+port: the server was started, an account registered and verified through the HTTP API, the process
+killed, the server started again, and the same credentials accepted. That sequence is what the
+whole section is about, and it had never been run before today.
+
 ---
 
 ## 3. Basis-path design
