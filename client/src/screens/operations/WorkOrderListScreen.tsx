@@ -13,7 +13,7 @@
  */
 import { useState } from 'react';
 import { useLoad } from '../../lib/useLoad';
-import { StateView } from '../../components/States';
+import { Freshness, QUEUE_REFRESH_MS, StateView } from '../../components/States';
 import { link } from '../../components/Link';
 import { WorkOrderStatus } from '../../../../src/entity/enums';
 import { ScreenProps } from '../ScreenProps';
@@ -34,14 +34,19 @@ interface ListPayload {
 export function WorkOrderListScreen(props: ScreenProps): JSX.Element {
   const [status, setStatus] = useState('');
   const path = status === '' ? '/api/ops/work-orders' : `/api/ops/work-orders?status=${encodeURIComponent(status)}`;
-  const { state, value, retry } = useLoad<ListPayload>(props.api, path, {
+  const { state, value, retry, lastLoadedAt } = useLoad<ListPayload>(props.api, path, {
     isEmpty: (v) => v.workOrders.length === 0,
     emptyMessage: 'No work orders match. Raise one from the dispatch list or from a cluster.',
+    // 8.3.x — the crew move orders through the state table from their own devices. Without the
+    // poll a manager watching this list sees Assigned long after the job was completed, and the
+    // first they learn of it is when they go looking for something to verify.
+    refreshMs: QUEUE_REFRESH_MS,
   });
 
   return (
     <section data-screen="WOList" data-requirement="11.2.25">
       <h1>Work orders</h1>
+      <Freshness at={lastLoadedAt} everyMs={QUEUE_REFRESH_MS} onRefresh={retry} />
       <a href="/ops/work-orders/new" onClick={link(props, '/ops/work-orders/new')}>
         New work order
       </a>

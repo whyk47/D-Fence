@@ -63,6 +63,51 @@ export function StateView({ state, onRetry, children }: StateViewProps): JSX.Ele
   }
 }
 
+/**
+ * How often a shared queue re-reads itself, in milliseconds.
+ *
+ * Twenty seconds. Named once and shared by the three screens two people look at simultaneously,
+ * so the interval is a decision rather than a number repeated in three files that drift apart.
+ *
+ * Chosen against the §10.1 budget rather than by feel: three polling screens at 20 s is nine
+ * requests a minute per signed-in user, against an ingestion cycle that already runs every ~2.9
+ * minutes on the same B1 instance. Faster than this buys reaction time nobody needs — a work
+ * order is accepted and completed over tens of minutes — and spends a crew member's phone
+ * battery on a screen in their pocket.
+ */
+export const QUEUE_REFRESH_MS = 20_000;
+
+/**
+ * 10.5.7, 11.4.5 — when this screen last heard from the server, and a way to ask again now.
+ *
+ * A screen that silently refreshes itself is worse than one that does not, because the reader
+ * cannot tell the difference between "nothing has changed" and "nothing is arriving". Saying when
+ * the data is from converts both into something checkable.
+ *
+ * `aria-live` is deliberately absent. This text changes every twenty seconds; announcing it would
+ * interrupt a screen-reader user mid-row, forever. The manual control is what such a user needs,
+ * and it is a real button rather than a hint to press F5.
+ */
+export function Freshness(props: {
+  at: Date | null;
+  everyMs: number;
+  onRefresh: () => void;
+}): JSX.Element {
+  const seconds = Math.round(props.everyMs / 1000);
+  return (
+    <p data-part="freshness">
+      <span data-part="at">
+        {props.at === null
+          ? 'Loading…'
+          : `Updated ${props.at.toTimeString().slice(0, 8)} — refreshes every ${seconds} seconds`}
+      </span>{' '}
+      <button type="button" onClick={props.onRefresh} data-action="refresh-now">
+        Refresh now
+      </button>
+    </p>
+  );
+}
+
 /** 11.4.6 — a confirmation dialog. 11.3.4 permits a modal for exactly this and one-field input. */
 export function ConfirmDialog(props: {
   title: string;

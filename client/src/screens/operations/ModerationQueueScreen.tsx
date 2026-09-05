@@ -13,7 +13,7 @@
  */
 import { useState } from 'react';
 import { useLoad } from '../../lib/useLoad';
-import { StateView } from '../../components/States';
+import { Freshness, QUEUE_REFRESH_MS, StateView } from '../../components/States';
 import { link } from '../../components/Link';
 import { ReportType } from '../../../../src/entity/enums';
 import { ScreenProps } from '../ScreenProps';
@@ -35,14 +35,19 @@ interface QueuePayload {
 export function ModerationQueueScreen(props: ScreenProps): JSX.Element {
   const [type, setType] = useState<string>('');
   const path = type === '' ? '/api/ops/moderation' : `/api/ops/moderation?type=${encodeURIComponent(type)}`;
-  const { state, value, retry } = useLoad<QueuePayload>(props.api, path, {
+  const { state, value, retry, lastLoadedAt } = useLoad<QueuePayload>(props.api, path, {
     isEmpty: (v) => v.queue.length === 0,
     emptyMessage: 'Nothing is waiting for review.',
+    // 5.2.x — residents file reports continuously and this is the screen that answers them. A
+    // queue that only changes when the manager reloads understates how much is waiting, which is
+    // precisely the number the screen exists to report.
+    refreshMs: QUEUE_REFRESH_MS,
   });
 
   return (
     <section data-screen="ModQueue" data-requirement="11.2.14">
       <h1>Moderation</h1>
+      <Freshness at={lastLoadedAt} everyMs={QUEUE_REFRESH_MS} onRefresh={retry} />
 
       <label htmlFor="type-filter">Filter by type</label>
       <select id="type-filter" value={type} onChange={(event) => setType(event.target.value)}>
