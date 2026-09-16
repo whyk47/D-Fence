@@ -1,7 +1,10 @@
 # D-Fence — Epics, User Stories and Subtasks
 
-Version 0.3 · drafted 2026-09-02 · companion to `REQUIREMENTS.md`
-Revised after adversarial review. 11 epics, 57 user stories.
+Version 0.4 · drafted 2026-09-02, revised 2026-09-16 · companion to `REQUIREMENTS.md`
+Revised after adversarial review, then widened from dengue to all pests. **12 epics, 67 user
+stories.** (v0.3 said 57; the file has always held 59 in E0-E10, and the count is now taken
+from the headings rather than from memory.) v0.4 adds **E11 — Cross-pest generalisation**, which carries requirement groups 1.5, 1.6,
+4.2, 4.3, 4.4 and 8.6 forward from `REQUIREMENTS.md` v0.9. Nothing in E0–E10 was renumbered.
 
 Every story carries a **Traces** list citing the atomised requirement numbers it delivers. That list
 is the traceability spine: requirement → story → commit → test case. The Lab 5 demo reserves 2–3
@@ -28,9 +31,15 @@ P2 = build if on schedule · P3 = cut unless genuinely ahead.
 | E8 | Work-order dispatch and crew execution | Manager, Crew | 8.1–8.5 | P1 | L |
 | E9 | Map, trend and history | All | 9.1 | P2 | M |
 | E10 | Front end, navigation and interaction | All | 11.1–11.7 | P1 | L |
+| E11 | Cross-pest generalisation *(new)* | Manager, Resident, Scheduler | 1.5, 1.6, 4.2, 4.3, 4.4, 8.6 | P1 — P0 for US-11.1/11.2 | L |
 
-E7 and E8 are the new features added 2026-09-02. What they change is discussed in §"What the new
-feature costs and buys" at the foot of this document.
+E7 and E8 are the new features added 2026-09-02. E11 is the widening added 2026-09-16. What each
+changes is discussed in §"What the new feature costs and buys" at the foot of this document.
+
+**How E11 relates to E4.** E11 does not replace the scoring engine — it generalises it. E4 computes
+*urgency*; E11 multiplies urgency by a per-pest severity and chooses which drivers urgency is allowed
+to use. Requirement 4.2.5 makes that additive property testable, and US-11.2 writes that test before
+any other E11 code. If it fails, the generalisation has broken dengue and must be backed out.
 
 **How E10 relates to the other epics.** The screens themselves are built inside the feature epic that
 owns them — the report form is in E5, the priority table is in E7, the crew job view is in E8. E10
@@ -1986,6 +1995,306 @@ reach it was a command line — which is not a feature a manager has.*
 
 ---
 
+# E11 — Cross-pest generalisation *(new, v0.4)*
+
+*Added 2026-09-16 on the TA's suggestion to widen the product beyond dengue. This epic is what turns
+D-Fence from a dengue tool into a pest prioritiser: one comparable queue across 22 pest types, built
+on `PEST-PRIORITY-MODEL.md`. It is additive by construction — US-11.2's first test asserts that every
+dengue score is unchanged.*
+
+> **Built 2026-09-16: US-11.1, US-11.2, US-11.3, US-11.6, US-11.7 and US-11.8.** That is build
+> steps 1 to 6 of `PEST-PRIORITY-MODEL.md` §8, which the model doc calls the point at which "the
+> model is still complete and demonstrable". 4.2.5's compatibility test was written first and passes
+> on five v0.8 goldens, bit-identically. The suite stands at 749 tests, 748 passing; the one failure
+> is `rainfall.test.ts` J2 and it predates this work.
+>
+> **Not built: US-11.4 and US-11.5**, the two external gateways — build steps 7 and 8, and the two
+> stories the cut list already had at position 1. Tier C runs on stored reports alone, so nothing
+> below is blocked by their absence.
+
+**Read before estimating.** Only the mosquito has a government feed. Nothing published by MSO,
+OneService, AVS, SFA or NEA carries cockroach, rat, boar or snake reports; that was verified against
+all 4,615 data.gov.sg datasets on 2026-09-16 and is recorded in `PEST-SCOPE-EXPANSION.md` §2. The
+evidence tiers in US-11.3 exist because of that finding, not as an abstraction for its own sake.
+
+### US-11.1 — Catalogue the pests and their profiles
+> **Built 2026-09-16.** `config/pests.default.json` (22 profiles), `PestProfile`, `ConfigSet.validatePestProfiles`. Contact numbers verified against nea.gov.sg and nparks.gov.sg the same day.
+**As** the team, **we need** one configuration record per pest **so that** severity, evidence tier,
+driver weights and responsible authority are data rather than code.
+
+**Traces:**
+- 4.2.1
+- 4.2.2
+- 4.2.3
+- 4.2.6
+- 4.2.7
+- 5.1.15
+- 10.6.2
+
+**Acceptance:**
+- All 22 pest types of 5.1.15 have a profile in `config/pest-profiles.default.json`.
+- A profile carrying a severity multiplier outside (0, 1] is rejected at start-up.
+- A catalogue in which no pest carries 1.0 is rejected at start-up — the normalisation the tier
+  thresholds depend on has failed if it is absent.
+- Every profile names a dispatch authority and a published contact number.
+
+**Subtasks:**
+- Write `config/pest-profiles.default.json` from `PEST-PRIORITY-MODEL.md` §4.
+- Implement `PestProfileRegistry` with validation at start-up.
+- Extend `ConfigSet.validate` with 4.2.6 and 4.2.7.
+- Unit-test both refusals and the accepted catalogue.
+
+### US-11.2 — Score any pest on one comparable scale
+> **Built 2026-09-16.** `UrgencyCalculator` + `PestPriorityCalculator`, `ClusterRanking` renamed `PriorityRanking` with 4.1.14's new keys. The 4.2.5 test was written first and caught a real defect before the rest was built — see `lab4/TEST-PLAN.md` §6.1, case C1b.
+**As** an Operations Manager, **I want** a rat in one town and a mosquito in another on the same
+ranking **so that** I can dispatch against one queue instead of arbitrating between several.
+
+**Traces:**
+- 4.2.4
+- **4.2.5**
+- 4.2.8
+- 4.1.1
+- 4.1.3
+- 4.1.7
+- 4.1.14
+
+**Acceptance:**
+- The score is severity × urgency on a 0–100 scale to one decimal place.
+- **The mosquito score equals its v0.8 value for every existing test fixture.** This is 4.2.5 and it
+  is the first test written in this epic, before any other line of E11 code.
+- The ranking mixes pest types by default and orders them by score, then severity, then verified open
+  report count, then locality name.
+- A row displays its severity multiplier whenever it sits beside a row of another pest type.
+
+**Subtasks:**
+- Write the 4.2.5 compatibility test first — `lab4/TEST-PLAN.md` §2.34, cases C1–C5.
+- Split `PriorityScoringEngine` into `UrgencyCalculator` and `PestPriorityCalculator` per
+  `lab3/class-diagram-design-control.puml`.
+- Rename `ClusterRanking` to `PriorityRanking` and change its key per 4.1.14 as revised.
+- Re-run the whole suite and confirm no existing expectation moved.
+
+### US-11.3 — Compute a score from whatever evidence exists
+> **Built 2026-09-16.** Per-tier driver sets and weights, the four new drivers bound in `NormalisationFactory` to methods that already existed. No new Strategy class, as the design diagram promised.
+**As** the Scheduler, **I need** a driver set chosen by evidence tier **so that** a pest with no feed
+still gets a defensible score instead of a zero.
+
+**Traces:**
+- 4.3.1
+- 4.3.2
+- 4.3.3
+- 4.3.4
+- 4.3.5
+- 4.3.6
+- 4.3.7
+- 4.3.8
+- 4.3.9
+- 4.3.10
+- 4.1.22
+- 4.1.23
+- 4.1.25
+
+**Acceptance:**
+- Tier A uses the seven v0.8 drivers unchanged; tier B six; tier C five.
+- A weight set naming a driver its tier does not permit is rejected at start-up.
+- A tier C pest scores with no external source reachable — bed bugs and fleas have no external feed of
+  any kind, which is why tier C exists.
+- The evidence tier appears beside every score.
+
+**Subtasks:**
+- Implement `driversFor(tier)` and the per-tier weight sets in `PestProfileRegistry`.
+- Implement the `ReportVelocity` and `CorroborationDensity` drivers over stored reports.
+- Reuse the four existing normalisation strategies — no new Strategy class is needed, and the design
+  class diagram carries a note saying so.
+- Test each tier at its own driver set, and test the 4.3.8 refusal.
+
+### US-11.4 — Ingest wildlife observations
+> **Not built.** Build step 8. The taxon ids are already in the catalogue, each resolved by id rather than by name search.
+**As** the Scheduler, **I need** the one live third-party feed that exists **so that** tier B pests
+have evidence beyond our own reports.
+
+**Traces:**
+- 1.5.1
+- 1.5.2
+- 1.5.3
+- 1.5.4
+- 1.5.5
+- 1.5.6
+- 1.5.7
+- 1.5.8
+- 1.5.9
+- 1.5.10
+- 1.5.11
+- 1.5.12
+- 1.5.13
+- 1.5.14
+- 4.1.24
+- 4.1.26
+
+**Acceptance:**
+- Observations are retrieved per taxon at least daily and stored idempotently.
+- Obscured, undated, inaccurate (over 500 m) and stale (over 90 days) records are rejected, and each
+  rejection count is recorded per run.
+- The driver is labelled **recent wildlife activity**, never pest pressure.
+- A failed cycle serves the last stored observations rather than zeroing the driver.
+
+**Subtasks:**
+- Implement `INaturalistGateway` and `ObservationIngestionJob` on the existing `AbstractIngestionJob`
+  template.
+- Record the taxon ids in the pest profiles. 85553 is Serpentes; **26172 is Squamata** and returns
+  skinks and monitor lizards, which is a three-fold overcount.
+- Implement the four rejection rules and the per-run counters.
+- Test each rejection rule at its boundary.
+
+**What this feed is not.** Macaque, otter and pangolin records are 100% obscured by the supplier and
+therefore never stored; wild boar yields roughly 37 usable records a year. The driver is real but
+thin, and the weight it carries (0.20 within tier B) was set with that in mind.
+
+### US-11.5 — Load the operator registry and derive response capacity
+> **Not built.** Build step 7.
+**As** the Scheduler, **I need** the NEA operator registry geocoded **so that** a locality far from any
+operator ranks slightly higher than one next door to twelve.
+
+**Traces:**
+- 1.6.1
+- 1.6.2
+- 1.6.3
+- 1.6.4
+- 1.6.5
+- 1.6.6
+- 1.6.7
+- 1.6.8
+
+**Acceptance:**
+- All 290 rows load at start-up; a row with a malformed postal code is rejected.
+- Postal codes resolve through OneMap's search endpoint, which needs **no credentials** — verified
+  2026-09-16.
+- Resolved coordinates are cached and never re-resolved.
+- Wherever the registry is shown it carries its source publication date and is not presented as live.
+
+**Subtasks:**
+- Implement `VCORegistryGateway` and `OperatorRegistryLoader`.
+- Geocode once, commit the cache, and make the loader read it.
+- Implement 1.6.8's nearest-operator distance per locality.
+
+**Note on honesty.** These are **registered offices**, not service areas — 17 on Bukit Batok Crescent,
+11 on Anson Road. The driver is therefore response capacity at weight 0.05, and is never used as a
+demand proxy. `PEST-PRIORITY-MODEL.md` §5.3 carries the measured distribution.
+
+### US-11.6 — Raise acute danger above the arithmetic
+> **Built 2026-09-16.** `CriticalOverrideEvaluator`, `PriorityTier.Critical`, and the ranking comparator that puts Critical above every High. 4.4.9's one-minute notification is **not** wired to the alert path yet.
+**As** an Operations Manager, **I want** a snake indoors to reach me immediately **so that** a weighted
+sum's opinion about a low-volume locality cannot bury it.
+
+**Traces:**
+- 4.4.1
+- 4.4.2
+- 4.4.3
+- 4.4.4
+- 4.4.5
+- 4.4.6
+- 4.4.7
+- 4.4.8
+- 4.4.9
+- 5.3.7
+- 7.2.14
+
+**Acceptance:**
+- A wildlife report with an indoor location context, or any report recording an injury, is Critical
+  regardless of score.
+- Critical ranks above all of High, and the computed score is retained and displayed alongside it.
+- The matched rule is named on the row.
+- The manager is notified within one minute, and the moderation queue floats these ahead of the
+  oldest-first order.
+- Critical is distinguished by more than colour.
+
+**Subtasks:**
+- Implement `CriticalOverrideEvaluator` and `CriticalOverrideRule` from configuration.
+- Add `Critical` to `PriorityTier` and to the ranking comparator.
+- Wire the notification onto the existing alert path.
+- Test both rules, the ranking order, and the retained score — `lab4/TEST-PLAN.md` §2.35.
+
+### US-11.7 — Report a pest, not only a breeding site
+> **Built server-side 2026-09-16.** `Report.pestType` / `locationContext` / `injuryReported`, 5.1.16's refusal, 5.1.18's pest-aware duplicate window. **The Report a Site form is not yet rewritten for 11.3.20's field order** — the API takes a pest type, the form does not send one.
+**As** a Resident, **I want** to report the pest I actually saw **so that** the system is about more
+than mosquitoes.
+
+**Traces:**
+- 5.1.15
+- 5.1.16
+- 5.1.17
+- 5.1.18
+- 5.1.19
+- 5.3.6
+- 7.2.10
+- 7.2.11
+- 7.2.12
+- 7.2.13
+- 7.2.14
+- 7.2.15
+- 11.3.20
+
+**Acceptance:**
+- Pest type is mandatory and is chosen before the location and description fields activate.
+- Location context is mandatory for a wildlife pest; injury is optional on any report.
+- Duplicate detection matches on pest type — a snake report near an open cockroach report is not a
+  duplicate.
+- Report type survives unchanged and is orthogonal to pest type.
+- The priority table shows pest type and evidence tier, filters by pest type and pest class, and shows
+  only the drivers that row's tier actually has.
+
+**Subtasks:**
+- Extend `Report` with `pestType`, `locationContext` and `injuryReported`; extend `WorkOrder` with
+  `pestType`.
+- Rewrite the Report a Site form for the 11.3.20 field order.
+- Add the pest-type and pest-class filters to the priority table and the moderation queue.
+- Change the duplicate-window query to match on pest type.
+
+### US-11.8 — Refer what we have no authority to do
+> **Built 2026-09-16.** `Referral`, `ReferralController`, `ReferralRoutes`, and both screens (11.2.27 Pest Reference, 11.2.28 Referral). 8.1.14 refuses a wildlife work order and 8.1.17 restricts task types by pest class. 8.6.6's resident notification is **not** wired.
+**As** an Operations Manager, **I want** to route a wildlife case to AVS and record what came of it
+**so that** widening the product is honest rather than cosmetic.
+
+**Traces:**
+- 8.6.1
+- 8.6.2
+- 8.6.3
+- 8.6.4
+- 8.6.5
+- 8.6.6
+- 8.6.7
+- 8.6.8
+- 8.6.9
+- 8.6.10
+- 8.6.11
+- 8.1.14
+- 8.1.15
+- 8.1.16
+- 8.1.17
+- 11.2.27
+- 11.2.28
+- 11.3.21
+
+**Acceptance:**
+- Work-order creation is refused for a wildlife pest class and the referral action is offered instead.
+- A referral records destination, referrer, timestamp and reason, sets the report Actioned, and
+  notifies the resident naming the authority.
+- Recording an outcome closes the report.
+- **No work order and no treatment record is written**, and a referred report is excluded from the
+  treatment-recency driver.
+- The Pest Reference screen lists every covered pest with its authority and published contact number.
+
+**Subtasks:**
+- Implement `ReferralController`, the `Referral` entity and the two screens (11.2.27, 11.2.28).
+- Add the 8.1.14 refusal and the 8.1.17 task-type restriction to work-order creation.
+- Exclude referred reports from the recency driver.
+- Test that a referral produces neither a work order nor a treatment record.
+
+**Team decision still owed.** Bees, wasps and the three bird species sit between NEA and AVS. The
+shared-authority resolution must be written into the pest profiles before the Lab 5 demo — open point
+10 below.
+
+---
+
 # Build order
 
 Seven working weeks across Labs 3–4, assuming Lab 1 and Lab 2 produce the models and mockups rather
@@ -2006,6 +2315,13 @@ by actually removing the work.
 | 5 | US-7.1, US-7.2, US-8.1 to US-8.3 | The manager can see the ranking and dispatch against it. |
 | 6 | US-8.4 to US-8.6, US-8.8, US-8.7 | The full loop runs end to end. |
 | 7 | US-6.1 to US-6.4, US-9.1, US-9.2, US-1.6, US-10.5 | The phone buzzes, the map works, the system survives a feed outage. Stop here. |
+| 8 | US-11.1, US-11.2, US-11.7 | **The v0.4 widening, minimum viable.** Profiles exist, the score is severity × urgency with dengue provably unchanged, and a resident can report any of the 22 pests. This alone answers the TA. |
+| 9 | US-11.3, US-11.6, US-11.8 | Evidence tiers, the critical override and referral to AVS. The wildlife story now closes without pretending we dispatch to it. |
+| 10 | US-11.4, US-11.5 | The two external sources. **Cut these first** — the model is designed to run tier C on stored reports alone. |
+
+**Weeks 8–10 do not exist in the seven-week schedule.** They are written as a sequence, not a promise
+of calendar time. If E11 has to fit inside the seven weeks, it displaces the whole of the week-7 row
+except US-1.6, and even then only weeks 8 and 9 land. Decide which, rather than starting all three.
 
 **Cut from the schedule in v0.3** to pay for E7 and E8, as the cost note said should happen and the
 previous table did not do: US-7.3 (analytics charts) reduced from five charts to two, and moved out of
@@ -2029,18 +2345,22 @@ the descope list below.
 The single most common failure is discovering in week 6 that you are two weeks behind and cutting
 whatever is nearest. Cut in this order instead, top first:
 
-1. US-9.3 — trend and trajectory.
-2. US-7.3 — analytics charts, all of them.
-3. US-7.5 — attention panel.
-4. US-10.7 — accessibility beyond component defaults.
-5. US-10.6 — presentation conventions beyond what the components already do.
-6. Photograph handling in US-5.1 and US-5.4 — accept reports without photographs and drop the
+1. US-11.4 and US-11.5 — the two external sources. Tier C scores without either, by design.
+2. US-9.3 — trend and trajectory.
+3. US-7.3 — analytics charts, all of them.
+4. US-7.5 — attention panel.
+5. US-10.7 — accessibility beyond component defaults.
+6. US-10.6 — presentation conventions beyond what the components already do.
+7. Photograph handling in US-5.1 and US-5.4 — accept reports without photographs and drop the
    status-dependent photo projection.
-7. US-9.1 — reduce the map to cluster polygons only, no layer toggles.
+8. US-9.1 — reduce the map to cluster polygons only, no layer toggles.
 
 **Never cut, in any circumstance:** US-1.1, US-1.3 (live data), US-4.1 to US-4.3 (the processing the
 whole concept rests on), US-5.1 to US-5.4 (the multi-user loop), US-8.8 (the demo). Those five lines
 are the three stated grading criteria. Everything else is negotiable.
+
+**And never cut US-11.2's compatibility test**, even if the rest of E11 is abandoned. It costs an hour
+and it is the only thing standing between a half-finished generalisation and a broken dengue score.
 
 ---
 
@@ -2063,6 +2383,27 @@ in E7.
 3. **A demo that closes.** US-8.8 is ninety seconds that shows every stated grading criterion at once:
    live data updating, a computed priority, two users changing shared state, and the score moving
    because of it.
+
+## What E11 costs and buys *(v0.4)*
+
+**Cost.** Eight stories, of which three (US-11.1, US-11.2, US-11.7) are the minimum that answers the
+TA and the other five are genuinely optional. The expensive part is not the arithmetic — severity ×
+urgency is one multiplication — it is the 22-row catalogue in US-11.1, the form rework in US-11.7 and
+the referral path in US-11.8.
+
+**Buys.** Three things:
+
+1. **A product, not a dengue demo.** The TA's objection was scope. One comparable queue across 22
+   pests answers it without abandoning anything already built.
+2. **A defensible answer to "why not just sort by case count".** Severity × urgency, with the severity
+   rubric in `PEST-PRIORITY-MODEL.md` §4 and the weights per evidence tier in §3, is a model someone
+   has to argue with rather than glance at.
+3. **A second worked example for the traceability walkthrough.** 4.2.5 → US-11.2 → the compatibility
+   test is a complete requirement-to-test chain that fits in ninety seconds, and it is about
+   *not breaking* something, which is a more interesting story than adding a feature.
+
+**What it does not buy.** It does not buy live data for any pest but the mosquito. That does not
+exist, and no amount of design makes it exist. Say so in the demo before a grader asks.
 
 **What this does not change.** The two standing calls hold. Do not build the fogging scraper properly
 — seed the treatment table by hand and let 8.3.12 populate it going forward. Do not build the
@@ -2105,6 +2446,16 @@ engine should be.
    window, the five-case alert threshold, the 90-day treatment default and the 70/40 tier cut points
    are all judgement, not evidence. They are now collected in one table rather than scattered through
    the requirements as unmarked "shall" statements. Someone must be able to defend each in Q&A.
-9. **Whether to commit at all.** These documents specify a concept the team has not agreed to. Do not
+10. **Shared NEA/AVS authority for bees, wasps and the three bird species (4.2.3, 8.6.2).**
+   *Open, and needed before the Lab 5 demo.* A pest profile holds exactly one dispatch authority, but
+   bees, wasps, house crows, pigeons and Javan mynas are handled by NEA in some circumstances and AVS
+   in others. Either the team picks one authority per pest and says why, or `PestProfile` grows a
+   second authority field and the referral screen offers a choice. The first is cheaper and defensible;
+   the second is more truthful. **Decide, and write it into `config/pest-profiles.default.json`.**
+11. **Whether the seven-week schedule absorbs E11 at all (build order, weeks 8–10).** *Open.* Weeks
+   8–10 are a sequence, not calendar time. Either E11 displaces week 7, or the project ships with
+   weeks 8–9 only, or the TA's suggestion is answered in the requirements and diagrams and not in
+   code. All three are legitimate; drifting between them is not.
+12. **Whether to commit at all.** These documents specify a concept the team has not agreed to. Do not
    let their completeness become the argument — the concept decision should be made on the evidence
    pack, not on how much specification already exists.

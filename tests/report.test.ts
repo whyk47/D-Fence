@@ -40,7 +40,7 @@ import { CompletionEvidence } from '../src/entity/CompletionEvidence';
 import { Report, UNASSIGNED_LOCALITY } from '../src/entity/Report';
 import { GeoPoint, Polygon, PremisesMix } from '../src/entity/valueTypes';
 import { PhotoUpload } from '../src/entity/ReportPhoto';
-import { ReportStatus, ReportType, Role, TaskType } from '../src/entity/enums';
+import { PestType, ReportStatus, ReportType, Role, TaskType } from '../src/entity/enums';
 import { Principal } from '../src/control/Principal';
 
 const MANAGER = principalFor(Role.OperationsManager, 'manager-1');
@@ -148,7 +148,13 @@ async function submit(
   type = ReportType.StandingWater,
   now = new Date(),
 ): Promise<Report> {
-  return f.controller.submitReport({ point, type, description: 'Standing water in a disused tray.' }, by, now);
+  // v0.9: a breeding-site report IS a mosquito report (5.1.15). Every call site in this file
+  // predates the pest catalogue, so all of them say so explicitly rather than relying on a default.
+  return f.controller.submitReport(
+    { point, type, pestType: PestType.Mosquito, description: 'Standing water in a disused tray.' },
+    by,
+    now,
+  );
 }
 
 /** A verified report — the state from which 5.2.5 and the §8 hooks become interesting. */
@@ -185,23 +191,23 @@ describe('Submission — §5.1.1 to §5.1.6', () => {
   it('S3 — a description of exactly 500 characters is accepted, 501 is refused (5.1.4, boundary)', async () => {
     const at = new Date();
     await expect(
-      f.controller.submitReport({ point: INSIDE, type: ReportType.BlockedDrain, description: 'x'.repeat(500) }, RESIDENT, at),
+      f.controller.submitReport({ point: INSIDE, pestType: PestType.Mosquito, type: ReportType.BlockedDrain, description: 'x'.repeat(500) }, RESIDENT, at),
     ).resolves.toBeInstanceOf(Report);
     await expect(
-      f.controller.submitReport({ point: FAR, type: ReportType.BlockedDrain, description: 'x'.repeat(501) }, RESIDENT, at),
+      f.controller.submitReport({ point: FAR, pestType: PestType.Mosquito, type: ReportType.BlockedDrain, description: 'x'.repeat(501) }, RESIDENT, at),
     ).rejects.toBeInstanceOf(ReportRejected);
   });
 
   it('S4 — three photographs are accepted and a fourth is refused (5.1.5, boundary)', async () => {
     const three = [photo(), photo(), photo()];
     const report = await f.controller.submitReport(
-      { point: INSIDE, type: ReportType.StandingWater, description: 'tray', photos: three },
+      { point: INSIDE, pestType: PestType.Mosquito, type: ReportType.StandingWater, description: 'tray', photos: three },
       RESIDENT,
     );
     expect(await f.reports.photosFor(report.id)).toHaveLength(3);
     await expect(
       f.controller.submitReport(
-        { point: FAR, type: ReportType.StandingWater, description: 'tray', photos: [...three, photo()] },
+        { point: FAR, pestType: PestType.Mosquito, type: ReportType.StandingWater, description: 'tray', photos: [...three, photo()] },
         RESIDENT,
       ),
     ).rejects.toThrow(/at most three/);
@@ -214,7 +220,7 @@ describe('Submission — §5.1.1 to §5.1.6', () => {
     ];
     for (const [upload, message] of cases) {
       await expect(
-        f.controller.submitReport({ point: FAR, type: ReportType.Other, description: 'x', photos: [upload] }, RESIDENT),
+        f.controller.submitReport({ point: FAR, pestType: PestType.Mosquito, type: ReportType.Other, description: 'x', photos: [upload] }, RESIDENT),
       ).rejects.toThrow(message);
     }
     // Exactly 5 MB, and PNG, are both fine — the limit is "larger than", not "at least".
@@ -222,6 +228,7 @@ describe('Submission — §5.1.1 to §5.1.6', () => {
       f.controller.submitReport(
         {
           point: INSIDE,
+          pestType: PestType.Mosquito,
           type: ReportType.Other,
           description: 'x',
           photos: [photo({ sizeBytes: 5 * 1024 * 1024, contentType: 'image/png' })],
@@ -234,7 +241,7 @@ describe('Submission — §5.1.1 to §5.1.6', () => {
   it('S6 — a type outside the five is refused rather than coerced to Other (5.1.3)', async () => {
     await expect(
       f.controller.submitReport(
-        { point: INSIDE, type: 'Mosquitoes' as ReportType, description: 'lots of them' },
+        { point: INSIDE, pestType: PestType.Mosquito, type: 'Mosquitoes' as ReportType, description: 'lots of them' },
         RESIDENT,
       ),
     ).rejects.toThrow(/not one of the five/);
@@ -438,7 +445,7 @@ describe('Visibility — §5.2.9, §5.3.5', () => {
 
   it('V1 — photographs are withheld from other residents until the report is Verified (5.3.5)', async () => {
     const report = await f.controller.submitReport(
-      { point: INSIDE, type: ReportType.StandingWater, description: 'tray', photos: [photo()] },
+      { point: INSIDE, pestType: PestType.Mosquito, type: ReportType.StandingWater, description: 'tray', photos: [photo()] },
       RESIDENT,
     );
     expect((await f.controller.publicView(report.id, NEIGHBOUR)).photos).toHaveLength(0);
@@ -448,7 +455,7 @@ describe('Visibility — §5.2.9, §5.3.5', () => {
 
   it('V2 — the reporter sees their own photographs immediately (5.3.5 says "other than the reporter")', async () => {
     const report = await f.controller.submitReport(
-      { point: INSIDE, type: ReportType.StandingWater, description: 'tray', photos: [photo()] },
+      { point: INSIDE, pestType: PestType.Mosquito, type: ReportType.StandingWater, description: 'tray', photos: [photo()] },
       RESIDENT,
     );
     expect((await f.controller.publicView(report.id, RESIDENT)).photos).toHaveLength(1);

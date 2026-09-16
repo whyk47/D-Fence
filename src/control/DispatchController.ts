@@ -7,7 +7,9 @@
  * table first. Requirement 8.3.2 is then enforced in exactly one place — the Lab 2 adversarial
  * review found a version of this model that claimed one owner of the state machine and drew two.
  */
-import { PriorityTier, Role, TaskType, WorkOrderStatus } from '../entity/enums';
+import { PestClass, PestType, PriorityTier, Role, TaskType, WorkOrderStatus } from '../entity/enums';
+import { PestProfile } from '../entity/PestProfile';
+import { ConfigSet } from '../config/ConfigSet';
 import { IsoDate, Uuid, singaporeDate } from '../entity/valueTypes';
 import { WorkOrder } from '../entity/WorkOrder';
 import { Cluster } from '../entity/Cluster';
@@ -18,6 +20,8 @@ import { Principal } from './Principal';
 
 export interface WorkOrderDraft {
   clusterId: Uuid;
+  /** 8.1.16 — the pest the case addresses. Mosquito when a pre-v0.9 caller omits it. */
+  pestType?: PestType;
   taskType: TaskType;
   scheduledDate: IsoDate;
   instructions?: string;
@@ -91,6 +95,8 @@ export class DispatchController {
      * moved this order to Assigned" and "who put Ah Meng on it" is asking two questions.
      */
     private readonly audit: AuditStore | null = null,
+    /** 4.2.3 — the pest catalogue, for 8.1.14 and 8.1.17. Null on a v0.8 deployment. */
+    private readonly config: ConfigSet | null = null,
   ) {}
 
   /**
@@ -152,6 +158,28 @@ export class DispatchController {
     if ((draft.instructions ?? '').length > 1000) {
       throw new WorkOrderRejected('instructions exceed 1000 characters (8.1.6)');
     }
+    // 8.1.14, 8.1.15 — a wildlife case is not crew work. The Cleaning Crew is not equipped or
+    // authorised to remove a snake or a boar, and a work order that nobody can carry out is worse
+    // than an honest refusal: it reads as dispatched, suppresses nothing, and leaves the resident
+    // waiting. §8.6 defines what happens instead, and the refusal names it.
+    const pestType = draft.pestType ?? PestType.Mosquito;
+    const profile = this.profileFor(pestType);
+    if (profile?.isReferrable() === true) {
+      throw new WorkOrderRejected(
+        `${pestType} is handled by ${profile.dispatchAuthority}, not by a cleaning crew — ` +
+          `refer the report instead (8.1.14, 8.1.15)`,
+      );
+    }
+    // 8.1.17 — fogging is not a response to a rat. Which task types suit which pest class is
+    // configuration, not a rule in code, so an unconfigured pest class permits everything rather
+    // than silently permitting nothing.
+    const permitted = profile === null ? null : this.permittedTasks(profile);
+    if (permitted !== null && !permitted.includes(draft.taskType)) {
+      throw new WorkOrderRejected(
+        `${draft.taskType} is not a permitted task for ${pestType} (8.1.17)`,
+      );
+    }
+
     const clash = (await this.workOrders.findOpenForCluster(draft.clusterId)).find(
       (w) => w.taskType === draft.taskType,
     );
@@ -161,6 +189,7 @@ export class DispatchController {
 
     const workOrder = new WorkOrder();
     workOrder.clusterId = draft.clusterId;
+    workOrder.pestType = pestType; // 8.1.16
     workOrder.taskType = draft.taskType;
     workOrder.scheduledDate = draft.scheduledDate;
     workOrder.instructions = draft.instructions ?? '';
@@ -179,6 +208,41 @@ export class DispatchController {
     // initial state rather than a transition into it — so this row has no counterpart there.
     await this.audit?.appendAction(by.accountId, 'workOrder:create', 'WorkOrder', saved.id);
     return saved;
+  }
+
+  /**
+   * 4.2.3 — the profile, when a catalogue is configured. Null when it is not, which is the v0.8
+   * deployment: 8.1.14 and 8.1.17 then do not apply, and mosquito work orders are created exactly
+   * as they were.
+   */
+  private profileFor(pestType: PestType): PestProfile | null {
+    return this.config?.pestProfiles.get(pestType) ?? null;
+  }
+
+  /**
+   * 8.1.17 — the task types that suit a pest class.
+   *
+   * Written here rather than in configuration for now, and the choice is worth stating: the mapping
+   * is short, it is about what a crew physically does, and putting it in `pests.default.json` would
+   * invite someone to make fogging available for a bed bug by editing a file. If it needs to vary
+   * per pest rather than per class, it moves to the profile — and the requirement is written so
+   * that it can.
+   */
+  private permittedTasks(profile: PestProfile): TaskType[] {
+    switch (profile.pestClass) {
+      case PestClass.VectorBorne:
+        return Object.values(TaskType);
+      case PestClass.Structural:
+        // No fogging and no larviciding: a termite is not a mosquito, and treating one as a
+        // breeding site would put a crew on the wrong job with the wrong equipment.
+        return [TaskType.Inspection, TaskType.RefuseClearance, TaskType.DrainClearance];
+      case PestClass.Nuisance:
+        return [TaskType.Inspection, TaskType.RefuseClearance, TaskType.DrainClearance];
+      default:
+        // Wildlife never reaches here — 8.1.14 refused it above — and an unknown class is
+        // restricted to looking rather than acting.
+        return [TaskType.Inspection];
+    }
   }
 
   /**
@@ -266,7 +330,7 @@ export class DispatchController {
     await this.ac.authorise(by, 'workOrder:readAssigned', { kind: 'workOrder', ownerId: by.accountId });
     const mine = await this.workOrders.findForAssignee(by.accountId);
     const today = DispatchController.today();
-    const tierRank: Record<PriorityTier, number> = { High: 0, Medium: 1, Low: 2 };
+    const tierRank: Record<PriorityTier, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 };
 
     const filtered = mine.filter((w) => {
       switch (filter) {
@@ -301,7 +365,7 @@ export class DispatchController {
     filter: { status?: WorkOrderStatus; crewId?: Uuid } = {},
   ): Promise<WorkOrder[]> {
     await this.ac.authorise(by, 'workOrder:readAll', { kind: 'workOrder' });
-    const tierRank: Record<PriorityTier, number> = { High: 0, Medium: 1, Low: 2 };
+    const tierRank: Record<PriorityTier, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 };
     return (await this.workOrders.findAll())
       .filter((w) => filter.status === undefined || w.currentStatus() === filter.status)
       .filter((w) => filter.crewId === undefined || w.assigneeId === filter.crewId)

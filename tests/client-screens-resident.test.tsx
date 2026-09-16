@@ -199,7 +199,17 @@ describe('Add Location — §11.2.7, §3.1.4, §3.1.5, §3.1.17', () => {
   });
 });
 
-describe('Report a Site — §11.2.8, §5.1.4–5.1.6', () => {
+/**
+ * v0.9 — the form asks for a pest before anything else (5.1.15, 11.3.20), so every case that
+ * submits has to choose one. The helper does it by value rather than by label so the test does not
+ * depend on /api/pests having answered: the select falls back to the PestType enum when the
+ * catalogue has not loaded, which is the behaviour a resident on a bad connection gets.
+ */
+function choosePest(pestType = 'Mosquito'): void {
+  fireEvent.change(screen.getByLabelText('What did you see?'), { target: { value: pestType } });
+}
+
+describe('Report a Site — §11.2.8, §5.1.4–5.1.6, §5.1.15–5.1.17', () => {
   it('R1 — the counter uses the server constant, so the two limits cannot drift (5.1.4)', () => {
     render(<ReportSiteScreen {...props()} />);
     fireEvent.change(screen.getByLabelText('Describe what you saw'), { target: { value: 'water' } });
@@ -210,6 +220,7 @@ describe('Report a Site — §11.2.8, §5.1.4–5.1.6', () => {
     const { fetcher, calls } = router({ '/api/reports': { status: 201, body: { reportId: 'r1' } } });
     render(<ReportSiteScreen {...props({}, fetcher)} />);
 
+    choosePest();
     fireEvent.change(screen.getByLabelText('Describe what you saw'), {
       target: { value: 'x'.repeat(MAX_DESCRIPTION_CHARS + 1) },
     });
@@ -218,7 +229,9 @@ describe('Report a Site — §11.2.8, §5.1.4–5.1.6', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit report' }));
 
     await waitFor(() => expect(screen.getByText(`${MAX_DESCRIPTION_CHARS + 1} characters; the limit is ${MAX_DESCRIPTION_CHARS}`)).toBeTruthy());
-    expect(calls).toHaveLength(0);
+    // The reference lookup the screen makes on mount is not a submission. Counting POSTs rather
+    // than every call keeps this case about 5.1.4, which is what it is for.
+    expect(calls.filter((c) => c.url === '/api/reports')).toHaveLength(0);
   });
 
   it('R3 — exactly 500 characters is accepted; the boundary is inclusive (5.1.4)', async () => {
@@ -226,6 +239,7 @@ describe('Report a Site — §11.2.8, §5.1.4–5.1.6', () => {
     const onNavigate = vi.fn();
     render(<ReportSiteScreen {...props({ onNavigate }, fetcher)} />);
 
+    choosePest();
     fireEvent.change(screen.getByLabelText('Describe what you saw'), {
       target: { value: 'x'.repeat(MAX_DESCRIPTION_CHARS) },
     });
@@ -233,7 +247,9 @@ describe('Report a Site — §11.2.8, §5.1.4–5.1.6', () => {
     fireEvent.change(screen.getByLabelText('Longitude'), { target: { value: '103.8' } });
     fireEvent.click(screen.getByRole('button', { name: 'Submit report' }));
 
-    await waitFor(() => expect(calls.length).toBe(1));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === '/api/reports')).toHaveLength(1),
+    );
     expect(onNavigate).toHaveBeenCalledWith('/reports/r1');
   });
 
@@ -329,6 +345,7 @@ describe('Report a Site — §11.2.8, §5.1.4–5.1.6', () => {
     expect((upload?.body as { data: string }).data).toBe('AQIDBA==');
     expect((upload?.body as { contentType: string }).contentType).toBe('image/jpeg');
 
+    choosePest();
     fireEvent.change(screen.getByLabelText('Describe what you saw'), {
       target: { value: 'Standing water in a discarded pail behind the block.' },
     });
@@ -344,6 +361,75 @@ describe('Report a Site — §11.2.8, §5.1.4–5.1.6', () => {
     // The filename still travels, because a resident naming their own photograph is useful; it is
     // simply no longer pretending to be a key.
     expect(submitted.photos[0]?.filename).toBe('IMG_4821.jpg');
+  });
+
+  it('R8 — the chosen pest reaches the server, and nothing is active until one is chosen (5.1.15, 11.3.20)', async () => {
+    const { fetcher, calls } = router({
+      '/api/pests': {
+        body: {
+          pests: [
+            { pestType: 'Mosquito', pestClass: 'VectorBorne', evidenceTier: 'A', severityMultiplier: 1, authority: 'NEA', contactNumber: '6225 5632', referred: false },
+            { pestType: 'Snake', pestClass: 'Wildlife', evidenceTier: 'B', severityMultiplier: 0.75, authority: 'AVS', contactNumber: '1800 476 1600', referred: true },
+          ],
+        },
+      },
+      '/api/reports': { status: 201, body: { reportId: 'r10' } },
+    });
+    render(<ReportSiteScreen {...props({}, fetcher)} />);
+    await waitFor(() => expect(screen.getByLabelText('What did you find?')).toBeTruthy());
+
+    // 11.3.20 — the later fields are inert until a pest is chosen. Asking for a description first
+    // would collect the answer that changes the form after the form has been filled in.
+    expect((screen.getByLabelText('What did you find?') as HTMLSelectElement).disabled).toBe(true);
+
+    choosePest('Mosquito');
+    expect((screen.getByLabelText('What did you find?') as HTMLSelectElement).disabled).toBe(false);
+
+    fireEvent.change(screen.getByLabelText('Describe what you saw'), { target: { value: 'A tray of water.' } });
+    fireEvent.change(screen.getByLabelText('Latitude'), { target: { value: '1.4' } });
+    fireEvent.change(screen.getByLabelText('Longitude'), { target: { value: '103.8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit report' }));
+
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/reports')).toBe(true));
+    const body = calls.find((c) => c.url === '/api/reports')?.body as { pestType: string };
+    expect(body.pestType).toBe('Mosquito');
+  });
+
+  it('R9 — a wildlife pest must say indoors or outdoors, and says who handles it (5.1.16, 8.1.14)', async () => {
+    const { fetcher, calls } = router({
+      '/api/pests': {
+        body: {
+          pests: [
+            { pestType: 'Snake', pestClass: 'Wildlife', evidenceTier: 'B', severityMultiplier: 0.75, authority: 'AVS (NParks Animal Response Centre)', contactNumber: '1800 476 1600', referred: true },
+          ],
+        },
+      },
+      '/api/reports': { status: 201, body: { reportId: 'r11' } },
+    });
+    render(<ReportSiteScreen {...props({}, fetcher)} />);
+    await waitFor(() => expect(screen.getByLabelText('What did you see?')).toBeTruthy());
+
+    choosePest('Snake');
+    // 8.1.14 in words, before the form is filled in rather than after it is submitted.
+    await waitFor(() => expect(screen.getByText(/handles Snake, not D-Fence/)).toBeTruthy());
+    expect(screen.getByText('1800 476 1600')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Describe what you saw'), { target: { value: 'A snake by the lift.' } });
+    fireEvent.change(screen.getByLabelText('Latitude'), { target: { value: '1.4' } });
+    fireEvent.change(screen.getByLabelText('Longitude'), { target: { value: '103.8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit report' }));
+
+    // 5.1.16 — refused locally, so the resident is not refused after typing everything else.
+    expect(calls.some((c) => c.url === '/api/reports')).toBe(false);
+
+    fireEvent.click(screen.getByLabelText('Inside a building'));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit report' }));
+
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/reports')).toBe(true));
+    const body = calls.find((c) => c.url === '/api/reports')?.body as { locationContext: string };
+    // 4.4.7 reads this value and raises the case to Critical. It cannot do so from a value nobody
+    // supplied, which is the whole reason 5.1.16 makes it mandatory.
+    expect(body.locationContext).toBe('Indoor');
   });
 });
 

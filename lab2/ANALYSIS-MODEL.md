@@ -17,7 +17,7 @@ done here.
 
 ## 1. Entity classes — `class-diagram-entity.puml`
 
-23 entity classes in seven packages, with 13 enumerations drawn as first-class model elements rather
+27 entity classes in eight packages, with 17 enumerations drawn as first-class model elements rather
 than left as prose.
 
 | Package | Classes |
@@ -60,7 +60,7 @@ extensibility segment of the Lab 5 demo rather than being left for a marker to f
 
 ## 2. Boundary and control classes — `class-diagram-boundary-control.puml`
 
-**Boundary classes: 27 screens plus 5 external gateways.** Every screen in `REQUIREMENTS.md` §11.2
+**Boundary classes: 29 screens plus 7 external gateways.** Every screen in `REQUIREMENTS.md` §11.2
 appears once. Note the arithmetic: §11.2 has 25 numbered requirements, but 11.2.4 and 11.2.24 each
 define *two* screens, so the inventory is 27 screens, not 25. An earlier version of this document
 said 24 and gave the Password Reset Request screen no class of its own. The five gateways — `NEAFeedGateway`, `RainfallGateway`, `ForecastGateway`,
@@ -81,7 +81,12 @@ OneMap Search) are still unverified.
 | ReportController | 3.1, 3.2, 3.3 | Includes duplicate detection |
 | ModerationController | 3.4 | |
 | IngestionController | 7.1, 7.2, 7.3, 7.4 | Four sources, one lifecycle |
-| PriorityScoringEngine | 7.5, 8.2 | The computational core |
+| PriorityScoringEngine | 7.5, 8.2, 8.5 | The computational core. Lab 3 splits it into `UrgencyCalculator` + `PestPriorityCalculator` |
+| PestProfileRegistry | 8.5 | Holds severity, evidence tier, driver weights and authority per pest |
+| CriticalOverrideEvaluator | 7.10 | Acute life-safety, which the weighted sum cannot express |
+| ReferralController | 6.10 | Routes work the system has no authority to do |
+| ObservationIngestionJob | 7.8 | The only live feed for any non-mosquito pest |
+| OperatorRegistryLoader | 7.9 | Response-capacity driver from the NEA operator registry |
 | AlertTriggerEvaluator | 7.6 | |
 | AlertSubscriptionController | 4.1, 4.2 | Telegram linking and per-location alert settings |
 | NotificationController | 4.3, 4.4 | Both audiences, one delivery path |
@@ -178,8 +183,8 @@ change which screen the user is on.
 | Lab 1 artefact | Feeds | Lab 2 artefact |
 |---|---|---|
 | Data dictionary, 23 entities | → | Entity class diagram, 23 classes, same names |
-| Screen inventory §11.2, 27 screens | → | 27 boundary classes; 27 dialog-map states |
-| Use case model, 41 use cases | → | 15 control classes |
+| Screen inventory §11.2, 29 screens | → | 29 boundary classes; 29 dialog-map states |
+| Use case model, 48 use cases | → | 20 control classes |
 | Transition rules §11.3 | → | Dialog map transitions |
 | §2.3 access control | → | AccessControlService |
 | §8.3 work-order state table | → | WorkOrderLifecycleController |

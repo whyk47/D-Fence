@@ -25,6 +25,9 @@ import { ExpressApp } from './boundary/http/ExpressApp';
 import { DashboardRoutes } from './boundary/http/DashboardRoutes';
 import { ReportRoutes } from './boundary/http/ReportRoutes';
 import { ModerationRoutes } from './boundary/http/ModerationRoutes';
+import { ReferralRoutes } from './boundary/http/ReferralRoutes';
+import { ReferralController } from './control/ReferralController';
+import { InMemoryReferralStore } from './persistence/memory/InMemoryReferralStore';
 import { WorkOrderRoutes } from './boundary/http/WorkOrderRoutes';
 import { CrewRoutes } from './boundary/http/CrewRoutes';
 import { AuthRoutes } from './boundary/http/AuthRoutes';
@@ -274,7 +277,13 @@ async function main(): Promise<void> {
   const reportLifecycle = new ReportLifecycleController(new ReportTransitionTable(), reports, notifier, auditStore);
   const moderation = new ModerationController(ac0, reports, reportLifecycle);
   // 5.1.5 — the last argument is what makes a cited photograph a photograph rather than a string.
-  const residentReports = new ReportController(ac0, reports, locator, reportLifecycle, auditStore, objectStorage);
+  // 4.2.3 — `config` is passed so 5.1.16 can ask a pest for its class. Without it the controller
+  // still takes reports; it simply cannot enforce the wildlife-needs-a-location-context rule.
+  const residentReports = new ReportController(
+    ac0, reports, locator, reportLifecycle, auditStore, objectStorage, config,
+  );
+  // 8.6 — referral, the path a wildlife case takes instead of a work order (8.1.14).
+  const referralStore = new InMemoryReferralStore();
   const alertTriggers = new AlertTriggerEvaluator(savedLocations, subscriptions, alertStore, locator);
   // 9.1.x — the map and the trend view read the same stores everything else writes to; nothing
   // here computes a second version of a score or a boundary.
@@ -606,6 +615,9 @@ async function main(): Promise<void> {
   );
   const dispatch = new DispatchController(
     ac, lifecycle, workOrders, clusters, scores, notifier, reportLifecycle, 10, auditStore,
+    // 8.1.14, 8.1.17 — the catalogue is what lets creation refuse a wildlife case and restrict the
+    // task types offered for the rest.
+    config,
   );
   void dispatch;
 
@@ -619,6 +631,14 @@ async function main(): Promise<void> {
   app.mount(new DashboardRoutes(ac, dashboard, analytics, ingestion));
   app.mount(new ReportRoutes(ac, residentReports));
   app.mount(new ModerationRoutes(ac, moderation));
+  // 11.2.27, 11.2.28, 8.6 — the pest reference and the referral path.
+  app.mount(
+    new ReferralRoutes(
+      ac,
+      new ReferralController(ac, reports, referralStore, reportLifecycle, config, auditStore),
+      config,
+    ),
+  );
   app.mount(new AuthRoutes(ac, authentication));
   app.mount(new AdminRoutes(ac, staff));
   app.mount(new LocationRoutes(ac, locations));

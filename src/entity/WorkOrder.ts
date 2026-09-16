@@ -4,15 +4,13 @@
  */
 
 import { Uuid, IsoDate, GeoPoint, Polygon, PremisesMix, singaporeDate } from './valueTypes';
-import {
-  Role, LocationLabel, ExposureStatus, AlertTrigger, ChangeClass,
-  ForecastRegion, Trajectory, PriorityTier, Driver, ReportType, ReportStatus,
-  TaskType, WorkOrderStatus, SourceKind, DeliveryOutcome,
-} from './enums';
+import { AlertTrigger, ChangeClass, DeliveryOutcome, Driver, ExposureStatus, ForecastRegion, LocationLabel, PestType, PriorityTier, ReportStatus, ReportType, Role, SourceKind, TaskType, Trajectory, WorkOrderStatus } from './enums';
 
 export class WorkOrder {
   id!: Uuid;
   clusterId!: Uuid;
+  /** 8.1.16 — the pest this work order addresses. 8.1.14 means it is never a Wildlife pest. */
+  pestType: PestType = PestType.Mosquito;
   assigneeId!: Uuid | null;
   /** 8.1.2 */
   sourceReportId!: Uuid | null;

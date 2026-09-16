@@ -1,15 +1,18 @@
 # LAB 2 — REQUIREMENTS ANALYSIS
 
+> **v0.9 update (2026-09-16).** The product was widened from dengue to all common household pests and all wild animals requiring NEA or AVS intervention. The counts and class names below are updated; the reasoning is unchanged. See `../PEST-PRIORITY-MODEL.md` and `REQUIREMENTS.md` §14.
+
+
 **Project:** D-Fence · **Module:** SC2006 / CZ2006 · **Started:** 2026-09-02
 
 ## Deliverables (lab manual §4)
 
 | # | Deliverable required | File | Status |
 |---|---|---|---|
-| 1 | Complete use case diagram | `use-case-diagram*.puml` + `.png`/`.svg` | **Done.** v0.2, 41 use cases |
-| 2 | Use case descriptions | `USE-CASE-DESCRIPTIONS.md` | **Done.** All 41 described |
-| 3 | Class diagram of entity classes | `class-diagram-entity.puml` + `.png`/`.svg` | **Done.** 23 entity classes, 13 enumerations |
-| 4 | Key boundary and control classes | `class-diagram-boundary-control.puml` + `.png`/`.svg` | **Done.** 27 screen + 5 gateway boundary classes, 15 control classes; key subset named in `ANALYSIS-MODEL.md` §2 |
+| 1 | Complete use case diagram | `use-case-diagram*.puml` + `.png`/`.svg` | **Done.** v0.3, 48 use cases |
+| 2 | Use case descriptions | `USE-CASE-DESCRIPTIONS.md` | **Done.** All 48 described |
+| 3 | Class diagram of entity classes | `class-diagram-entity.puml` + `.png`/`.svg` | **Done.** 27 entity classes, 17 enumerations |
+| 4 | Key boundary and control classes | `class-diagram-boundary-control.puml` + `.png`/`.svg` | **Done.** 29 screen + 7 gateway boundary classes, 20 control classes; key subset named in `ANALYSIS-MODEL.md` §2 |
 | 5 | Initial dialog map | `dialog-map.puml` + `.png`/`.svg` | **Done.** 27 states, three role regions |
 | 6 | PDF report on AI technology stack recommendations | `AI-TECH-STACK.md` | **Written; needs PDF export** |
 
@@ -37,8 +40,9 @@ critique. Both are now closed.
 | **3.4** and **6.8** now include **4.3 Notify Resident** | Critique 2 — 5.2.8, 8.5.2 |
 | Scheduler retained as an actor | Critique 6, rejected on verification |
 
-38 → 41 use cases. Identifiers are permanent: nothing was renumbered, so every Lab 1 trace still
-resolves.
+38 → 41 use cases in v0.2; **41 → 48 in v0.3 (2026-09-16)**, when the product was widened from
+dengue to all pests. Identifiers are permanent: nothing was renumbered at either step, so every Lab 1
+trace still resolves.
 
 ## Diagrams
 

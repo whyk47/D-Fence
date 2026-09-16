@@ -1,5 +1,5 @@
 @startuml D-Fence-Resident
-' Lab 2 v0.2. Role view 1 of 3 — Resident. Subset of use-case-diagram.puml, same IDs.
+' Lab 2/3 v0.3. Role view 1 of 3 — Resident. Subset of use-case-diagram.puml, same IDs.
 left to right direction
 skinparam packageStyle rectangle
 skinparam actorStyle awesome
@@ -22,7 +22,8 @@ rectangle "D-Fence — Resident" {
   usecase "2.2 Remove Saved Location" as UC22
   usecase "2.3 View Exposure Status" as UC23
   usecase "2.4 View Cluster Map" as UC24
-  usecase "3.1 Submit Breeding-Site Report" as UC31
+  usecase "3.1 Submit Pest Report" as UC31
+  usecase "3.5 Classify Pest Type" as UC35
   usecase "3.2 Confirm Existing Report" as UC32
   usecase "3.3 Track Own Reports" as UC33
   usecase "4.1 Link Telegram Chat" as UC41
@@ -51,5 +52,12 @@ UC81 -- ONEMAP
 
 UC21 ..> UC81 : <<include>>
 UC31 ..> UC81 : <<include>>
+UC31 ..> UC35 : <<include>>
 UC32 ..> UC31 : <<extend>>\n(duplicate detected)
+
+note bottom of UC35
+  A report carries exactly one pest type
+  from the 22 covered (5.1.15), plus a
+  location context for wildlife (5.1.16).
+end note
 @enduml

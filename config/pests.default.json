@@ -1,0 +1,87 @@
+{
+  "$comment": "D-Fence pest profile catalogue. Traces: 4.2.1-4.2.3, 4.2.6, 4.2.7, 4.3.1-4.3.8, 8.6.2, 8.6.3, 1.5.2, 10.6.2. Severity multipliers and their rubric: PEST-PRIORITY-MODEL.md §4. Evidence tiers and the measurements behind them: §3. Driver weight sets: §5. Like config/scoring.default.json these are a team proposal, not fitted values.",
+
+  "$severityNote": "sigma = rawSeverity/18 divided by the catalogue maximum (12/18), so Mosquito and Rat sit at exactly 1.000. That normalisation is what makes 4.2.5 hold: the mosquito score is unchanged from v0.8 and the tier thresholds at 40.0/70.0 still mean what SCORING-SPEC.md §4 says they mean. 4.2.7 refuses a catalogue in which no pest carries 1.0.",
+
+  "$contactNote": "NEA 6225 5632 verified against nea.gov.sg/contact-us on 2026-09-16. AVS Animal Response Centre 1800 476 1600 verified against nparks.gov.sg/contact-us the same day.",
+
+  "$authorityNote": "PROVISIONAL for BeeWasp, HouseCrow, Pigeon and JavanMyna. These four appear on the AVS published wildlife list AND are NEA public-health nuisance work; a profile holds one authority. NEA is set here because D-Fence covers built-up municipal estates, which is the NEA side of that split. This is open point 10 in EPICS-STORIES.md and needs a team decision before the Lab 5 demo - it is configuration, so changing it is a one-line edit.",
+
+  "$taxonNote": "iNaturalist taxon ids, each resolved by id against api.inaturalist.org/v1/taxa on 2026-09-16 rather than by name search. Name search is unsafe here: q=Serpentes returns 26172, which is Squamata - the whole order, including skinks and monitor lizards - and overcounts snakes roughly threefold. Serpentes is 85553.",
+
+  "driverWeightsByTier": {
+    "A": {
+      "$comment": "4.3.4. Byte-identical to config/scoring.default.json. 4.2.5 depends on it.",
+      "CaseSize": 0.3,
+      "CaseGrowthDelta": 0.2,
+      "DaysSinceLastTreatment": 0.15,
+      "Rainfall72h": 0.12,
+      "Rainfall24h": 0.08,
+      "VerifiedOpenReportCount": 0.1,
+      "PremisesMix": 0.05
+    },
+    "B": {
+      "$comment": "4.3.5. Reports lead, because a report is a complaint and an observation is not (4.1.26). ResponseCapacityDeficit is deliberately small: the VCO registry holds registered offices, not service areas.",
+      "VerifiedOpenReportCount": 0.3,
+      "ReportVelocity": 0.2,
+      "ExternalObservationDensity": 0.2,
+      "DaysSinceLastTreatment": 0.15,
+      "CorroborationDensity": 0.1,
+      "ResponseCapacityDeficit": 0.05
+    },
+    "C": {
+      "$comment": "4.3.6. Tier B with the external driver's 0.20 redistributed onto the two report drivers, which are the only evidence a tier C pest has (4.3.10).",
+      "VerifiedOpenReportCount": 0.35,
+      "ReportVelocity": 0.25,
+      "DaysSinceLastTreatment": 0.2,
+      "CorroborationDensity": 0.15,
+      "ResponseCapacityDeficit": 0.05
+    }
+  },
+
+  "authorities": {
+    "NEA": { "name": "NEA", "contactNumber": "6225 5632" },
+    "AVS": { "name": "AVS (NParks Animal Response Centre)", "contactNumber": "1800 476 1600" },
+    "VCO": { "name": "Registered vector control operator", "contactNumber": "6225 5632" }
+  },
+
+  "pests": [
+    { "pestType": "Mosquito",      "pestClass": "VectorBorne", "evidenceTier": "A", "severityMultiplier": 1.0,  "authority": "NEA", "observationTaxonId": null,   "$raw": "2D+2H+S+P = 6+2+3+1 = 12" },
+    { "pestType": "Rat",           "pestClass": "VectorBorne", "evidenceTier": "C", "severityMultiplier": 1.0,  "authority": "NEA", "observationTaxonId": null,   "$raw": "4+2+3+3 = 12; tier C because 128 iNat records a year is too thin to move a driver" },
+    { "pestType": "Macaque",       "pestClass": "Wildlife",    "evidenceTier": "C", "severityMultiplier": 0.92, "authority": "AVS", "observationTaxonId": null,   "$raw": "2+4+3+2 = 11; tier C because 30/30 sampled records were location-obscured" },
+    { "pestType": "WildBoar",      "pestClass": "Wildlife",    "evidenceTier": "C", "severityMultiplier": 0.83, "authority": "AVS", "observationTaxonId": null,   "$raw": "0+6+3+1 = 10; 37 records island-wide in a year" },
+    { "pestType": "Cockroach",     "pestClass": "VectorBorne", "evidenceTier": "B", "severityMultiplier": 0.75, "authority": "NEA", "observationTaxonId": 81769,  "$raw": "4+0+3+2 = 9; Blattodea, which includes termites" },
+    { "pestType": "Fly",           "pestClass": "VectorBorne", "evidenceTier": "B", "severityMultiplier": 0.75, "authority": "NEA", "observationTaxonId": 47822,  "$raw": "4+0+3+2 = 9; Diptera order-wide, a coarse density signal only" },
+    { "pestType": "Flea",          "pestClass": "VectorBorne", "evidenceTier": "C", "severityMultiplier": 0.75, "authority": "NEA", "observationTaxonId": null,   "$raw": "4+2+2+1 = 9; ONE iNat record in twelve months" },
+    { "pestType": "Snake",         "pestClass": "Wildlife",    "evidenceTier": "B", "severityMultiplier": 0.75, "authority": "AVS", "observationTaxonId": 85553,  "$raw": "0+6+3+0 = 9; Serpentes, NOT Squamata" },
+    { "pestType": "Crocodile",     "pestClass": "Wildlife",    "evidenceTier": "B", "severityMultiplier": 0.75, "authority": "AVS", "observationTaxonId": 26068,  "$raw": "0+6+3+0 = 9" },
+    { "pestType": "BeeWasp",       "pestClass": "Wildlife",    "evidenceTier": "B", "severityMultiplier": 0.75, "authority": "NEA", "observationTaxonId": 52747,  "$raw": "0+6+2+1 = 9; authority PROVISIONAL, see $authorityNote" },
+    { "pestType": "HouseCrow",     "pestClass": "Nuisance",    "evidenceTier": "B", "severityMultiplier": 0.75, "authority": "NEA", "observationTaxonId": 8031,   "$raw": "2+2+3+2 = 9; authority PROVISIONAL" },
+    { "pestType": "Civet",         "pestClass": "Wildlife",    "evidenceTier": "C", "severityMultiplier": 0.58, "authority": "AVS", "observationTaxonId": null,   "$raw": "2+2+1+2 = 7; 107 records a year" },
+    { "pestType": "Bat",           "pestClass": "Wildlife",    "evidenceTier": "B", "severityMultiplier": 0.58, "authority": "AVS", "observationTaxonId": 40268,  "$raw": "2+2+1+2 = 7" },
+    { "pestType": "Pigeon",        "pestClass": "Nuisance",    "evidenceTier": "B", "severityMultiplier": 0.58, "authority": "NEA", "observationTaxonId": 3017,   "$raw": "2+0+3+2 = 7; authority PROVISIONAL" },
+    { "pestType": "BedBug",        "pestClass": "Structural",  "evidenceTier": "C", "severityMultiplier": 0.5,  "authority": "NEA", "observationTaxonId": null,   "$raw": "0+2+2+2 = 6; ONE iNat record in twelve months - indoor pests are invisible to a biodiversity platform" },
+    { "pestType": "Ant",           "pestClass": "Nuisance",    "evidenceTier": "B", "severityMultiplier": 0.5,  "authority": "VCO", "observationTaxonId": 47336,  "$raw": "2+2+1+1 = 6" },
+    { "pestType": "Otter",         "pestClass": "Wildlife",    "evidenceTier": "C", "severityMultiplier": 0.5,  "authority": "AVS", "observationTaxonId": null,   "$raw": "0+2+2+2 = 6; 30/30 sampled records location-obscured" },
+    { "pestType": "Termite",       "pestClass": "Structural",  "evidenceTier": "B", "severityMultiplier": 0.33, "authority": "VCO", "observationTaxonId": 118903, "$raw": "0+0+1+3 = 4" },
+    { "pestType": "MonitorLizard", "pestClass": "Wildlife",    "evidenceTier": "B", "severityMultiplier": 0.33, "authority": "AVS", "observationTaxonId": 39392,  "$raw": "0+2+1+1 = 4" },
+    { "pestType": "JavanMyna",     "pestClass": "Nuisance",    "evidenceTier": "B", "severityMultiplier": 0.33, "authority": "NEA", "observationTaxonId": 145095, "$raw": "0+0+2+2 = 4; authority PROVISIONAL" },
+    { "pestType": "Pangolin",      "pestClass": "Wildlife",    "evidenceTier": "C", "severityMultiplier": 0.25, "authority": "AVS", "observationTaxonId": null,   "$raw": "0+0+3+0 = 3; 12/12 sampled records location-obscured" },
+    { "pestType": "Other",         "pestClass": "Nuisance",    "evidenceTier": "C", "severityMultiplier": 0.25, "authority": "NEA", "observationTaxonId": null,   "$raw": "5.1.15 requires a value for a pest the resident cannot name. Scored at the catalogue floor and from reports alone: an unidentified pest is evidence of something, and the moderator decides what." }
+  ],
+
+  "criticalOverrideRules": {
+    "$comment": "4.4.1-4.4.3. A linear weighted sum cannot express acute life-safety: a snake indoors in a two-report locality scores low and is right to score low, and is still the thing the manager must see first. These raise the TIER and never the score (4.4.5).",
+    "wildlife-indoors": {
+      "$rule": "4.4.7",
+      "pestClass": "Wildlife",
+      "locationContext": "Indoor",
+      "description": "Wildlife reported indoors"
+    },
+    "injury": {
+      "$rule": "4.4.8",
+      "injuryReported": true,
+      "description": "An injury was reported"
+    }
+  }
+}

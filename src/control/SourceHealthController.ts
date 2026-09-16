@@ -32,6 +32,11 @@ const DEFAULT_INTERVAL_SECONDS: Record<SourceKind, number> = {
   [SourceKind.Rainfall]: 300,
   [SourceKind.Forecast]: 6 * 3_600,
   [SourceKind.Geocoding]: 48 * 3_600,
+  // 1.5.1 — observations at least daily. 1.6.7 — the operator registry is static reference data
+  // loaded at startup, so its "interval" is a formality; a week is chosen so that a health check
+  // never reports it stale, which would be a false alarm about a file that does not change.
+  [SourceKind.Observations]: 24 * 3_600,
+  [SourceKind.OperatorRegistry]: 7 * 24 * 3_600,
 };
 
 /** What 1.4.2 displays and 1.4.4 keys off, per source. */

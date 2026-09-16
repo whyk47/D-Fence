@@ -71,6 +71,25 @@ export const ATTRIBUTIONS: readonly SourceAttribution[] = [
     requiresCredential: true,
     shownOn: ['AddLocation', 'ConfirmAddress', 'DataSources'],
   },
+  {
+    source: SourceKind.Observations,
+    // 4.1.26 in attribution form: name what this is. It is a naturalist's sighting contributed by a
+    // member of the public, not a complaint and not a government record, and the line a user reads
+    // should not let them think otherwise.
+    text: 'Wildlife sightings © iNaturalist contributors, CC BY-NC',
+    url: 'https://www.inaturalist.org/',
+    licence: 'CC BY-NC 4.0 (per-observation; some records are CC0 or all rights reserved)',
+    requiresCredential: false,
+    shownOn: ['PriorityTable', 'ClusterDetail', 'PestReference', 'DataSources'],
+  },
+  {
+    source: SourceKind.OperatorRegistry,
+    text: 'Registered vector control operators © National Environment Agency, from data.gov.sg',
+    url: 'https://data.gov.sg/datasets/d_0921c2daa08b8bd846d2405c934da8c6/view',
+    licence: 'Singapore Open Data Licence v1.0',
+    requiresCredential: false,
+    shownOn: ['PriorityTable', 'PestReference', 'DataSources'],
+  },
 ] as const;
 
 export class Attribution {

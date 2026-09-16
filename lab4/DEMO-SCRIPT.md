@@ -170,6 +170,24 @@ Laptop, `/ops`. Presenter 2. **Sign in before the session** — do not spend dem
 > weight rather than treating missing as zero — and the row says it is degraded. Nothing here is
 > fitted to observed outcomes and we do not claim it is."
 
+### 4.2 If asked about pests other than dengue *(added 2026-09-16)*
+
+The TA suggested widening the scope. It is specified — `REQUIREMENTS.md` v0.9, the Lab 2 and Lab 3
+diagrams, `EPICS-STORIES.md` E11 and `lab4/TEST-PLAN.md` §6 — and **it is not built**. Say that in
+those words. What to say if it comes up, in the extensibility segment rather than the demo proper:
+
+> "The model generalises. A score is a pest's severity multiplied by an urgency, where urgency is a
+> weighted sum of whichever drivers that pest actually has evidence for — twenty-two pests, three
+> evidence tiers. Dengue is tier A and its score is unchanged by construction; there is a requirement,
+> 4.2.5, that says so, and that is the first test we would write. What we could not do is find data.
+> No Singapore government API publishes cockroach, rat, boar or snake reports — we checked all 4,615
+> datasets on data.gov.sg. iNaturalist is the only live feed, it is thin, and its wildlife records are
+> sightings rather than complaints. So the tiers are not an abstraction; they are what the evidence
+> actually supports."
+
+**Do not demonstrate a pest selector that does not exist.** The strength of this answer is that it is
+specified honestly and the limitation is stated first.
+
 ---
 
 ## 5. Segment D — the crew loop, on the phone (3½ minutes)

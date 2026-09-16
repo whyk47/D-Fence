@@ -1,8 +1,9 @@
 # USE CASE DESCRIPTIONS — D-Fence
 
-Lab 2 deliverable 2. Version 0.2, 2026-09-02. Supersedes the Lab 1 set.
+Lab 2 deliverable 2. Version 0.3, 2026-09-16. Supersedes the Lab 1 set.
+v0.3 adds seven use cases for the cross-pest generalisation - see the section at the end of this document.
 
-**41 use cases, all described.** The Lab 1 model carried 20 full descriptions and deferred 18; those
+**48 use cases, all described.** The Lab 1 model carried 20 full descriptions and deferred 18; those
 18 are written here, together with three use cases added by the Lab 1 AI critique and one correction
 to an existing relationship.
 
@@ -573,12 +574,12 @@ requirement obliges it.
 
 ---
 
-## Use Case 3.1 — Submit Breeding-Site Report
+## Use Case 3.1 — Submit Pest Report
 
 | Field | Value |
 |---|---|
 | **Use Case ID** | 3.1 |
-| **Use Case Name** | Submit Breeding-Site Report |
+| **Use Case Name** | Submit Pest Report |
 | **Created By** | Y. K. Chow |
 | **Date Created** | 2026-09-02 |
 | **Last Updated By** | Y. K. Chow |
@@ -2116,9 +2117,13 @@ would silently suppress a real alert.
 | **Priority** | P0 |
 | **Frequency of Use** | After every cluster ingestion cycle, and on every work-order verification. |
 
-**Description.** The system combines seven drivers into a single priority score per active cluster,
-assigns a tier, ranks the clusters and retains each driver's contribution. This is the computation that
-distinguishes the product from a presentation of extracted data.
+**Description.** The system computes a priority score for each scored subject as the severity
+multiplier of its pest type multiplied by an urgency value, assigns a tier, ranks the subjects in one
+mixed-pest ranking and retains each driver's contribution. Urgency is a weighted sum of the drivers
+available to the subject's evidence tier — the seven drivers of 4.1.3 for tier A, six for tier B, five
+for tier C. This is the computation that distinguishes the product from a presentation of extracted
+data. *(v0.3, 2026-09-16: generalised from the mosquito-only seven-driver sum. Requirement 4.2.5
+obliges the mosquito result to be unchanged, and 8.5 Apply Pest Severity Profile is included here.)*
 
 **Preconditions.**
 1. At least one active cluster exists.
@@ -2294,7 +2299,7 @@ diagnosis.
 | **Date Created** | 2026-09-02 |
 | **Last Updated By** | Y. K. Chow |
 | **Date Last Updated** | 2026-09-02 |
-| **Actor** | OneMap (secondary). Included by 2.1 Add Saved Location and 3.1 Submit Breeding-Site Report. |
+| **Actor** | OneMap (secondary). Included by 2.1 Add Saved Location, 3.1 Submit Pest Report and 7.9 Load Operator Registry. |
 | **Priority** | P1 |
 | **Frequency of Use** | Every location entry by a resident. |
 
@@ -2519,3 +2524,491 @@ photograph, manager verification, treatment record, lower score, changed ranking
 the spine of the Lab 5 demo.
 
 **Traces.** 8.3.12, 8.5.1, 8.5.2, 8.5.3, 8.5.4, 4.1.15, 4.1.16, 4.1.17.
+
+---
+
+# v0.3 additions (2026-09-16) — cross-pest generalisation
+
+The seven use cases below were added when the product was widened from dengue to all common
+household pests and all wild animals requiring NEA or AVS intervention (`REQUIREMENTS.md` v0.9,
+model in `../PEST-PRIORITY-MODEL.md`). **48 use cases, all described.**
+
+One existing use case is renamed: **3.1 Submit Breeding-Site Report → 3.1 Submit Pest Report.** Its
+description is unchanged apart from the pest type now required by 5.1.15, because a breeding-site
+report is simply a pest report whose pest type is Mosquito.
+
+| Added | Actor | Why the model needed it |
+|---|---|---|
+| 3.5 Classify Pest Type | Resident (via 3.1) | 5.1.15 makes the pest type mandatory and it decides everything downstream |
+| 5.5 Filter Ranking by Pest Type | Operations Manager | 7.2.11–7.2.13: one queue by default, per-pest as a filter |
+| 6.10 Refer Case to External Authority | Operations Manager, AVS | §8.6 — the system declines work it has no authority to do |
+| 7.8 Ingest Wildlife Observations | Scheduler, Observation Data Service | §1.5 — the only live feed for any non-mosquito pest |
+| 7.9 Load Operator Registry | Scheduler, NEA | §1.6 — the response-capacity driver |
+| 7.10 Evaluate Critical Override | Scheduler | §4.4 — acute life-safety, which arithmetic cannot express |
+| 8.5 Apply Pest Severity Profile | — (included by 7.5) | 4.2.4 — severity × urgency, the model itself |
+
+---
+
+## Use Case 3.5 — Classify Pest Type
+
+| Field | Value |
+|---|---|
+| **Use Case ID** | 3.5 |
+| **Use Case Name** | Classify Pest Type |
+| **Created By** | Y. K. Chow |
+| **Date Created** | 2026-09-16 |
+| **Last Updated By** | Y. K. Chow |
+| **Date Last Updated** | 2026-09-16 |
+| **Actor** | Resident (primary), included by 3.1 Submit Pest Report |
+| **Priority** | P0 |
+| **Frequency of Use** | Once per report submitted. |
+
+**Description.** The resident states which pest they are reporting. The choice is not cosmetic: it
+selects the severity multiplier that scales the score, the evidence tier that decides which drivers
+apply, the authority the case is dispatched or referred to, and whether a location context and an
+injury flag are demanded. Everything downstream of the report depends on this one field.
+
+**Preconditions.**
+1. The resident is authenticated and has begun a report under 3.1.
+
+**Postconditions.**
+1. The report carries exactly one pest type from the 22 fixed by 5.1.15.
+2. The report carries a location context when the pest class is Wildlife.
+3. The report carries an injury flag when the resident has recorded one.
+
+**Flow of Events.**
+1. The system presents the covered pest types grouped by pest class, with the responsible authority shown against each.
+2. The resident selects one pest type.
+3. The system activates the remaining report fields.
+4. The system requires a location context of Indoor or Outdoor when the selected pest class is Wildlife.
+5. The system offers the resident the option to record that an injury occurred.
+6. The system retains the selection with the report and returns control to 3.1.
+
+**Alternative Flows.**
+- **3.5.AC.1 — Pest not listed.** At step 2 the resident selects Other. The system accepts the report
+  and the moderating Operations Manager assigns the pest type during review under 3.4.
+- **3.5.AC.2 — Resident wants the authority, not the form.** At step 1 the resident opens the Pest
+  Reference screen (11.2.27), reads the responsible authority and its contact number, and leaves
+  without submitting. This is a legitimate outcome: someone who has just found a snake needs the AVS
+  number faster than they need a form.
+
+**Exceptions.**
+- **3.5.EX.1 — No pest type selected.** The system refuses submission and states that a pest type is
+  required. The other fields remain inactive per 11.3.20.
+- **3.5.EX.2 — Wildlife selected without a location context.** The system refuses submission and
+  states that Indoor or Outdoor is required, because 4.4.7 depends on the value.
+
+**Includes.** None. This use case is included by 3.1 Submit Pest Report.
+
+**Special Requirements.** The pest type must be capturable in one interaction on a phone screen; 22
+options in a flat list is not that. Grouping by pest class, with the four most-reported pests
+surfaced first, is a usability obligation under 10.5.x, not a preference.
+
+**Assumptions.** A resident can tell a rat from a cockroach and a snake from a monitor lizard at the
+level of the enumeration. Where they cannot, Other plus a photograph plus moderation (3.4) is the
+designed fallback rather than an error path.
+
+**Notes and Issues.** Bees and wasps, and the three nuisance bird species, have a genuinely shared
+NEA/AVS authority. The system does not guess: the resolution sits in the pest profile configuration
+and the team must record it before the Lab 5 demo.
+
+**Traces.** 5.1.15, 5.1.16, 5.1.17, 5.1.19, 11.2.27, 11.3.20, 4.2.3.
+
+---
+
+## Use Case 5.5 — Filter Ranking by Pest Type
+
+| Field | Value |
+|---|---|
+| **Use Case ID** | 5.5 |
+| **Use Case Name** | Filter Ranking by Pest Type |
+| **Created By** | Y. K. Chow |
+| **Date Created** | 2026-09-16 |
+| **Last Updated By** | Y. K. Chow |
+| **Date Last Updated** | 2026-09-16 |
+| **Actor** | Operations Manager (primary) |
+| **Priority** | P1 |
+| **Frequency of Use** | Several times per shift. |
+
+**Description.** The manager narrows the priority table to one pest type or one pest class. The
+default is deliberately the opposite — every pest in one ranking — because a queue that can only be
+read one pest at a time cannot answer the question the manager actually has, which is what to do
+next with the crews available today.
+
+**Preconditions.**
+1. The manager is authenticated and viewing the priority table.
+2. At least one scoring cycle has completed.
+
+**Postconditions.**
+1. The table shows only rows matching the selected filters.
+2. The ranking order within the filtered set is unchanged from the unfiltered ranking.
+
+**Flow of Events.**
+1. The manager opens the filter control on the priority table.
+2. The manager selects a pest type, a pest class, or both.
+3. The system applies the filter and redraws the table, preserving the existing sort.
+4. The system displays the count of rows shown against the total.
+5. The manager clears the filter and the full ranking returns.
+
+**Alternative Flows.**
+- **5.5.AC.1 — Filter combined with tier or work-order filters.** The filters compose; 7.2.4 and
+  7.2.5 are unaffected.
+- **5.5.AC.2 — Filter yields no rows.** The system states that no scored subject matches, and names
+  which filters are active, rather than presenting an empty table.
+
+**Exceptions.**
+- **5.5.EX.1 — Filtered pest type has no scored subject yet.** A tier C pest with no verified report
+  anywhere has no row. The system states this explicitly, because an empty result here means "nobody
+  has reported this pest", not "the filter is broken".
+
+**Includes.** Included by 5.2 Review Priority Ranking.
+
+**Special Requirements.** Filtering must not re-rank. A filtered view is a subset of the one true
+ranking, and a manager who filters to Rat must see the same relative order those rows held in the
+mixed queue.
+
+**Assumptions.** Managers will use the mixed queue as their default and reach for the filter when
+allocating a specialist crew.
+
+**Notes and Issues.** The mixed queue is the demonstrable consequence of the whole generalisation:
+a rat row at 71.0 sitting above a dengue cluster at 54.9 is the single screenshot that shows the
+model works. Filtering is what makes it operationally usable, not what makes it interesting.
+
+**Traces.** 7.2.11, 7.2.12, 7.2.13, 7.2.10, 4.1.14.
+
+---
+
+## Use Case 6.10 — Refer Case to External Authority
+
+| Field | Value |
+|---|---|
+| **Use Case ID** | 6.10 |
+| **Use Case Name** | Refer Case to External Authority |
+| **Created By** | Y. K. Chow |
+| **Date Created** | 2026-09-16 |
+| **Last Updated By** | Y. K. Chow |
+| **Date Last Updated** | 2026-09-16 |
+| **Actor** | Operations Manager (primary), External Dispatch Authority / AVS (secondary) |
+| **Priority** | P0 |
+| **Frequency of Use** | Every verified wildlife report. |
+
+**Description.** The manager routes a verified report to the agency responsible for it, instead of
+creating a work order the system's own Cleaning Crew is neither equipped nor authorised to execute.
+This is the use case that makes widening the product to wildlife honest: the system declines the work
+and names who does it.
+
+**Preconditions.**
+1. The manager is authenticated and viewing a report whose status is Verified.
+2. The report's pest type has a pest class of Wildlife, or the manager has judged the case outside the
+   system's dispatch authority.
+
+**Postconditions.**
+1. A referral record exists carrying the destination, the referring user, a timestamp and a reason.
+2. The report's status is Actioned.
+3. The reporting resident has been notified, naming the destination authority.
+4. **No work order exists and no treatment record has been written.**
+
+**Flow of Events.**
+1. The manager opens a verified wildlife report in the Report Review screen.
+2. The system offers the referral action and withholds the work-order creation action.
+3. The system displays the destination authority and its published contact number, read from the pest profile.
+4. The manager enters a reason and confirms the referral.
+5. The system creates the referral record, sets the report to Actioned and notifies the resident.
+6. The system presents the report in the dashboard as referred, distinct from one with an open work order.
+7. The manager later records the outcome, and the system sets the report to Closed.
+
+**Alternative Flows.**
+- **6.10.AC.1 — Manager refers a non-wildlife report.** Permitted. 8.6.1 is not restricted by pest
+  class; only the *refusal* in 8.1.14 is. A cockroach infestation inside a licensed food premises may
+  belong to another agency, and the manager may say so.
+- **6.10.AC.2 — Outcome never recorded.** The report remains Actioned. It is not closed by timeout,
+  because the system has no knowledge of what the authority did.
+
+**Exceptions.**
+- **6.10.EX.1 — Work order attempted against wildlife.** The system refuses under 8.1.14 and offers
+  this use case instead.
+- **6.10.EX.2 — Pest profile carries no dispatch authority.** The system refuses the referral and
+  states that the destination is unconfigured, rather than referring to a default.
+
+**Includes.** Includes 4.3 Notify Resident. Extends 3.4 Moderate Report when the pest class is
+Wildlife.
+
+**Special Requirements.** 8.6.11 is the requirement most likely to be got wrong in implementation: a
+referral must **not** write a treatment record. The system did not treat the locality, and recording
+treatment recency it did not earn would corrupt the 4.1.17 feedback loop — the one causal chain the
+whole product rests on.
+
+**Assumptions.** The published AVS contact number is correct and stable. It is configuration, not a
+constant, so a change is a configuration edit.
+
+**Notes and Issues.** In the Lab 5 demo, refuse to dispatch a crew to a wild boar and refer to AVS on
+screen. It demonstrates domain understanding more convincingly than any additional data source, and
+it takes fifteen seconds.
+
+**Traces.** 8.6.1, 8.6.2, 8.6.3, 8.6.4, 8.6.5, 8.6.6, 8.6.7, 8.6.8, 8.6.9, 8.6.10, 8.6.11, 8.1.14,
+8.1.15, 11.2.28, 11.3.21.
+
+---
+
+## Use Case 7.8 — Ingest Wildlife Observations
+
+| Field | Value |
+|---|---|
+| **Use Case ID** | 7.8 |
+| **Use Case Name** | Ingest Wildlife Observations |
+| **Created By** | Y. K. Chow |
+| **Date Created** | 2026-09-16 |
+| **Last Updated By** | Y. K. Chow |
+| **Date Last Updated** | 2026-09-16 |
+| **Actor** | Scheduler (primary), Observation Data Service (secondary) |
+| **Priority** | P1 |
+| **Frequency of Use** | Once per 24 hours per tier B pest type. |
+
+**Description.** The system retrieves third-party wildlife and pest sightings for every pest type of
+evidence tier B and binds them to localities, giving those pests a live driver they would otherwise
+not have. No Singapore government API publishes pest reports for any species other than the mosquito,
+so this feed is the only external evidence available for twelve of the twenty-two covered pests.
+
+**Preconditions.**
+1. At least one pest profile carries evidence tier B and a taxon identifier.
+2. The observation service is reachable.
+
+**Postconditions.**
+1. Accepted observations are stored, each bound to a locality.
+2. The counts of accepted and rejected records are recorded against the ingestion run.
+3. Previously stored observations are unchanged.
+
+**Flow of Events.**
+1. The scheduler triggers the job for one tier B pest type.
+2. The system requests observations for that pest type's taxon identifier.
+3. The system rejects any record missing an observed date, latitude or longitude.
+4. The system rejects any record observed more than 90 days ago.
+5. The system rejects any record whose coordinates are obscured.
+6. The system rejects any record whose positional accuracy exceeds 500 metres.
+7. The system binds each surviving record to the locality containing its coordinates and discards those binding to none.
+8. The system stores the accepted records and writes the ingestion run.
+
+**Alternative Flows.**
+- **7.8.AC.1 — Every record rejected.** The run succeeds with an accepted count of zero. This is a
+  normal outcome for a pest whose records are wholly obscured, and it must not be reported as a
+  failure.
+- **7.8.AC.2 — Retrieval fails.** The system retries three times at five-minute intervals and
+  continues to serve the previously stored observations.
+
+**Exceptions.**
+- **7.8.EX.1 — Taxon identifier unknown to the service.** The run fails for that pest type alone and
+  the remaining pest types proceed.
+
+**Includes.** None.
+
+**Special Requirements.** Steps 5 and 6 are not defensive tidying, they are load-bearing. The supplier
+randomises coordinates within roughly a 22 km box for species at risk of harm; in sampling on
+2026-09-16 the macaque, otter and pangolin were **100% obscured**. Admitting those records would bind
+sightings to arbitrary localities and silently corrupt the ranking.
+
+**Assumptions.** A sighting is a reasonable proxy for local pest activity. It is a weak one — an
+observation is a naturalist's photograph, not a complaint — which is why 4.1.26 forces the label
+"recent wildlife activity" and why the driver is capped at 0.20 of the tier B weight set.
+
+**Notes and Issues.** Measured 2026-09-16: median positional accuracy 111 m, 34 of 46 sampled records
+within 500 m. The 500 m threshold in 1.5.7 is set from that measurement, not chosen.
+
+**Traces.** 1.5.1–1.5.14, 4.1.24, 4.1.26, 4.3.3, 4.3.5.
+
+---
+
+## Use Case 7.9 — Load Operator Registry
+
+| Field | Value |
+|---|---|
+| **Use Case ID** | 7.9 |
+| **Use Case Name** | Load Operator Registry |
+| **Created By** | Y. K. Chow |
+| **Date Created** | 2026-09-16 |
+| **Last Updated By** | Y. K. Chow |
+| **Date Last Updated** | 2026-09-16 |
+| **Actor** | Scheduler (primary), External Data Provider / NEA (secondary) |
+| **Priority** | P2 |
+| **Frequency of Use** | Once at application startup. |
+
+**Description.** The system loads the NEA register of licensed vector control operators, geocodes each
+operator's postal code, and computes for every locality the distance to its nearest operator. That
+distance feeds the response capacity deficit driver.
+
+**Preconditions.**
+1. The registry dataset is reachable, or a cached copy exists.
+
+**Postconditions.**
+1. Each accepted operator is stored with a latitude and longitude.
+2. Each locality carries a distance to its nearest operator.
+3. Resolved coordinates are cached and are not resolved again.
+
+**Flow of Events.**
+1. The system downloads the registry at startup.
+2. The system rejects any row whose postal code is not a six-digit value.
+3. The system resolves each remaining postal code to coordinates through the geocoding service, skipping any already cached.
+4. The system stores each operator with its coordinates.
+5. The system computes the nearest-operator distance for every locality.
+
+**Alternative Flows.**
+- **7.9.AC.1 — Cached registry present.** Geocoding is skipped entirely and step 5 runs against the
+  cache.
+- **7.9.AC.2 — Download fails.** The system retains and uses the most recently cached registry.
+
+**Exceptions.**
+- **7.9.EX.1 — A postal code does not resolve.** That operator is stored without coordinates and
+  excluded from the distance computation. The run continues.
+
+**Includes.** Includes 8.1 Geocode Address.
+
+**Special Requirements.** 1.6.7 obliges the system to display the source dataset's publication date
+wherever the registry appears, and never to present it as live. The dataset was last published
+2024-06-06. A grader filtering on "live data update" will ask, and the honest answer must already be
+on the screen.
+
+**Assumptions.** Distance to the nearest registered operator is a usable proxy for how quickly a
+locality can be serviced.
+
+**Notes and Issues.** What this measures must be stated plainly and was, in `../PEST-PRIORITY-MODEL.md`
+§5.3: the registry records **registered offices**, and of 290 operators the commonest addresses are
+industrial and CBD streets. It is a response-capacity signal, not a demand signal. Used as demand it
+would rank industrial land above the housing estates that generate the complaints, which is precisely
+why 4.1.25 carries a weight of 0.05 and no more.
+
+**Traces.** 1.6.1–1.6.8, 4.1.25.
+
+---
+
+## Use Case 7.10 — Evaluate Critical Override
+
+| Field | Value |
+|---|---|
+| **Use Case ID** | 7.10 |
+| **Use Case Name** | Evaluate Critical Override |
+| **Created By** | Y. K. Chow |
+| **Date Created** | 2026-09-16 |
+| **Last Updated By** | Y. K. Chow |
+| **Date Last Updated** | 2026-09-16 |
+| **Actor** | Scheduler (primary), included by 7.5 Compute Priority Scores |
+| **Priority** | P0 |
+| **Frequency of Use** | Every scoring cycle. |
+
+**Description.** The system tests every verified report against the critical override rules and raises
+any matching subject to the Critical tier, above the ranked queue, irrespective of its computed score.
+A weighted sum expresses sustained burden well and acute danger not at all; this use case exists so
+that it is never asked to.
+
+**Preconditions.**
+1. A scoring cycle is in progress.
+2. Override rules are configured.
+
+**Postconditions.**
+1. Every matching subject carries the Critical tier and names the rule it matched.
+2. Every matching subject retains and displays its computed score.
+3. The Operations Manager has been notified within one minute.
+
+**Flow of Events.**
+1. The scoring cycle computes a score for each subject.
+2. The system evaluates each subject's verified reports against the configured rules.
+3. The system assigns the Critical tier to each matching subject and records the matched rule name.
+4. The system ranks every Critical subject above every High subject.
+5. The system notifies the Operations Manager.
+
+**Alternative Flows.**
+- **7.10.AC.1 — Subject matches more than one rule.** The first matching rule is recorded; the tier is
+  unchanged by further matches.
+- **7.10.AC.2 — Report is verified between scoring cycles.** 4.4.9's one-minute obligation is measured
+  from verification, not from the next cycle, so evaluation runs on verification as well as on cycle.
+
+**Exceptions.**
+- **7.10.EX.1 — Override rules unconfigured.** Scoring proceeds and no subject is raised. The system
+  raises a configuration warning; it does not fail the cycle.
+
+**Includes.** None. Included by 7.5 Compute Priority Scores.
+
+**Special Requirements.** 4.4.5 requires the computed score to survive and be displayed. A manager
+must be able to see that a subject scored 38.6 and was raised anyway, and why. Hiding the arithmetic
+behind the override would make the ranking unexplainable at exactly the moment it matters most.
+
+**Assumptions.** The rule set — venomous snake indoors, crocodile anywhere, boar in a residential or
+education zone, bee or wasp nest at a school or eldercare site, macaque entering a dwelling, any
+injury — is complete enough for this version. It is configuration, so it is cheap to extend.
+
+**Notes and Issues.** This is the answer to the obvious demo question, "why is a snake only 0.75 when
+a macaque is 0.92?" Severity encodes sustained municipal burden, in which macaques genuinely outweigh
+snakes in Singapore; acute danger is handled here instead. Keeping the two mechanisms separate is the
+design decision, and it should be stated as one rather than defended as an accident.
+
+**Traces.** 4.4.1–4.4.9, 5.3.7, 7.2.14, 4.1.8.
+
+---
+
+## Use Case 8.5 — Apply Pest Severity Profile
+
+| Field | Value |
+|---|---|
+| **Use Case ID** | 8.5 |
+| **Use Case Name** | Apply Pest Severity Profile |
+| **Created By** | Y. K. Chow |
+| **Date Created** | 2026-09-16 |
+| **Last Updated By** | Y. K. Chow |
+| **Date Last Updated** | 2026-09-16 |
+| **Actor** | — (shared; included by 7.5 Compute Priority Scores) |
+| **Priority** | P0 |
+| **Frequency of Use** | Once per scored subject per scoring cycle. |
+
+**Description.** The system reads the pest profile of the subject being scored, selects the driver set
+its evidence tier permits, computes the urgency value from those drivers, and multiplies by the pest's
+severity multiplier to produce a priority score comparable across every pest in the system. This use
+case *is* the generalised model.
+
+**Preconditions.**
+1. A pest profile exists for the pest type being scored.
+2. The profile's driver weights sum to 1.0 and name only drivers its evidence tier permits.
+
+**Postconditions.**
+1. The subject carries a priority score on the 0–100 scale to one decimal place.
+2. The subject carries a driver breakdown listing each driver's normalised value and weighted contribution.
+3. The subject carries its evidence tier and severity multiplier for display.
+
+**Flow of Events.**
+1. The system reads the pest profile for the subject's pest type.
+2. The system selects the driver set for the profile's evidence tier.
+3. The system normalises each available driver to a value between 0 and 1.
+4. The system excludes any driver whose source is stale and renormalises the remaining weights to sum to 1.0.
+5. The system computes the urgency value as the weighted sum.
+6. The system multiplies the urgency value by the severity multiplier and scales to 0–100.
+7. The system stores the score, the tier, the breakdown and the evidence tier.
+
+**Alternative Flows.**
+- **8.5.AC.1 — Tier C subject.** Steps 1 to 7 run unchanged against reports, corroborations and
+  treatment records alone. No external source is consulted and none is required.
+- **8.5.AC.2 — Driver excluded as stale.** The score is marked DEGRADED and the excluded driver is
+  named, exactly as in v0.8.
+
+**Exceptions.**
+- **8.5.EX.1 — Weights do not sum to 1.0.** The system rejects the configuration at load and does not
+  score with it.
+- **8.5.EX.2 — Weight set names an unavailable driver.** The system rejects the configuration, rather
+  than silently contributing zero for a driver the tier cannot supply.
+- **8.5.EX.3 — No pest carries a severity multiplier of 1.0.** The system rejects the configuration,
+  because the multipliers are normalised against the most severe pest and the tier thresholds depend
+  on that normalisation.
+
+**Includes.** None. Included by 7.5 Compute Priority Scores.
+
+**Special Requirements.** **4.2.5 is the compatibility obligation and it is directly testable:** score
+a dengue cluster under v0.9 and assert the result equals its v0.8 score. The mosquito multiplier is
+1.000 by construction and the tier A weight set is v0.8's unchanged, so a failure here means the
+generalisation has broken the system it was supposed to extend. Write this test first.
+
+**Assumptions.** The 22 severity multipliers are judgement derived from a four-factor rubric, with no
+outcome data behind them — the same honest position the driver weights have held since v0.5. They are
+configuration and the team can revise any of them without touching code.
+
+**Notes and Issues.** The property worth stating aloud in the demo: because urgency is always in
+[0,1] and severity is a constant, a rat scored purely from resident reports and a dengue cluster
+scored from NEA's own case counts land on one scale and sort against each other honestly. That
+comparability is the entire point, and it cost no change to the dengue behaviour.
+
+**Traces.** 4.2.1–4.2.8, 4.3.1–4.3.10, 4.1.3, 4.1.7, 4.1.12, 4.1.19, 4.1.22–4.1.25.

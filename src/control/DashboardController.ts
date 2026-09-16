@@ -111,6 +111,7 @@ export class DashboardController {
     const open = this.workOrders === null ? null : await this.workOrders.findAllOpen();
 
     const tierDistribution: Record<PriorityTier, number> = {
+      [PriorityTier.Critical]: 0,
       [PriorityTier.High]: 0,
       [PriorityTier.Medium]: 0,
       [PriorityTier.Low]: 0,
@@ -303,9 +304,11 @@ export class DashboardController {
     const column = query.sortBy ?? 'rank';
     const direction = query.descending === true ? -1 : 1;
     const tierOrder: Record<PriorityTier, number> = {
-      [PriorityTier.High]: 0,
-      [PriorityTier.Medium]: 1,
-      [PriorityTier.Low]: 2,
+      // 4.4.4 — Critical sorts above every High, whatever its score.
+      [PriorityTier.Critical]: 0,
+      [PriorityTier.High]: 1,
+      [PriorityTier.Medium]: 2,
+      [PriorityTier.Low]: 3,
     };
     return [...rows].sort((a, b) => {
       switch (column) {

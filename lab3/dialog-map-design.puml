@@ -40,6 +40,7 @@ state "Resident  (RouteGuard: role = Resident)" as ResidentRegion {
   state "My Reports\n/reports  (11.2.9)" as MyReports
   state "Report Detail\n/reports/:id  (11.2.10)" as ReportDetail
   state "Alert Settings\n/alerts  (11.2.11)" as AlertSettings
+  state "Pest Reference\n/pests  (11.2.27)" as PestReference
 
   ResidentMap --> MyLocations : openLocations /\nSavedLocationController.list()
   ResidentMap --> ReportSite : reportHere
@@ -58,6 +59,10 @@ state "Resident  (RouteGuard: role = Resident)" as ResidentRegion {
   ReportDetail --> MyReports : back
   MyReports --> ResidentMap : back
   AlertSettings --> ResidentMap : back /\nAlertSubscriptionController.setLocationAlerts()
+  ResidentMap --> PestReference : openPestReference /\nPestProfileRegistry.listProfiles()
+  ReportSite --> PestReference : whoHandlesThis /\nPestProfileRegistry.dispatchAuthority()
+  PestReference --> ReportSite : reportThisPest
+  PestReference --> ResidentMap : back
 }
 
 state "Operations Manager  (RouteGuard: role = OperationsManager)" as OpsRegion {
@@ -71,6 +76,7 @@ state "Operations Manager  (RouteGuard: role = OperationsManager)" as OpsRegion 
   state "Work Order Detail\n/ops/work-orders/:id  (11.2.18)" as WODetail
   state "Staff Accounts\n/ops/staff  (11.2.22)" as StaffAccounts
   state "Data Sources\n/ops/sources  (11.2.23)" as DataSources
+  state "Referral\n/ops/referrals/:id  (11.2.28)" as Referral
   state "Analytics\n/ops/analytics  (11.2.26)" as Analytics
 
   OpsDashboard --> ClusterDetail : selectCluster /\nDashboardController.buildPriorityTable()
@@ -89,6 +95,10 @@ state "Operations Manager  (RouteGuard: role = OperationsManager)" as OpsRegion 
   ModQueue --> ReportReview : selectReport
   ReportReview --> ModQueue : verified / rejected /\nModerationController.verify() | reject()
   ReportReview --> ModQueue : back
+  ReportReview --> Referral : refer [pestClass = Wildlife] /\nReferralController.destinationFor()
+  Referral --> ModQueue : referred /\nReferralController.refer()
+  Referral --> OpsDashboard : outcomeRecorded /\nReferralController.recordOutcome()
+  Referral --> ReportReview : cancel
   DispatchProposal --> WOCreate : editItem
   DispatchProposal --> OpsDashboard : accepted / back
   WOCreate --> WOList : created /\nDispatchController.createWorkOrder()
@@ -167,6 +177,16 @@ note as N_return
   and Not Found now carry distinct URLs. All four defects were inherited
   from the Lab 2 map and survived the first refinement pass; an
   adversarial review found them.
+end note
+
+
+note bottom
+  v0.9 additions. 11.3.20: the Report a Site screen requires a
+  pest type before its other fields activate, because the pest
+  type decides which fields 5.1.16 makes mandatory.
+  11.3.21: the Report Review screen offers REFERRAL, not work-order
+  creation, when the pest class is Wildlife (8.1.14, 8.1.15).
+  ReferralController writes no TreatmentRecord (8.6.11).
 end note
 
 @enduml

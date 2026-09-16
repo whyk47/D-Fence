@@ -1,6 +1,13 @@
 # D-Fence — Scoring Specification
 
-Version 1.0 · 2026-09-03 · status: **PROPOSAL for team review**
+Version 1.1 · 2026-09-03, noted 2026-09-16 · status: **PROPOSAL for team review**
+
+> **v0.9 scope note (2026-09-16).** This document specifies the **mosquito** scorer, which is now
+> evidence tier A of a general model. Everything below still holds exactly as written: the seven
+> drivers, the normalisation methods and the weights are tier A's, unchanged, and requirement 4.2.5
+> obliges them to stay that way. What sits above it — the severity multiplier per pest, the tier B and
+> tier C driver sets, and the critical override — is in `PEST-PRIORITY-MODEL.md`. Read that for any
+> pest other than the mosquito; read this one for the mosquito.
 Satisfies requirements 4.1.4 (a normalisation method per driver) and 4.1.5 (driver weights).
 Implemented by `src/control/normalisation/` and `config/scoring.default.json`.
 

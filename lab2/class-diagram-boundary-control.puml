@@ -11,6 +11,14 @@ skinparam shadowing false
 skinparam classAttributeIconSize 0
 hide circle
 
+' v0.3 (2026-09-16) - cross-pest generalisation, REQUIREMENTS.md v0.9:
+'   +PestReferenceUI (11.2.27), +ReferralUI (11.2.28);
+'   +INaturalistGateway (1.5), +VCORegistryGateway (1.6);
+'   +PestProfileRegistry, +CriticalOverrideEvaluator, +ReferralController,
+'   +ObservationIngestionJob, +OperatorRegistryLoader.
+' PriorityScoringEngine keeps its analysis name here; Lab 3 splits it into
+' UrgencyCalculator + PestPriorityCalculator by the Fox pp. 341-345 heuristics.
+
 package "Boundary — Resident screens" #FDFDF7 {
   class LandingUI <<boundary>>
   class RegisterUI <<boundary>>
@@ -24,6 +32,7 @@ package "Boundary — Resident screens" #FDFDF7 {
   class MyReportsUI <<boundary>>
   class ReportDetailUI <<boundary>>
   class AlertSettingsUI <<boundary>>
+  class PestReferenceUI <<boundary>>
 }
 
 package "Boundary — Operations screens" #FDFDF7 {
@@ -37,6 +46,7 @@ package "Boundary — Operations screens" #FDFDF7 {
   class WorkOrderDetailUI <<boundary>>
   class StaffAccountsUI <<boundary>>
   class DataSourcesUI <<boundary>>
+  class ReferralUI <<boundary>>
 }
 
 package "Boundary — Crew screens" #FDFDF7 {
@@ -64,6 +74,12 @@ package "Boundary — External services" #F7FAFD {
   class OneMapGateway <<boundary>> {
     search(address)
     requestToken()
+  }
+  class INaturalistGateway <<boundary>> {
+    fetchObservations(taxonId, sinceDate)
+  }
+  class VCORegistryGateway <<boundary>> {
+    downloadRegistry()
   }
   class TelegramGateway <<boundary>> {
     sendMessage(chatId, text)
@@ -100,6 +116,26 @@ package "Control" #FAF7FD {
     detectDuplicate()
     confirmExisting()
     listOwnReports()
+  }
+  class PestProfileRegistry <<control>> {
+    profileFor(pestType)
+    severityMultiplier(pestType)
+    driversFor(pestType)
+    dispatchAuthority(pestType)
+  }
+  class CriticalOverrideEvaluator <<control>> {
+    evaluate(subject, reports)
+  }
+  class ReferralController <<control>> {
+    refer(reportId, actor, reason)
+    recordOutcome(referralId, outcome, actor)
+  }
+  class ObservationIngestionJob <<control>> {
+    run(pestType)
+  }
+  class OperatorRegistryLoader <<control>> {
+    load()
+    nearestOperatorDistance(localityId)
   }
   class ModerationController <<control>> {
     listQueue()

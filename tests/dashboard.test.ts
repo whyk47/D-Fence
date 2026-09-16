@@ -139,7 +139,8 @@ describe('DashboardController — §7', () => {
     expect(overview.activeClusters).toBe(3);
     expect(overview.totalActiveCases).toBe(262);
     expect(overview.highTierClusters).toBe(1);
-    expect(overview.tierDistribution).toEqual({ High: 1, Medium: 1, Low: 1 });
+    // Critical is a band of the distribution in v0.9 (4.4.4), zero until an override fires.
+    expect(overview.tierDistribution).toEqual({ Critical: 0, High: 1, Medium: 1, Low: 1 });
     expect(overview.dataAsOf).toEqual(AT);
   });
 

@@ -41,6 +41,7 @@ state "Resident" as ResidentRegion {
   state "My Reports (11.2.9)" as MyReports
   state "Report Detail (11.2.10)" as ReportDetail
   state "Alert Settings (11.2.11)" as AlertSettings
+  state "Pest Reference (11.2.27)" as PestReference
 
   ResidentMap --> MyLocations : openLocations
   ResidentMap --> ReportSite : reportHere
@@ -58,6 +59,10 @@ state "Resident" as ResidentRegion {
   ReportDetail --> MyReports : back
   MyReports --> ResidentMap : back
   AlertSettings --> ResidentMap : back
+  ResidentMap --> PestReference : openPestReference
+  ReportSite --> PestReference : whoHandlesThis
+  PestReference --> ReportSite : reportThisPest
+  PestReference --> ResidentMap : back
 }
 
 state "Operations Manager" as OpsRegion {
@@ -71,6 +76,7 @@ state "Operations Manager" as OpsRegion {
   state "Work Order Detail (11.2.18)" as WODetail
   state "Staff Accounts (11.2.22)" as StaffAccounts
   state "Data Sources (11.2.23)" as DataSources
+  state "Referral (11.2.28)" as Referral
 
   OpsDashboard --> ClusterDetail : selectCluster
   OpsDashboard --> ModQueue : openModeration
@@ -85,6 +91,10 @@ state "Operations Manager" as OpsRegion {
   ClusterDetail --> OpsDashboard : back
   ModQueue --> ReportReview : selectReport
   ReportReview --> ModQueue : verified / rejected / back
+  ReportReview --> Referral : refer [pestClass = Wildlife]
+  Referral --> ReportReview : cancel
+  Referral --> ModQueue : referred
+  Referral --> OpsDashboard : outcomeRecorded
   DispatchProposal --> WOCreate : editItem
   DispatchProposal --> OpsDashboard : accepted / back
   WOCreate --> WOList : created
@@ -144,6 +154,15 @@ note bottom of NotAuthorised
   Reached when the server refuses a resource the
   role may not read (2.3.7). The interface never
   decides this — it only displays the refusal.
+end note
+
+
+note bottom
+  v0.9 additions. 11.3.20: the Report a Site screen requires a
+  pest type before its other fields activate, because the pest
+  type decides which fields 5.1.16 makes mandatory.
+  11.3.21: the Report Review screen offers REFERRAL, not work-order
+  creation, when the pest class is Wildlife (8.1.14, 8.1.15).
 end note
 
 @enduml

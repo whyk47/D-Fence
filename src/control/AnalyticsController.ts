@@ -134,6 +134,9 @@ export class AnalyticsController {
   async tierDistribution(): Promise<Chart<Record<PriorityTier, number>>> {
     const latest = await this.scores.latest();
     const distribution: Record<PriorityTier, number> = {
+      // 4.4.4 — Critical is its own band on the chart, not folded into High. A manager reading
+      // "three High" when one of them is a snake indoors has been told the wrong thing.
+      [PriorityTier.Critical]: 0,
       [PriorityTier.High]: 0,
       [PriorityTier.Medium]: 0,
       [PriorityTier.Low]: 0,

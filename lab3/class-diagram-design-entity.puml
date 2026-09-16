@@ -1,4 +1,9 @@
 @startuml D-Fence-DesignEntity
+' v0.2 (2026-09-16) - cross-pest generalisation, REQUIREMENTS.md v0.9:
+'   +PestProfile, +ObservationRecord, +VectorControlOperator, +Referral;
+'   +PestType, +PestClass, +EvidenceTier, +LocationContext enumerations;
+'   Report gains pestType / locationContext / injuryReported;
+'   WorkOrder gains pestType; PriorityTier gains Critical.
 ' D-Fence — Design class model, entity and persistence layers (Lab 3 deliverable 2, part 1b)
 ' Transformed from lab2/class-diagram-entity.puml. The 23 analysis entities keep their names;
 ' what is added here is types, visibility, operations, container classes and the persistence
@@ -71,14 +76,21 @@ package "Entity — domain model" #F7F7F7 {
   class PriorityScore <<entity>> {
     + id : Uuid
     + clusterId : Uuid
+    + localityId : Uuid
+    + pestType : PestType
     + computedAt : Date
+    + urgency : number
+    + severityMultiplier : number
     + score : number
     + tier : PriorityTier
+    + evidenceTier : EvidenceTier
+    + overrideRuleName : string
     + isDegraded : boolean
     + excludedDrivers : Driver[]
     + rank : number
     + breakdown() : DriverContribution[]
     + explain() : string
+    + isCritical() : boolean
   }
 
   class DriverContribution <<entity>> {
@@ -94,6 +106,9 @@ package "Entity — domain model" #F7F7F7 {
     + reporterId : Uuid
     + point : GeoPoint
     + type : ReportType
+    + pestType : PestType
+    + locationContext : LocationContext
+    + injuryReported : boolean
     + description : string
     + clusterId : Uuid
     + status : ReportStatus
@@ -108,6 +123,7 @@ package "Entity — domain model" #F7F7F7 {
   class WorkOrder <<entity>> {
     + id : Uuid
     + clusterId : Uuid
+    + pestType : PestType
     + assigneeId : Uuid
     + sourceReportId : Uuid
     + taskType : TaskType
@@ -151,6 +167,54 @@ package "Entity — domain model" #F7F7F7 {
     + occurredAt : Date
   }
 
+  class PestProfile <<entity>> {
+    + pestType : PestType
+    + pestClass : PestClass
+    + evidenceTier : EvidenceTier
+    + severityMultiplier : number
+    + driverWeights : Map<Driver, number>
+    + dispatchAuthority : string
+    + authorityContactNumber : string
+    + observationTaxonId : number
+    + drivers() : Driver[]
+    + weightsSumToOne() : boolean
+    + isReferrable() : boolean
+  }
+
+  class ObservationRecord <<entity>> {
+    + observationId : string
+    + pestType : PestType
+    + observedOn : IsoDate
+    + point : GeoPoint
+    + positionalAccuracy : number
+    + qualityGrade : string
+    + localityId : Uuid
+    + retrievedAt : Date
+    + isWithin(days : number, now : Date) : boolean
+  }
+
+  class VectorControlOperator <<entity>> {
+    + companyName : string
+    + blockOrHouseNo : string
+    + streetName : string
+    + postalCode : string
+    + telephoneNo : string
+    + point : GeoPoint
+    + isGeocoded() : boolean
+  }
+
+  class Referral <<entity>> {
+    + id : Uuid
+    + reportId : Uuid
+    + destinationAuthority : string
+    + referredAt : Date
+    + referredBy : Uuid
+    + reason : string
+    + outcome : string
+    + outcomeRecordedAt : Date
+    + isClosed() : boolean
+  }
+
   note bottom of Account
     Supabase Auth owns the credential: there is no
     passwordHash here. 2.1.7 and 10.3.1 are still met —
@@ -160,6 +224,37 @@ package "Entity — domain model" #F7F7F7 {
     failedAttempts and lockedUntil stay ours, because
     2.1.10 is specified more precisely than any provider
     setting expresses.
+  end note
+
+  note bottom of PestProfile
+    **PestProfile is configuration, not user data** (4.2.2,
+    10.6.2). It is an entity because it is read at scoring
+    time like any other, but it is loaded from
+    config/pest-profiles.default.json and never written by
+    a use case. 4.2.7 refuses a catalogue in which no pest
+    carries severityMultiplier 1.0 — the multipliers are
+    normalised against the most severe pest, and the tier
+    thresholds in 4.1.8 mean what they meant in v0.8 only
+    while that holds.
+  end note
+
+  note bottom of ObservationRecord
+    **Not a Report.** A Report has a reporter, a status and
+    accountability; an observation has none of the three. It
+    is a naturalist's sighting retrieved under 1.5, and
+    4.1.26 forbids labelling it as pest pressure anywhere it
+    is shown. Records whose supplier obscured the
+    coordinates are never stored (1.5.6) — obscuring
+    randomises the point within roughly a 22 km box, so it
+    cannot be attributed to a locality at all.
+  end note
+
+  note bottom of Referral
+    **A referral writes no TreatmentRecord and no WorkOrder**
+    (8.6.10, 8.6.11). The locality was not treated. Recording
+    treatment recency the system did not earn would corrupt
+    the 4.1.17 feedback loop, which is the one thing that
+    makes a score fall after work is done.
   end note
 
   note bottom of WorkOrder
@@ -240,6 +335,18 @@ package "Persistence — repositories (heuristics 6 and 7)" #F7FAFD {
   class TreatmentRecordRepository
   class IngestionRunRepository
   class AuditRecordRepository
+  class ObservationRepository {
+    + upsertBatch(batch : ObservationRecord[]) : Promise<number>
+    + countByLocality(pest : PestType, localityId : Uuid, days : number) : Promise<number>
+  }
+  class ReferralRepository {
+    + findByReport(id : Uuid) : Promise<Referral>
+    + findOpen() : Promise<Referral[]>
+  }
+  class OperatorRepository {
+    + findAll() : Promise<VectorControlOperator[]>
+    + nearestTo(p : GeoPoint) : Promise<number>
+  }
 
   Repository <|.. ClusterRepository
   Repository <|.. ReportRepository
@@ -251,6 +358,9 @@ package "Persistence — repositories (heuristics 6 and 7)" #F7FAFD {
   Repository <|.. TreatmentRecordRepository
   Repository <|.. IngestionRunRepository
   Repository <|.. AuditRecordRepository
+  Repository <|.. ObservationRepository
+  Repository <|.. ReferralRepository
+  Repository <|.. OperatorRepository
 
   class Database <<infrastructure>> {
     + query(sql : string, params : unknown[]) : Promise<Row[]>
@@ -259,6 +369,8 @@ package "Persistence — repositories (heuristics 6 and 7)" #F7FAFD {
   ClusterRepository --> Database
   ReportRepository --> Database
   WorkOrderRepository --> Database
+  ObservationRepository --> Database
+  ReferralRepository --> Database
 }
 
 Account "1" -- "0..5" SavedLocation
@@ -269,7 +381,15 @@ Cluster "1" -- "0..*" PriorityScore
 Cluster "1" -- "0..*" Report
 Cluster "1" -- "0..*" WorkOrder
 Cluster "1" -- "0..*" TreatmentRecord
-PriorityScore "1" *-- "1..7" DriverContribution
+PriorityScore "1" *-- "5..7" DriverContribution
+PriorityScore "0..*" -- "1" PestProfile : scored under >
+Report "0..*" -- "1" PestProfile
+Report "1" -- "0..1" Referral
+WorkOrder "0..*" -- "1" PestProfile
+ObservationRecord "0..*" -- "1" PestProfile
+ObservationRecord *-- GeoPoint
+VectorControlOperator *-- GeoPoint
+Account "1" -- "0..*" Referral : referred by >
 Report "0..*" -- "0..1" WorkOrder : actioned by >
 WorkOrder "0..*" -- "0..1" Report : raised from >
 WorkOrder "1" -- "0..1" TreatmentRecord
@@ -279,6 +399,15 @@ Cluster *-- Polygon
 Cluster *-- PremisesMix
 SavedLocation *-- GeoPoint
 Report *-- GeoPoint
+
+note bottom of PriorityScore
+  **5..7, not 1..7** (v0.9). A score carries one contribution
+  per driver its evidence tier allows: seven for tier A, six
+  for tier B, five for tier C (4.3.4 to 4.3.6). The lower
+  bound is a requirement, not a convenience — 4.3.10 says a
+  tier C pest scores with no external source at all, and five
+  is what remains when there is none.
+end note
 
 note top of Repository
   **Repository.** One per aggregate root. The rest of the

@@ -1,9 +1,17 @@
 @startuml D-Fence-UseCases
-' D-Fence - Use Case Diagram (Lab 2, v0.2)
+' D-Fence - Use Case Diagram (Lab 2, v0.3)
 ' SC2006/CZ2006 Lab 2 deliverable 1. Source of truth for the diagram image.
 ' v0.2 changes: +1.5 Sign Out, +2.4 View Cluster Map, +4.4 Notify Crew Member;
 ' 6.7 re-modelled as a direct association (was <<extend>> of 6.6);
 ' 3.4 and 6.8 now include 4.3. See ../lab1/submission/AI-CRITIQUE.md section 6.
+' v0.3 (2026-09-16) - cross-pest generalisation, REQUIREMENTS.md v0.9:
+'   +actor AVS (A6 External Dispatch Authority), +actor Observation Data Service,
+'   +3.5 Classify Pest Type, +5.5 Filter Ranking by Pest Type,
+'   +6.10 Refer Case to External Authority, +7.8 Ingest Wildlife Observations,
+'   +7.9 Load Operator Registry, +7.10 Evaluate Critical Override,
+'   +8.5 Apply Pest Severity Profile;
+'   3.1 renamed Submit Breeding-Site Report -> Submit Pest Report (5.1.15).
+' 48 use cases.
 ' Render: paste into https://www.plantuml.com/plantuml, or use the PlantUML
 ' extension in VS Code / IntelliJ, or `plantuml use-case-diagram.puml`.
 
@@ -22,6 +30,8 @@ actor "OneMap" as ONEMAP
 actor "NEA Data Service" as NEA
 actor "Weather Data Service" as WX
 actor "Telegram Service" as TG
+actor "Observation Data Service" as INAT
+actor "Wildlife Authority (AVS)" as AVS
 
 ' Actor generalization: the three human roles are all registered users
 RES --|> RU
@@ -44,10 +54,11 @@ rectangle "D-Fence" {
   usecase "2.4 View Cluster Map" as UC24
 
   ' ---------- 3. Reporting ----------
-  usecase "3.1 Submit Breeding-Site Report" as UC31
+  usecase "3.1 Submit Pest Report" as UC31
   usecase "3.2 Confirm Existing Report" as UC32
   usecase "3.3 Track Own Reports" as UC33
   usecase "3.4 Moderate Report" as UC34
+  usecase "3.5 Classify Pest Type" as UC35
 
   ' ---------- 4. Alerts ----------
   usecase "4.1 Link Telegram Chat" as UC41
@@ -60,6 +71,7 @@ rectangle "D-Fence" {
   usecase "5.2 Review Priority Ranking" as UC52
   usecase "5.3 Inspect Cluster Detail" as UC53
   usecase "5.4 Monitor Data Source Health" as UC54
+  usecase "5.5 Filter Ranking by Pest Type" as UC55
 
   ' ---------- 6. Dispatch and field work ----------
   usecase "6.1 Generate Daily Dispatch List" as UC61
@@ -71,6 +83,7 @@ rectangle "D-Fence" {
   usecase "6.7 Raise Issue on Job" as UC67
   usecase "6.8 Verify Completed Work" as UC68
   usecase "6.9 Cancel Work Order" as UC69
+  usecase "6.10 Refer Case to External Authority" as UC610
 
   ' ---------- 7. Automated system behaviour ----------
   usecase "7.1 Ingest Cluster Data" as UC71
@@ -80,12 +93,16 @@ rectangle "D-Fence" {
   usecase "7.5 Compute Priority Scores" as UC75
   usecase "7.6 Evaluate Alert Triggers" as UC76
   usecase "7.7 Refresh Geocoding Token" as UC77
+  usecase "7.8 Ingest Wildlife Observations" as UC78
+  usecase "7.9 Load Operator Registry" as UC79
+  usecase "7.10 Evaluate Critical Override" as UC710
 
   ' ---------- 8. Shared, included by others ----------
   usecase "8.1 Geocode Address" as UC81
   usecase "8.2 View Driver Breakdown" as UC82
   usecase "8.3 Link Verified Reports" as UC83
   usecase "8.4 Record Treatment" as UC84
+  usecase "8.5 Apply Pest Severity Profile" as UC85
 }
 
 ' ---------- Actor associations ----------
@@ -115,6 +132,8 @@ OM  -- UC62
 OM  -- UC63
 OM  -- UC68
 OM  -- UC69
+OM  -- UC55
+OM  -- UC610
 
 CCM -- UC64
 CCM -- UC65
@@ -127,11 +146,16 @@ SCH -- UC74
 SCH -- UC75
 SCH -- UC76
 SCH -- UC77
+SCH -- UC78
+SCH -- UC79
 
 ' ---------- Secondary / external actors ----------
 UC81 -- ONEMAP
 UC77 -- ONEMAP
 UC71 -- NEA
+UC78 -- INAT
+UC79 -- NEA
+UC610 -- AVS
 UC73 -- WX
 UC74 -- WX
 UC43 -- TG
@@ -153,14 +177,40 @@ UC68 ..> UC43 : <<include>>
 UC63 ..> UC44 : <<include>>
 UC68 ..> UC44 : <<include>>
 UC61 ..> UC62 : <<include>>
+UC31 ..> UC35 : <<include>>
+UC75 ..> UC85 : <<include>>
+UC75 ..> UC710 : <<include>>
+UC79 ..> UC81 : <<include>>
+UC52 ..> UC55 : <<include>>
+UC610 ..> UC43 : <<include>>
 
 ' ---------- Extend relationships ----------
 UC32 ..> UC31 : <<extend>>\n(duplicate detected)
+UC610 ..> UC34 : <<extend>>\n(pest class is Wildlife)
 
 note right of UC75
   Triggered by 7.1 completing
   and by 6.8 verifying a work order.
   Requirements 4.1.1-4.1.2, 8.5.3.
+end note
+
+note right of UC85
+  Priority score = severity multiplier
+  x urgency. Requirements 4.2.1-4.2.8;
+  4.2.5 holds the mosquito score
+  identical to v0.8.
+end note
+
+note bottom of UC710
+  A linear weighted sum cannot express
+  acute life-safety, so it is not asked to.
+  Requirements 4.4.1-4.4.9.
+end note
+
+note left of UC610
+  The system declines work it has no
+  authority to do and names who does.
+  Requirements 8.1.14, 8.6.1-8.6.11.
 end note
 
 note bottom of UC84

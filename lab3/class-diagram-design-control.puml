@@ -2,6 +2,12 @@
 ' D-Fence — Design class model, control layer (Lab 3 deliverable 2, part 1a)
 ' Transformed from lab2/class-diagram-boundary-control.puml by the Fox pp. 341-345 heuristics.
 ' Operation signatures are TypeScript. Visibility: + public, - private, # protected.
+' v0.2 (2026-09-16) - cross-pest generalisation, REQUIREMENTS.md v0.9:
+'   PriorityScoringEngine split into UrgencyCalculator (the weighted sum, 4.1.7)
+'   and PestPriorityCalculator (severity x urgency, 4.2.4);
+'   +CriticalOverrideEvaluator (4.4), +ObservationIngestionJob (1.5),
+'   +OperatorRegistryLoader (1.6), +ReferralController (8.6).
+'   No new NormalisationStrategy: all four existing strategies are reused.
 
 skinparam shadowing false
 skinparam classAttributeIconSize 0
@@ -59,19 +65,48 @@ package "Access control" #FAF7FD {
 }
 
 package "Scoring" #FAF7FD {
-  class PriorityScoringEngine <<control>> {
+  class PestPriorityCalculator <<control>> {
+    - urgency : UrgencyCalculator
+    - override : CriticalOverrideEvaluator
+    - profiles : PestProfileStore
+    - scores : PriorityScoreStore
+    + computeScores(subjects : ScoredSubject[], inputs : Map<SubjectKey, DriverInputs>, now : Date) : Promise<PriorityRanking>
+    + scoreOne(subject : ScoredSubject, inputs : DriverInputs, ctx : NormalisationContext) : PriorityScore
+    - applySeverity(urgency : number, profile : PestProfile) : number
+    + assignTier(score : number, overridden : boolean) : PriorityTier
+  }
+  class UrgencyCalculator <<control>> {
     - strategies : Map<Driver, NormalisationStrategy>
     - config : ConfigSet
-    - scores : PriorityScoreStore
     - staleDrivers : Set<Driver>
     + markStale(drivers : Driver[]) : void
-    + computeScores(clusters : Cluster[], inputs : Map<Uuid, DriverInputs>, now : Date) : Promise<ClusterRanking>
-    + scoreOne(cluster : Cluster, inputs : DriverInputs, ctx : NormalisationContext) : PriorityScore
-    - buildBreakdown(cluster : Cluster, inputs : DriverInputs, ctx : NormalisationContext) : DriverContribution[]
+    + computeUrgency(subject : ScoredSubject, inputs : DriverInputs, ctx : NormalisationContext) : number
+    - buildBreakdown(subject : ScoredSubject, inputs : DriverInputs, ctx : NormalisationContext) : DriverContribution[]
     - applyWeights(contributions : DriverContribution[]) : number
-    + assignTier(score : number) : PriorityTier
+    - driversFor(tier : EvidenceTier) : Driver[]
     - degradeForMissingDrivers(drivers : Driver[]) : Driver[]
+    - renormaliseWeights(available : Driver[]) : Map<Driver, number>
   }
+  class CriticalOverrideEvaluator <<control>> {
+    - rules : CriticalOverrideRule[]
+    + evaluate(subject : ScoredSubject, reports : Report[]) : CriticalOverrideRule | null
+    + isCritical(subject : ScoredSubject, reports : Report[]) : boolean
+  }
+  class CriticalOverrideRule <<value>> {
+    + name : string
+    + pestTypes : PestType[]
+    + requiresIndoor : boolean
+    + requiresInjury : boolean
+    + matches(report : Report) : boolean
+  }
+  class ScoredSubject <<value>> {
+    + localityId : Uuid
+    + pestType : PestType
+    + clusterId : Uuid | null
+  }
+  PestPriorityCalculator *-- UrgencyCalculator
+  PestPriorityCalculator *-- CriticalOverrideEvaluator
+  CriticalOverrideEvaluator o-- CriticalOverrideRule
   interface NormalisationStrategy <<interface>> {
     + normalise(raw : number, ctx : NormalisationContext) : number
     + driver() : Driver
@@ -100,9 +135,14 @@ package "Scoring" #FAF7FD {
   NormalisationStrategy <|.. CappedLinearNormalisation
   NormalisationStrategy <|.. RecencyDecayNormalisation
   NormalisationStrategy <|.. PremisesMixNormalisation
-  NormalisationFactory ..> NormalisationStrategy : builds all 7
+  NormalisationFactory ..> NormalisationStrategy : builds all 11 drivers
+  note right of NormalisationFactory
+    The four tier B/C drivers (4.1.22-4.1.25) all reuse
+    CappedLinearNormalisation or LogScaleNormalisation.
+    The generalisation adds NO new strategy class.
+  end note
 
-  class ClusterRanking <<container>> {
+  class PriorityRanking <<container>> {
     - ordered : PriorityScore[]
     - keys : Map<Uuid, RankingKey>
     + add(score : PriorityScore, key : RankingKey) : void
@@ -112,20 +152,24 @@ package "Scoring" #FAF7FD {
     + size() : number
   }
   class RankingKey <<value>> {
-    + caseSize : number
+    + severityMultiplier : number
+    + verifiedOpenReportCount : number
     + locality : string
   }
-  ClusterRanking o--> "0..*" RankingKey
-  note bottom of ClusterRanking
-    4.1.14 orders on three keys: score descending,
-    then case size, then locality name. The last two
-    live on Cluster, not on PriorityScore, so the
-    engine supplies them rather than the container
-    reaching back into a repository.
+  PriorityRanking o--> "0..*" RankingKey
+  note bottom of PriorityRanking
+    4.1.14 orders on four keys: score descending, then
+    severity multiplier, then verified open report count,
+    then locality name. The v0.8 tie-break used case size,
+    which exists for the mosquito alone and so could not
+    order a mixed-pest queue. The keys live outside
+    PriorityScore, so the calculator supplies them rather
+    than the container reaching back into a repository.
     rank() is a Lab 4 basis-path subject.
   end note
-  PriorityScoringEngine o--> "1..7" NormalisationStrategy : strategies
-  PriorityScoringEngine --> ClusterRanking : produces
+  UrgencyCalculator o--> "1..*" NormalisationStrategy : strategies
+  PestPriorityCalculator --> PriorityRanking : produces
+  PestPriorityCalculator --> PestProfileStore : reads profiles
 }
 
 package "Ingestion" #FAF7FD {
@@ -157,9 +201,30 @@ package "Ingestion" #FAF7FD {
   ClusterIngestionJob ..> ClusterFeedParser : parses with
   class RainfallIngestionJob
   class ForecastIngestionJob
+  class ObservationIngestionJob {
+    - observations : ObservationStore
+    - profiles : PestProfileStore
+    + tiersServed() : EvidenceTier[]
+    - rejectObscured(raw : RawObservation) : boolean
+    - rejectImprecise(raw : RawObservation, maxMetres : number) : boolean
+    - bindLocality(lat : number, lon : number) : Uuid | null
+  }
+  class OperatorRegistryLoader <<control>> {
+    - operators : OperatorStore
+    - geocoder : GeocodingController
+    + load() : Promise<number>
+    + nearestOperatorDistance(localityId : Uuid) : Promise<number>
+    - geocodePostalCode(postalCode : string) : Promise<GeoPoint | null>
+    - isSixDigit(postalCode : string) : boolean
+  }
   AbstractIngestionJob <|-- ClusterIngestionJob
   AbstractIngestionJob <|-- RainfallIngestionJob
   AbstractIngestionJob <|-- ForecastIngestionJob
+  AbstractIngestionJob <|-- ObservationIngestionJob
+  note bottom of OperatorRegistryLoader
+    Static reference data, loaded once and cached
+    (1.6.1-1.6.7). Never presented as a live feed.
+  end note
 
   class IngestionController <<control>> {
     - jobs : Map<SourceKind, AbstractIngestionJob>
@@ -189,7 +254,7 @@ package "Domain events" #FAF7FD {
     - applyDailyCap(accountId : Uuid, candidates : Alert[]) : Alert[]
   }
   DomainEventSubscriber <|.. AlertTriggerEvaluator
-  DomainEventSubscriber <|.. PriorityScoringEngine
+  DomainEventSubscriber <|.. PestPriorityCalculator
   IngestionController --> DomainEventPublisher : publishes IngestionCompleted
   DomainEventPublisher --> DomainEventSubscriber
 }
@@ -200,7 +265,7 @@ package "Work-order lifecycle" #FAF7FD {
     - woRepo : WorkOrderRepository
     - treatmentRepo : TreatmentRecordRepository
     - notifier : NotificationController
-    - scoring : PriorityScoringEngine
+    - scoring : PestPriorityCalculator
     + isTransitionPermitted(from : WorkOrderStatus, to : WorkOrderStatus, by : Role) : boolean
     + transition(id : Uuid, to : WorkOrderStatus, by : Principal) : Promise<WorkOrder>
     + accept(id : Uuid, by : Principal) : Promise<WorkOrder>
@@ -225,6 +290,20 @@ package "Work-order lifecycle" #FAF7FD {
     + requirement : string
     + assigneeOnly : boolean
   }
+  class ReferralController <<control>> {
+    - referrals : ReferralStore
+    - profiles : PestProfileStore
+    - publisher : DomainEventPublisher
+    + refer(reportId : Uuid, actor : Principal, reason : string) : Promise<Referral>
+    + recordOutcome(referralId : Uuid, outcome : string, actor : Principal) : Promise<Referral>
+    + destinationFor(pestType : PestType) : DispatchAuthority
+    - assertWildlife(report : Report) : void
+  }
+  note right of ReferralController
+    Writes NO TreatmentRecord (8.6.11) and dispatches
+    no crew (8.6.10): the locality was not treated.
+  end note
+
   class DispatchController <<control>> {
     - lifecycle : WorkOrderLifecycleController
     - woRepo : WorkOrderRepository

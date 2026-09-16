@@ -1,6 +1,13 @@
 /**
  * D-Fence — Report a Site screen (REQUIREMENTS.md 11.2.8).
- * Stereotype: <<boundary>>. Traces: 11.2.8, 5.1.1–5.1.6, 11.5.1–11.5.3, 11.6.x, 10.5.3.
+ * Stereotype: <<boundary>>. Traces: 11.2.8, 5.1.1–5.1.6, 5.1.15–5.1.17, 11.3.20, 11.5.1–11.5.3,
+ * 11.6.x, 10.5.3.
+ *
+ * **The pest comes first (11.3.20).** Nothing else on the form is active until one is chosen, and
+ * that is not a stylistic preference: the pest decides which later fields are mandatory (5.1.16),
+ * whether anyone from D-Fence will be sent at all (8.1.14), and who the resident should be calling
+ * instead. Asking for a description first and the pest last would collect the answer that changes
+ * the form after the form has been filled in.
  *
  * The character counter is present from the first keystroke rather than appearing at 500 (11.5.2).
  * A counter that materialises at the moment of failure is a reprimand; one that is always there is
@@ -13,11 +20,12 @@
  * is too large before uploading it over mobile data, and the server check exists because the client
  * one is advisory.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ApiError } from '../../lib/ApiClient';
 import { Field, field, FormField } from '../../components/Field';
 import { evaluate, formIsValid, maxLength, required } from '../../components/FieldValidation';
-import { ReportType } from '../../../../src/entity/enums';
+import { LocationContext, PestType, ReportType } from '../../../../src/entity/enums';
+import { link } from '../../components/Link';
 import { MAX_DESCRIPTION_CHARS } from '../../../../src/control/ReportController';
 import { MAX_PHOTOS_PER_REPORT, MAX_PHOTO_BYTES } from '../../../../src/entity/ReportPhoto';
 import { uploadPhoto } from '../../lib/PhotoUpload';
@@ -41,7 +49,27 @@ const TYPE_LABELS: Record<ReportType, string> = {
 
 const MEGABYTE = 1024 * 1024;
 
+/** One row of /api/pests. The class is what 5.1.16 and 8.1.14 both turn on. */
+interface PestRow {
+  pestType: string;
+  pestClass: string;
+  authority: string;
+  contactNumber: string;
+  referred: boolean;
+}
+
+/** 10.5.1 — the data dictionary's identifier, spaced for reading. Not renamed, only spaced. */
+function readable(pestType: string): string {
+  return pestType.replace(/([a-z])([A-Z])/g, '$1 $2');
+}
+
 export function ReportSiteScreen(props: ScreenProps): JSX.Element {
+  // 11.3.20 — no pest chosen yet. Empty rather than defaulted to Mosquito: a defaulted pest type
+  // is indistinguishable from a chosen one, and it decides who the case goes to.
+  const [pestType, setPestType] = useState<string>('');
+  const [locationContext, setLocationContext] = useState<LocationContext | ''>('');
+  const [injuryReported, setInjuryReported] = useState(false);
+  const [pests, setPests] = useState<PestRow[]>([]);
   const [type, setType] = useState<ReportType>(ReportType.StandingWater);
   const [description, setDescription] = useState<FormField>(field());
   const [latitude, setLatitude] = useState<FormField>(field());
@@ -51,6 +79,25 @@ export function ReportSiteScreen(props: ScreenProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  // The catalogue, for the labels and — the part that matters — the pest class. Failure is silent
+  // on purpose: a resident who cannot reach /api/pests can still file a report, they simply do not
+  // get the "AVS handles this" hint. Blocking the form on a reference lookup would be worse.
+  //
+  // A 200 carrying a body of the wrong shape is the same situation as a failure and is treated as
+  // one: a rejected promise is not the only way a reference lookup disappoints, and an unchecked
+  // `v.pests` here renders as a crash on the resident's screen rather than a missing hint.
+  useEffect(() => {
+    props.api
+      .get<{ pests?: PestRow[] }>('/api/pests')
+      .then((v) => setPests(Array.isArray(v?.pests) ? v.pests : []))
+      .catch(() => setPests([]));
+  }, [props.api]);
+
+  const chosen = pests.find((p) => p.pestType === pestType) ?? null;
+  const isWildlife = chosen?.pestClass === 'Wildlife';
+  /** 11.3.20 — everything after the pest is inert until one is chosen. */
+  const pestChosen = pestType !== '';
+
   const descriptionRules = [required('Description'), maxLength(MAX_DESCRIPTION_CHARS, '5.1.4')];
   // 5.1.2 — a report must carry a location. The Singapore bounds are the server's to enforce;
   // the rule here is only that a number was supplied at all.
@@ -59,11 +106,16 @@ export function ReportSiteScreen(props: ScreenProps): JSX.Element {
     { requirement: '5.1.2', check: (v: string) => (Number.isFinite(Number(v)) ? null : 'that is not a coordinate') },
   ];
 
-  const valid = formIsValid([
-    evaluate(description.value, descriptionRules),
-    evaluate(latitude.value, coordinateRules),
-    evaluate(longitude.value, coordinateRules),
-  ]);
+  const valid =
+    pestChosen &&
+    // 5.1.16 — the server refuses a wildlife report with no location context. Enforced here too so
+    // the resident is not refused after typing everything else.
+    (!isWildlife || locationContext !== '') &&
+    formIsValid([
+      evaluate(description.value, descriptionRules),
+      evaluate(latitude.value, coordinateRules),
+      evaluate(longitude.value, coordinateRules),
+    ]);
 
   /**
    * 5.1.5, 5.1.6 — refuse locally what the server would refuse, before it costs an upload; then
@@ -147,6 +199,9 @@ export function ReportSiteScreen(props: ScreenProps): JSX.Element {
         latitude: Number(latitude.value),
         longitude: Number(longitude.value),
         type,
+        pestType, // 5.1.15
+        ...(locationContext === '' ? {} : { locationContext }), // 5.1.16
+        ...(injuryReported ? { injuryReported: true } : {}), // 5.1.17
         description: description.value.trim(),
         photos,
       });
@@ -164,10 +219,82 @@ export function ReportSiteScreen(props: ScreenProps): JSX.Element {
 
   return (
     <section data-screen="ReportSite" data-requirement="11.2.8">
-      <h1>Report a site</h1>
+      <h1>Report a pest</h1>
       <form onSubmit={submit} noValidate>
+        {/* 5.1.15, 11.3.20 — first, and everything else waits on it. */}
+        <label htmlFor="pestType">What did you see?</label>
+        <select
+          id="pestType"
+          value={pestType}
+          onChange={(e) => {
+            setPestType(e.target.value);
+            setLocationContext('');
+          }}
+          data-part="pest-type"
+        >
+          <option value="">Choose a pest…</option>
+          {(pests.length > 0 ? pests.map((p) => p.pestType) : Object.values(PestType)).map((option) => (
+            <option key={option} value={option}>
+              {readable(option)}
+            </option>
+          ))}
+        </select>
+
+        {/* 8.1.14 in words, and before the form is filled in rather than after it is submitted.
+            11.2.27's screen is one click away, which is the dialog map's whoThisHandles transition. */}
+        {chosen?.referred === true ? (
+          <p data-part="authority" role="status">
+            {chosen.authority} handles {readable(chosen.pestType)}, not D-Fence. We will pass this to
+            them. If the animal is inside or someone is hurt, call{' '}
+            <a href={`tel:${chosen.contactNumber.replace(/\s/g, '')}`}>{chosen.contactNumber}</a>{' '}
+            first.{' '}
+            <a href="/pests" onClick={link(props, '/pests')}>
+              Who handles which pest
+            </a>
+          </p>
+        ) : null}
+
+        {/* 5.1.16 — mandatory for wildlife, because 4.4.7 raises an indoor sighting to Critical and
+            cannot do so from a value nobody supplied. Not shown for other pests: an unanswerable
+            question on a cockroach report is a question nobody answers accurately. */}
+        {isWildlife ? (
+          <fieldset data-part="location-context">
+            <legend>Where was the animal?</legend>
+            {Object.values(LocationContext).map((option) => (
+              <label key={option} htmlFor={`context-${option}`}>
+                <input
+                  id={`context-${option}`}
+                  type="radio"
+                  name="locationContext"
+                  value={option}
+                  checked={locationContext === option}
+                  onChange={() => setLocationContext(option)}
+                />{' '}
+                {option === LocationContext.Indoor ? 'Inside a building' : 'Outdoors'}
+              </label>
+            ))}
+          </fieldset>
+        ) : null}
+
+        {/* 5.1.17 — optional on any report, and 4.4.8 turns on it. */}
+        <label htmlFor="injury">
+          <input
+            id="injury"
+            type="checkbox"
+            checked={injuryReported}
+            onChange={(e) => setInjuryReported(e.target.checked)}
+            disabled={!pestChosen}
+          />{' '}
+          Someone was hurt
+        </label>
+
         <label htmlFor="type">What did you find?</label>
-        <select id="type" value={type} onChange={(e) => setType(e.target.value as ReportType)}>
+        <select
+          id="type"
+          value={type}
+          onChange={(e) => setType(e.target.value as ReportType)}
+          disabled={!pestChosen}
+        >
           {Object.values(ReportType).map((option) => (
             <option key={option} value={option}>
               {TYPE_LABELS[option]}

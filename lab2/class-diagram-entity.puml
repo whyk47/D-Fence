@@ -3,6 +3,13 @@
 ' SC2006/CZ2006 Lab 2 deliverable 3. Derived from ../lab1/submission/DATA-DICTIONARY.md.
 ' Stereotype <<entity>> per Bruegge ch. 5. Design detail (visibility, keys, methods)
 ' belongs to the Lab 3 design class model, not here.
+' v0.3 (2026-09-16) - cross-pest generalisation, REQUIREMENTS.md v0.9:
+'   +PestProfile, +ObservationRecord, +VectorControlOperator, +Referral;
+'   +PestType, +PestClass, +EvidenceTier enumerations;
+'   Report gains pestType, locationContext, injuryReported (5.1.15-5.1.17);
+'   WorkOrder gains pestType (8.1.16); PriorityTier gains Critical (4.4.3);
+'   Driver gains the four tier B/C drivers (4.1.22-4.1.25).
+'   27 entity classes, 16 enumerations.
 
 skinparam packageStyle rectangle
 skinparam shadowing false
@@ -169,6 +176,7 @@ package "Scoring" {
     contribution
   }
   enum PriorityTier <<enumeration>> {
+    Critical
     High
     Medium
     Low
@@ -181,6 +189,55 @@ package "Scoring" {
     VerifiedOpenReportCount
     DaysSinceLastTreatment
     PremisesMix
+    ReportVelocity
+    CorroborationDensity
+    ExternalObservationDensity
+    ResponseCapacityDeficit
+  }
+  class PestProfile <<entity>> {
+    pestType : PestType
+    pestClass : PestClass
+    evidenceTier : EvidenceTier
+    severityMultiplier
+    driverWeights
+    dispatchAuthority
+    observationTaxonId
+    authorityContactNumber
+  }
+  enum PestType <<enumeration>> {
+    Mosquito
+    Rat
+    Cockroach
+    Fly
+    BedBug
+    Flea
+    Termite
+    Ant
+    Snake
+    WildBoar
+    Macaque
+    MonitorLizard
+    Otter
+    Civet
+    Bat
+    Pangolin
+    Crocodile
+    HouseCrow
+    Pigeon
+    JavanMyna
+    BeeWasp
+    Other
+  }
+  enum PestClass <<enumeration>> {
+    VectorBorne
+    Structural
+    Nuisance
+    Wildlife
+  }
+  enum EvidenceTier <<enumeration>> {
+    A
+    B
+    C
   }
 }
 
@@ -188,7 +245,10 @@ package "Community reporting" {
   class Report <<entity>> {
     latitude
     longitude
+    pestType : PestType
     type : ReportType
+    locationContext : LocationContext
+    injuryReported
     description
     localityBinding
     status : ReportStatus
@@ -218,10 +278,45 @@ package "Community reporting" {
     Actioned
     Closed
   }
+  enum LocationContext <<enumeration>> {
+    Indoor
+    Outdoor
+  }
+}
+
+package "Observation and referral" {
+  class ObservationRecord <<entity>> {
+    observationId
+    pestType : PestType
+    observedOn
+    latitude
+    longitude
+    positionalAccuracy
+    qualityGrade
+    localityBinding
+    retrievedAt
+  }
+  class VectorControlOperator <<entity>> {
+    companyName
+    blockOrHouseNo
+    streetName
+    postalCode
+    telephoneNo
+    latitude
+    longitude
+  }
+  class Referral <<entity>> {
+    destinationAuthority
+    referredAt
+    reason
+    outcome
+    outcomeRecordedAt
+  }
 }
 
 package "Dispatch and field work" {
   class WorkOrder <<entity>> {
+    pestType : PestType
     taskType : TaskType
     scheduledDate
     priority : PriorityTier
@@ -310,11 +405,16 @@ end note
 ClusterRainfall "1" -- "3" RainfallStation : nearest >
 RainfallStation "1" -- "0..*" RainfallReading : reports >
 
-PriorityScore "1" *-- "1..7" DriverContribution : breakdown
+PriorityScore "1" *-- "5..7" DriverContribution : breakdown
+PriorityScore "0..*" -- "1" PestProfile : scored under >
+PestProfile "1" -- "0..*" ObservationRecord : observed as >
+PestProfile "1" -- "0..*" Report : classified by >
+PestProfile "1" -- "0..*" WorkOrder : classified by >
 
 Report "1" *-- "0..3" ReportPhoto : evidence
 Report "1" -- "0..*" Corroboration : corroborated by >
 Report "0..*" -- "0..1" WorkOrder : actioned by >
+Report "1" -- "0..1" Referral : referred by >
 WorkOrder "0..*" -- "0..1" Report : raised from >
 
 WorkOrder "1" -- "0..1" CompletionEvidence : closed by >
@@ -330,6 +430,35 @@ note bottom of Account
   One role per account (2.2.1). The real NEA / town-council
   split of task types is a recorded simplification, not an
   omission: one Operations Manager, one Cleaning Crew.
+end note
+
+note right of PestProfile
+  The configuration record that generalises the scorer:
+  score = severityMultiplier x urgency (4.2.4). The mosquito
+  profile carries severityMultiplier 1.000 and the tier A
+  weight set, which is what holds every dengue score
+  identical to v0.8 (4.2.5).
+end note
+
+note bottom of ObservationRecord
+  A third-party sighting, NOT a resident complaint. Obscured
+  coordinates and accuracy worse than 500 m are rejected at
+  ingestion (1.5.6, 1.5.7) and the driver is labelled
+  "recent wildlife activity", never "pest pressure" (4.1.26).
+end note
+
+note bottom of VectorControlOperator
+  290 NEA-registered operators, geocoded from postal code
+  (1.6.1-1.6.8). These are REGISTERED OFFICES, so the driver
+  they feed measures response capacity, not demand - which is
+  why 4.1.25 carries weight 0.05 and no more.
+end note
+
+note bottom of Referral
+  Written when the system declines work it has no authority
+  to do (8.1.14, 8.6.1). It writes NO TreatmentRecord: the
+  locality was not treated, and pretending otherwise would
+  corrupt the 4.1.17 feedback loop (8.6.11).
 end note
 
 @enduml

@@ -1,6 +1,6 @@
 /**
  * D-Fence — the route table the application actually serves.
- * Traces: 11.1.1–11.1.8, 11.2.1–11.2.25, 11.3.2, 11.3.8, 2.3.3–2.3.5.
+ * Traces: 11.1.1–11.1.8, 11.2.1–11.2.28, 11.3.2, 11.3.8, 11.3.21, 2.3.3–2.3.5.
  *
  * This is the list `DialogMap.conformanceProblems` is checked against. It is written by hand rather
  * than generated from the diagram on purpose: generated code cannot disagree with its source, and
@@ -45,6 +45,8 @@ export const ROUTES: readonly RouteDefinition[] = [
   { screenId: 'MyReports', path: '/reports', requirement: '11.2.9', roles: [Role.Resident], title: 'My reports' },
   { screenId: 'ReportDetail', path: '/reports/:id', requirement: '11.2.10', roles: [Role.Resident], title: 'Report' },
   { screenId: 'AlertSettings', path: '/alerts', requirement: '11.2.11', roles: [Role.Resident], title: 'Alerts' },
+  // 11.2.27 — a resident who has just seen a snake needs the AVS number faster than a report form.
+  { screenId: 'PestReference', path: '/pests', requirement: '11.2.27', roles: [Role.Resident], title: 'Pests and who handles them' },
 
   // 2.3.4 — the manager's screens. 2.3.3 denies every one of them to a Resident.
   { screenId: 'OpsDashboard', path: '/ops', requirement: '11.2.12', roles: [Role.OperationsManager], title: 'Operations' },
@@ -58,6 +60,8 @@ export const ROUTES: readonly RouteDefinition[] = [
   { screenId: 'StaffAccounts', path: '/ops/staff', requirement: '11.2.22', roles: [Role.OperationsManager], title: 'Staff' },
   { screenId: 'DataSources', path: '/ops/sources', requirement: '11.2.23', roles: [Role.OperationsManager], title: 'Data sources' },
   { screenId: 'Analytics', path: '/ops/analytics', requirement: '11.2.26', roles: [Role.OperationsManager], title: 'Analytics' },
+  // 11.2.28, 11.3.21 — reached from Report Review when the pest class is Wildlife (8.1.14).
+  { screenId: 'Referral', path: '/ops/referrals/:id', requirement: '11.2.28', roles: [Role.OperationsManager], title: 'Refer' },
 
   // 2.3.5 — the crew member's three screens, and nothing else.
   { screenId: 'MyJobs', path: '/crew', requirement: '11.2.19', roles: [Role.CleaningCrew], title: 'My jobs' },

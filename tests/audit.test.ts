@@ -34,7 +34,7 @@ import { AuditController } from '../src/control/AuditController';
 import { Principal, SYSTEM_ACTOR_ID } from '../src/control/Principal';
 import { Cluster } from '../src/entity/Cluster';
 import { GeoPoint, Polygon, PremisesMix } from '../src/entity/valueTypes';
-import { ChangeClass, ReportType, Role, TaskType, WorkOrderStatus } from '../src/entity/enums';
+import { ChangeClass, PestType, ReportType, Role, TaskType, WorkOrderStatus } from '../src/entity/enums';
 
 const MANAGER = new Principal('manager-1', Role.OperationsManager, 'session-m');
 const CREW = new Principal('crew-1', Role.CleaningCrew, 'session-c');
@@ -119,6 +119,7 @@ async function submitReport(f: Awaited<ReturnType<typeof fixture>>): Promise<str
   const report = await f.reports.submitReport(
     {
       type: ReportType.StandingWater,
+      pestType: PestType.Mosquito,
       description: 'Water standing in an uncovered drum behind the void deck',
       point: new GeoPoint(1.355, 103.845),
     },

@@ -1,9 +1,14 @@
 # D-Fence — Atomised Software Requirements
 
-Version 0.8 · drafted 2026-09-02, revised 2026-09-06 · status: DRAFT for team review
+Version 0.9 · drafted 2026-09-02, revised 2026-09-16 · status: DRAFT for team review
 Revised after adversarial review; findings and dispositions are recorded in §14.
-Project: NTU SC2006/CZ2006 team project (dengue sanitisation prioritiser)
-Working product name is a placeholder.
+Project: NTU SC2006/CZ2006 team project (municipal pest prioritiser)
+Product name: D-Fence.
+
+**v0.9 widens the product from dengue to all common household pests and all wild animals requiring
+NEA or AVS intervention**, on the TA's suggestion and Yen Kit's decision of 2026-09-16. The scoring
+model is generalised to `pest priority x urgency` and specified in `PEST-PRIORITY-MODEL.md`. The
+dengue behaviour is unchanged and numerically identical — see 4.2.5.
 
 ## How to read this document
 
@@ -25,14 +30,24 @@ these numbers.
 
 ## Scope
 
-The system ingests live dengue-cluster, rainfall and forecast data for Singapore, computes a cleaning
-and treatment **priority score** per cluster, lets residents report breeding sites that change that
-score, gives an operations manager a **dashboard** to see the ranking and **dispatch** cleaning crews
-against it, and lets crews close work orders in the field — which lowers the treated cluster's future
-score. The feedback loop is the product.
+The system ingests live dengue-cluster, rainfall, forecast and wildlife-observation data for
+Singapore, computes a cleaning and treatment **priority score** per locality **and pest type**, lets
+residents report pest sightings and breeding sites that change that score, gives an operations
+manager a **dashboard** to see one ranking across all pests and **dispatch** cleaning crews against
+it, refers cases outside its own authority to the responsible agency, and lets crews close work
+orders in the field — which lowers the treated locality's future score. The feedback loop is the
+product.
+
+**Pest coverage.** The system covers the five vectors NEA names under pest control (mosquitoes, rats
+and rat fleas, cockroaches, flies, bed bugs), the two household pests handled under the vector
+control operator regime (termites, ants), and the wild animals AVS publishes guidance for (snakes,
+wild boars, macaques, monitor lizards, otters, civets, bats, pangolins, estuarine crocodiles, house
+crows, pigeons, Javan mynas, bees and wasps). The enumeration is fixed by 5.1.15.
 
 Out of scope for this version: clinical or case-level data, Singpass/Myinfo integration, payments, a
-public API for third parties, non-Singapore geographies.
+public API for third parties, non-Singapore geographies, and **marine species** — AVS lists box
+jellyfish and hawksbill turtles, which are excluded because they are not municipal-estate pests and
+the system has no locality model for coastal waters.
 
 ## Actors
 
@@ -42,7 +57,8 @@ public API for third parties, non-Singapore geographies.
 | A2 | Operations Manager | Town council / environmental services planner. Reads the dashboard, creates and assigns work orders, moderates reports. |
 | A3 | Cleaning Crew Member | Field officer. Receives assigned work orders, records completion with evidence. |
 | A4 | Scheduler | Internal time-triggered actor. Drives ingestion and scoring cycles. |
-| A5 | External Data Provider | NEA dengue clusters, rainfall and forecast APIs, OneMap, Telegram Bot API. |
+| A5 | External Data Provider | NEA dengue clusters, rainfall and forecast APIs, NEA vector control operator registry, iNaturalist observation API, OneMap, Telegram Bot API. |
+| A6 | External Dispatch Authority | An agency outside the system's own dispatch chain that receives referred cases — in this version, the NParks Animal and Veterinary Service (AVS). Receives referrals; does not use the system. |
 
 A2 and A3 were added in v0.2. The domain reason is that a priority ranking nobody acts on is not a
 system: someone must decide where crews go, and someone must do the work and report back, or the
@@ -67,6 +83,17 @@ name the extension point: A2 gains a `dispatchAuthority` attribute and 8.1.3's t
 partitioned by it. Nothing else in the model changes. The alternative — narrowing A2 and removing
 fogging and larviciding from 8.1.3 — was considered and rejected on 2026-09-03.
 
+**Extension exercised in v0.9.** The `dispatchAuthority` extension point named above is now used, as
+it was always intended to be. Widening the product to wildlife makes the authority question
+unavoidable rather than optional: the system's own Cleaning Crew must not be sent to a wild boar.
+§8.6 defines referral to A6, and 4.4 defines the override that forces it. A2 remains one composite
+role; what is partitioned is the *destination* of a case, not the manager.
+
+**Two pests have a genuinely shared authority and the system does not guess.** Bees and wasps, and
+the three nuisance bird species, appear both on the AVS wildlife list and in NEA public-health
+nuisance work. Their authority is carried in the pest profile configuration (4.2.3), not hard-coded,
+and the team shall record the resolution there before the Lab 5 demo.
+
 ## Definitions used by the requirements
 
 | Term | Definition |
@@ -88,6 +115,17 @@ fogging and larviciding from 8.1.3 — was considered and rejected on 2026-09-03
 | Corroboration count | The number of distinct Residents who have confirmed an existing open report under 5.1.13. |
 | Destructive action | Any action that deletes a stored record, cancels a work order, or rejects a report or a completion. |
 | Reason | A free-text justification of at least ten characters, required wherever a requirement names one. |
+| Pest type | One member of the enumeration fixed by 5.1.15. |
+| Pest class | The grouping of pest types that determines dispatch authority: VectorBorne, Structural, Nuisance or Wildlife. |
+| Pest profile | The stored configuration record for one pest type, holding its severity multiplier, pest class, evidence tier, driver weight set and dispatch authority. Defined by 4.2.3. |
+| Severity multiplier | A fixed value in (0, 1] per pest type expressing sustained public-health and municipal burden, defined by 4.2.1. Written σ in `PEST-PRIORITY-MODEL.md`. |
+| Urgency | The weighted sum of normalised drivers for one locality and pest type, in [0, 1], defined by 4.1.7. |
+| Evidence tier | The classification A, B or C that determines which drivers are available for a pest type, defined by 4.3.1. |
+| Observation record | A third-party wildlife or pest sighting retrieved under 1.5, distinct from a Report, which originates with a Resident. |
+| Obscured observation | An observation record whose supplier has randomised its coordinates, identified by 1.5.6. |
+| Critical override | A rule that forces a case to the top of the queue irrespective of its score, defined by 4.4. |
+| Referral | The act of routing a case to an External Dispatch Authority instead of creating an internal work order, defined by §8.6. |
+| Registered operator | A vector control operator listed in the NEA registry ingested under 1.6. |
 
 ---
 
@@ -154,6 +192,41 @@ fogging and larviciding from 8.1.3 — was considered and rejected on 2026-09-03
 - **1.4.2** The system shall display each source's last successful retrieval timestamp to an Operations Manager.
 - **1.4.3** The system shall raise a source-health warning when a source has had no successful retrieval for three consecutive scheduled intervals.
 - **1.4.4** The system shall display a staleness indicator on any screen presenting data from a stale source.
+
+## 1.5 Wildlife and pest observation ingestion
+
+*(Added in v0.9. Source: iNaturalist observations API, Singapore `place_id=6734`, verified live
+2026-09-16. This is the only live feed that exists for any pest other than the mosquito — see §13.)*
+
+- **1.5.1** The system shall retrieve observation records for every pest type whose evidence tier is B at intervals of no more than 24 hours.
+- **1.5.2** The system shall request observation records only for the taxon identifier recorded in the pest profile of the pest type being retrieved.
+- **1.5.3** The system shall parse each retrieved observation into the fields observation id, observed date, taxon name, latitude, longitude, positional accuracy, quality grade and obscured flag.
+- **1.5.4** The system shall reject any observation missing an observed date, a latitude or a longitude.
+- **1.5.5** The system shall reject any observation whose observed date is more than 90 days before the retrieval date.
+- **1.5.6** The system shall reject any observation whose obscured flag is true.
+- **1.5.7** The system shall reject any observation whose positional accuracy exceeds 500 metres.
+- **1.5.8** The system shall record the count of observations rejected under each of 1.5.4 to 1.5.7 for every ingestion run.
+- **1.5.9** The system shall bind each accepted observation to the locality containing its coordinates.
+- **1.5.10** The system shall discard an accepted observation that binds to no locality.
+- **1.5.11** The system shall store each accepted observation without overwriting any previously stored observation.
+- **1.5.12** The system shall retry a failed retrieval up to three times at five-minute intervals.
+- **1.5.13** The system shall continue to serve the most recently stored observations when a retrieval cycle fails.
+- **1.5.14** The system shall record for each observation ingestion run the start time, end time, pest type, accepted count, rejected count and outcome.
+
+## 1.6 Vector control operator registry ingestion
+
+*(Added in v0.9. Source: NEA Registered Vector Control Operator dataset
+`d_0921c2daa08b8bd846d2405c934da8c6`, 290 rows, verified 2026-09-16. Static reference data, not a
+live feed — see 1.6.7 and §13.)*
+
+- **1.6.1** The system shall load the NEA registered vector control operator dataset at application startup.
+- **1.6.2** The system shall parse each row into the fields company name, block or house number, street name, postal code and telephone number.
+- **1.6.3** The system shall reject any row whose postal code is not a six-digit value.
+- **1.6.4** The system shall resolve each accepted row's postal code to a latitude and longitude using the geocoding service.
+- **1.6.5** The system shall cache every resolved coordinate and shall not re-resolve a postal code already held in the cache.
+- **1.6.6** The system shall retain the most recently cached registry when a load fails.
+- **1.6.7** The system shall present the registry with the publication date of its source dataset wherever it is displayed, and shall not present it as live data.
+- **1.6.8** The system shall compute, for each locality, the straight-line distance to the nearest registered operator.
 
 ---
 
@@ -229,20 +302,20 @@ fogging and larviciding from 8.1.3 — was considered and rejected on 2026-09-03
 
 # 4. Priority Scoring Engine
 
-- **4.1.1** The system shall compute a priority score for every active cluster on each scoring cycle.
+- **4.1.1** The system shall compute a priority score for every combination of active locality and covered pest type on each scoring cycle. *(Revised in v0.9 from "every active cluster". A cluster is a mosquito-specific construct; the general scored subject is a locality and a pest type.)*
 - **4.1.2** The system shall execute a scoring cycle within ten minutes of the completion of each cluster ingestion cycle.
-- **4.1.3** The system shall compute the priority score from exactly these drivers: case size, case growth delta, 24-hour rainfall, 72-hour rainfall, verified open report count, days since last treatment, and premises mix.
+- **4.1.3** The system shall compute the urgency value of a locality and pest type from exactly the drivers named by the driver weight set of that pest type's evidence tier, as defined by 4.3.4 to 4.3.6. *(Revised in v0.9. The v0.8 form fixed seven drivers for every scored subject, which is computable only for the mosquito: no other pest has a case count and rainfall does not predict cockroach pressure. The seven drivers named in v0.8 are retained unchanged as the tier A set in 4.3.4, so this revision widens the rule without altering any dengue result — see 4.2.5.)*
 - **4.1.4** The system shall normalise each driver to a value between 0 and 1 using the normalisation method documented for that driver in `SCORING-SPEC.md` §2. *(Revised in v0.5. The method per driver was named nowhere until `SCORING-SPEC.md` was written; the strategy classes implementing them are in `src/control/normalisation/`.)*
 - **4.1.5** The system shall read driver weights from the configuration source defined by 10.6.2. *(v0.5: the default weight set and its justification are in `SCORING-SPEC.md` §3, shipped as `config/scoring.default.json`. It is a proposal to be revised against real data, not a sourced fact — see §13.)*
 - **4.1.6** The system shall reject a weight configuration whose weights do not sum to 1.0.
-- **4.1.7** The system shall compute the priority score as the weighted sum of normalised drivers, expressed on a 0–100 scale to one decimal place.
+- **4.1.7** The system shall compute the urgency value as the weighted sum of normalised drivers, expressed as a value between 0 and 1. *(Revised in v0.9. The weighted sum is now an intermediate value; 4.2.4 defines how the priority score is formed from it.)*
 - **4.1.8** The system shall assign a priority tier of High when a cluster's score is 70.0 or above, Medium when it is between 40.0 and 69.9, and Low when it is below 40.0.
 - **4.1.9** The system shall read the tier thresholds from the configuration source defined by 10.6.2.
 - **4.1.10** The system shall store, for every scored cluster, each driver's normalised value and its weighted contribution to the final score.
 - **4.1.11** The system shall retain the score, tier and driver breakdown of every scoring cycle as history.
 - **4.1.12** The system shall exclude any driver whose source is stale from the score.
 - **4.1.13** The system shall mark a score as DEGRADED when any driver has been excluded.
-- **4.1.14** The system shall rank active clusters in descending score order, breaking ties by case size and then by locality name.
+- **4.1.14** The system shall rank scored subjects in descending score order, breaking ties by severity multiplier, then by verified open report count, then by locality name. *(Revised in v0.9. The v0.8 tie-break used case size, which exists for the mosquito alone and is therefore not a general rule.)*
 - **4.1.15** The system shall compute days since last treatment for a cluster from the most recent verified treatment record for that cluster.
 - **4.1.16** The system shall use a default value of 90 days since last treatment for a cluster with no treatment record.
 - **4.1.17** The system shall produce a lower priority score for a cluster after a treatment record is written for it, when all other driver values are unchanged.
@@ -250,10 +323,59 @@ fogging and larviciding from 8.1.3 — was considered and rejected on 2026-09-03
 - **4.1.19** The system shall renormalise the remaining driver weights to sum to 1.0 after a driver is excluded under 4.1.12. *(Split from 4.1.12 in v0.3 for atomicity.)*
 - **4.1.20** The system shall name every excluded driver alongside a score marked DEGRADED. *(Split from 4.1.13 in v0.3 for atomicity.)*
 - **4.1.21** The system shall normalise the premises mix driver using the value computed by 1.1.15 without further transformation.
+- **4.1.22** The system shall compute the report velocity driver as the count of verified reports of the scored pest type bound to the scored locality in the preceding 14 days. *(Added in v0.9.)*
+- **4.1.23** The system shall compute the corroboration density driver as the mean corroboration count of the open verified reports of the scored pest type bound to the scored locality. *(Added in v0.9.)*
+- **4.1.24** The system shall compute the external observation density driver as the count of observation records of the scored pest type bound to the scored locality in the preceding 90 days. *(Added in v0.9.)*
+- **4.1.25** The system shall compute the response capacity deficit driver from the distance computed by 1.6.8 for the scored locality. *(Added in v0.9.)*
+- **4.1.26** The system shall label the external observation density driver as recent wildlife activity wherever it is displayed, and shall not label it as pest pressure. *(Added in v0.9. An observation record is a naturalist's sighting, not a complaint; §13 records the consequence and `PEST-PRIORITY-MODEL.md` §5.4 the reasoning.)*
+
+## 4.2 Pest severity
+
+*(Added in v0.9. The severity values and the rubric behind them are in `PEST-PRIORITY-MODEL.md` §4.)*
+
+- **4.2.1** The system shall hold a severity multiplier for every covered pest type, expressed as a value greater than 0 and no greater than 1.
+- **4.2.2** The system shall read every severity multiplier from the configuration source defined by 10.6.2.
+- **4.2.3** The system shall hold for every covered pest type a pest profile carrying its severity multiplier, pest class, evidence tier, driver weight set, dispatch authority and, where its evidence tier is B, its observation taxon identifier.
+- **4.2.4** The system shall compute the priority score as the severity multiplier of the scored pest type multiplied by the urgency value of the scored subject, expressed on a 0–100 scale to one decimal place.
+- **4.2.5** The system shall compute a priority score for the mosquito pest type that equals the weighted sum of the seven drivers named in version 0.8 of requirement 4.1.3, on the same 0–100 scale. *(Added in v0.9. This is the compatibility obligation, and it is testable: the mosquito severity multiplier is 1.000 by construction and the tier A weight set is v0.8's unchanged, so every dengue score, tier assignment and test expectation carries over. A test that fails this requirement means the generalisation has broken the existing system.)*
+- **4.2.6** The system shall reject a pest profile configuration in which any severity multiplier lies outside the range permitted by 4.2.1.
+- **4.2.7** The system shall reject a pest profile configuration in which no pest type carries a severity multiplier of 1.0. *(Added in v0.9. The multipliers are normalised against the most severe pest in the catalogue, which is what keeps the tier thresholds in 4.1.8 meaning what they meant in v0.8.)*
+- **4.2.8** The system shall display the severity multiplier alongside the priority score wherever a score of one pest type is presented beside a score of another.
+
+## 4.3 Evidence tiers and driver availability
+
+*(Added in v0.9. Tier assignment per pest and the evidence behind it are in `PEST-PRIORITY-MODEL.md`
+§3.)*
+
+- **4.3.1** The system shall assign every covered pest type an evidence tier from the set {A, B, C}.
+- **4.3.2** The system shall assign evidence tier A only to a pest type for which an authoritative government feed is ingested.
+- **4.3.3** The system shall assign evidence tier B only to a pest type for which observation records are ingested under 1.5.
+- **4.3.4** The system shall use, for a pest type of evidence tier A, the driver set {case size, case growth delta, 24-hour rainfall, 72-hour rainfall, verified open report count, days since last treatment, premises mix}.
+- **4.3.5** The system shall use, for a pest type of evidence tier B, the driver set {verified open report count, report velocity, external observation density, days since last treatment, corroboration density, response capacity deficit}.
+- **4.3.6** The system shall use, for a pest type of evidence tier C, the driver set {verified open report count, report velocity, days since last treatment, corroboration density, response capacity deficit}.
+- **4.3.7** The system shall reject a driver weight set whose weights do not sum to 1.0.
+- **4.3.8** The system shall reject a driver weight set that names a driver not available to the evidence tier of the pest type it applies to.
+- **4.3.9** The system shall display the evidence tier of a scored subject alongside its priority score.
+- **4.3.10** The system shall compute a priority score for a pest type of evidence tier C without requiring any external data source. *(Added in v0.9. Tier C runs on stored reports, corroborations and treatment records alone. This is what makes the model complete for bed bugs and fleas, which have no external feed of any kind — see §13.)*
+
+## 4.4 Critical override
+
+*(Added in v0.9. A linear weighted sum cannot express acute life-safety and this requirement set
+exists so that it is not asked to — see `PEST-PRIORITY-MODEL.md` §6.)*
+
+- **4.4.1** The system shall evaluate every verified report against the critical override rules held in configuration.
+- **4.4.2** The system shall read the critical override rules from the configuration source defined by 10.6.2.
+- **4.4.3** The system shall assign a priority tier of Critical to any scored subject whose verified report matches a critical override rule, irrespective of its priority score.
+- **4.4.4** The system shall rank every subject in the Critical tier above every subject in the High tier.
+- **4.4.5** The system shall retain and display the computed priority score of a subject raised to the Critical tier.
+- **4.4.6** The system shall name the matched override rule on every subject raised to the Critical tier.
+- **4.4.7** The system shall raise a report of a pest type whose pest class is Wildlife to the Critical tier when the report records an indoor location.
+- **4.4.8** The system shall raise a report to the Critical tier when the report records an injury.
+- **4.4.9** The system shall notify the Operations Manager within one minute of a subject being raised to the Critical tier.
 
 ---
 
-# 5. Community Breeding-Site Reporting
+# 5. Community Pest Reporting
 
 ## 5.1 Submission
 
@@ -271,6 +393,11 @@ fogging and larviciding from 8.1.3 — was considered and rejected on 2026-09-03
 - **5.1.12** The system shall offer the Resident the option to confirm the existing report when a submission is rejected as a duplicate.
 - **5.1.13** The system shall allow a Resident to confirm any open report once.
 - **5.1.14** The system shall increment a report's corroboration count on each confirmation made under 5.1.13. *(Split from 5.1.13 in v0.3 for atomicity.)*
+- **5.1.15** The system shall require each report to carry exactly one pest type from the set {Mosquito, Rat, Cockroach, Fly, Bed bug, Flea, Termite, Ant, Snake, Wild boar, Macaque, Monitor lizard, Otter, Civet, Bat, Pangolin, Crocodile, House crow, Pigeon, Javan myna, Bee or wasp, Other}. *(Added in v0.9. The enumeration is NEA's five pest-control vectors, the two household pests under the vector control operator regime, and the wild animals AVS publishes guidance for. Marine species are excluded — see Scope.)*
+- **5.1.16** The system shall require a report whose pest type is of pest class Wildlife to carry a location context from the set {Indoor, Outdoor}. *(Added in v0.9. 4.4.7 depends on this value.)*
+- **5.1.17** The system shall allow any report to record whether an injury occurred. *(Added in v0.9. 4.4.8 depends on this value.)*
+- **5.1.18** The system shall treat a report as a duplicate under 5.1.11 only when the existing open report carries the same pest type. *(Added in v0.9. Without this, a snake report within 50 metres of an open cockroach report would be refused as a duplicate.)*
+- **5.1.19** The system shall retain the report type set defined by 5.1.3 as a description of the condition observed, independent of the pest type required by 5.1.15. *(Added in v0.9. The two are orthogonal: a blocked drain is a condition, a cockroach is a pest, and a report may carry both.)*
 
 ## 5.2 Lifecycle
 
@@ -291,6 +418,8 @@ fogging and larviciding from 8.1.3 — was considered and rejected on 2026-09-03
 - **5.3.3** The system shall allow the moderation queue to be filtered by cluster and by report type.
 - **5.3.4** The system shall record the moderating user id, timestamp and reason on every moderation decision, where a reason is as defined in the definitions table.
 - **5.3.5** The system shall withhold a report's photographs from all Residents other than the reporter until the report is Verified.
+- **5.3.6** The system shall allow the moderation queue to be filtered by pest type. *(Added in v0.9.)*
+- **5.3.7** The system shall sort the moderation queue so that reports matching a critical override rule appear first, ahead of the order defined by 5.3.2. *(Added in v0.9. A verified snake-indoors report that waits its turn in an oldest-first queue defeats 4.4.)*
 
 ---
 
@@ -337,6 +466,12 @@ fogging and larviciding from 8.1.3 — was considered and rejected on 2026-09-03
 - **7.2.7** The system shall open the cluster detail view when a row is selected.
 - **7.2.8** The system shall mark every row whose score is DEGRADED.
 - **7.2.9** The system shall name the excluded driver on every row marked under 7.2.8. *(Split from 7.2.8 in v0.3 for atomicity.)*
+- **7.2.10** The priority table shall display the pest type and evidence tier of every row. *(Added in v0.9.)*
+- **7.2.11** The system shall allow the priority table to be filtered by pest type. *(Added in v0.9.)*
+- **7.2.12** The system shall allow the priority table to be filtered by pest class. *(Added in v0.9.)*
+- **7.2.13** The system shall present rows of every pest type in one ranking by default, rather than in a separate ranking per pest type. *(Added in v0.9. One comparable queue across all pests is the purpose of the model in `PEST-PRIORITY-MODEL.md`; a per-pest view is a filter applied to it, not the default.)*
+- **7.2.14** The system shall distinguish every row in the Critical tier from every other row by a visual treatment that does not rely on colour alone. *(Added in v0.9. Traces to 10.5.x and 11.7.x on accessibility.)*
+- **7.2.15** The priority table shall display, for each row, only the drivers available to that row's evidence tier. *(Added in v0.9. The v0.8 column set in 7.2.2 names case size and rainfall, which are empty for every pest outside tier A.)*
 
 ## 7.3 Analytics
 
@@ -381,6 +516,10 @@ fogging and larviciding from 8.1.3 — was considered and rejected on 2026-09-03
 - **8.1.11** The system shall refuse to create a second open work order of the same task type for the same cluster.
 - **8.1.12** The system shall offer the existing open work order when creation is refused under 8.1.11.
 - **8.1.13** The system shall link every verified open report inside the target cluster to a newly created work order.
+- **8.1.14** The system shall refuse to create a work order against a report whose pest type is of pest class Wildlife. *(Added in v0.9. The system's Cleaning Crew is not equipped or authorised to handle wildlife; §8.6 defines what happens instead.)*
+- **8.1.15** The system shall offer the referral action defined by 8.6.1 when creation is refused under 8.1.14. *(Added in v0.9.)*
+- **8.1.16** The system shall require each work order to carry the pest type of the case it addresses. *(Added in v0.9.)*
+- **8.1.17** The system shall restrict the task types offered for a work order to those permitted for the work order's pest class by configuration. *(Added in v0.9. Fogging is not a response to a rat.)*
 
 ## 8.2 Assignment
 
@@ -455,6 +594,25 @@ made it unverifiable and left the Lab 4 basis-path test with nothing to path ove
 - **8.5.2** The system shall notify each reporting Resident when their report is Closed.
 - **8.5.3** The system shall recompute the target cluster's priority score within one scoring cycle of a work order being Verified.
 - **8.5.4** The cluster detail view shall display the priority score immediately before and immediately after the most recent verified treatment.
+
+---
+
+## 8.6 Referral to an external authority
+
+*(Added in v0.9. Serves actor A6. This is the behaviour that makes widening the product to wildlife
+honest rather than cosmetic: the system declines work it has no authority to do, and says who does.)*
+
+- **8.6.1** The system shall allow an Operations Manager to refer a verified report to an External Dispatch Authority.
+- **8.6.2** The system shall determine the referral destination from the dispatch authority held in the pest profile of the report's pest type.
+- **8.6.3** The system shall display the referral destination's name and published contact number when a referral is offered.
+- **8.6.4** The system shall record the referring user id, the destination, the timestamp and a reason on every referral.
+- **8.6.5** The system shall set a referred report's status to Actioned.
+- **8.6.6** The system shall notify the reporting Resident that their report has been referred, naming the destination authority.
+- **8.6.7** The system shall present a referred report in the operations dashboard as referred, distinct from a report with an open work order.
+- **8.6.8** The system shall allow an Operations Manager to record the outcome of a referral.
+- **8.6.9** The system shall set a referred report's status to Closed when its outcome is recorded.
+- **8.6.10** The system shall not create, assign or dispatch a work order to a Cleaning Crew Member as a consequence of a referral.
+- **8.6.11** The system shall exclude a referred report from the days since last treatment driver, and shall not write a treatment record on referral. *(Added in v0.9. The system did not treat the locality, so claiming treatment recency would corrupt 4.1.17's feedback loop.)*
 
 ---
 
@@ -596,6 +754,9 @@ the list the Lab 1 UI mockups must cover.*
 - **11.2.25** The system shall provide a Work Order List screen for an Operations Manager. *(Added in v0.4. Requirement 11.1.3 mandates a Work Orders navigation item, but §11.2 defined no list screen for it to open, and 11.3.7 requires a create action to return to the list it came from. Found by adversarial review of the Lab 2 model.)*
 - **11.2.26** The system shall provide an Analytics screen for an Operations Manager, presenting the five §7.3 visualisations, each carrying its own sufficiency statement. *(Added in v0.5. §7.3 says "the dashboard shall display" five charts and `AnalyticsController` builds all five, but §11.2 defined no screen to display them on and the Operations Dashboard realises §7.1 rather than §7.3 — so `GET /api/ops/analytics` answered correctly and no user could reach it. The same class of gap as 11.2.25. Found by independent review of the live deployment, 2026-09-05.)*
 
+- **11.2.27** The system shall provide a Pest Reference screen listing every covered pest type with its responsible authority and its published contact number. *(Added in v0.9. A resident who has just seen a snake needs the AVS number faster than they need a report form.)*
+- **11.2.28** The system shall provide a Referral screen for an Operations Manager, supporting referral under 8.6.1 and outcome recording under 8.6.8. *(Added in v0.9.)*
+
 ## 11.3 Dialog map and transitions
 
 - **11.3.1** The system shall define every permitted transition between the screens in 11.2 in the dialog map.
@@ -606,6 +767,9 @@ the list the Lab 1 UI mockups must cover.*
 - **11.3.6** The system shall warn a user before navigating away from a form containing unsaved changes.
 - **11.3.7** The system shall return a user to the list they came from after a create, edit or delete completes.
 - **11.3.8** The system shall address every screen in 11.2 by a distinct URL.
+
+- **11.3.20** The Report a Site screen shall require a pest type selection before the location and description fields become active. *(Added in v0.9. The pest type determines which subsequent fields 5.1.16 makes mandatory.)*
+- **11.3.21** The Report Review screen shall offer the referral action, and not the work-order creation action, for a report whose pest class is Wildlife. *(Added in v0.9. Traces 8.1.14 and 8.1.15 onto the screen where the manager actually stands.)*
 
 ## 11.4 Loading, empty and error states
 
@@ -714,6 +878,23 @@ number they verify.
 
 Open points requiring a team decision are listed at the end of `EPICS-STORIES.md`.
 
+**v0.9 traceability obligations.** The generalisation added requirement groups 1.5, 1.6, 4.2, 4.3,
+4.4 and 8.6, and actor A6. Each must be carried forward before the Lab 5 demo:
+
+| Artefact | What v0.9 obliges |
+|---|---|
+| `EPICS-STORIES.md` | **Done 2026-09-16 (v0.4).** Epic **E11 — Cross-pest generalisation**, stories US-11.1 to US-11.8, covering every number in the six new groups |
+| Use case model | A6 as an actor; use cases 3.5, 5.5, 6.10, 7.8, 7.9, 7.10 and 8.5; described in `lab2/USE-CASE-DESCRIPTIONS.md` and `lab3/USE-CASE-DESCRIPTIONS.md` |
+| Data dictionary | **Written: `lab3/DATA-DICTIONARY-DELTA.md`.** The Lab 1 dictionary is frozen as submitted evidence, so the delta extends it. Entities `PestProfile`, `ObservationRecord`, `VectorControlOperator`, `Referral`; attributes `Report.pestType`, `Report.locationContext`, `Report.injuryReported`, `WorkOrder.pestType`; enumerations `PestType`, `PestClass`, `EvidenceTier` |
+| Analysis class diagram | **Done 2026-09-16.** The four new entity classes and four new enumerations; 27 entities, 17 enumerations |
+| Design class diagram | **Done 2026-09-16**, across all three parts - control (`PestPriorityCalculator`, `UrgencyCalculator`, `CriticalOverrideEvaluator`, `ObservationIngestionJob`, `OperatorRegistryLoader`, `ReferralController`), entity (the four new entities and three new repositories) and boundary (`INaturalistGateway`, `VCORegistryGateway`, and screens 11.2.27 and 11.2.28) |
+| Dialog map | Screens 11.2.27 and 11.2.28, and transitions 11.3.20 and 11.3.21 |
+| Test plan | **Designed 2026-09-16 (`lab4/TEST-PLAN.md` v0.2, §6).** 4.2.5 is §6.1 cases C1–C5 and §4.4 is §6.2 cases O1–O10; 1.5, 1.6, 4.3 and 8.6 are §6.3 to §6.6. **Designed, not executed** — the code does not exist yet, and §6 carries no Actual Output column for that reason. 4.2.5 shall still be written first |
+
+**Numbers are permanent.** No v0.8 number was reused or renumbered in v0.9. Requirements 4.1.1,
+4.1.3, 4.1.7 and 4.1.14 were revised in place, each carrying a dated note stating what changed and
+why, in the manner already used for 1.1.15 and 8.2.5.
+
 ---
 
 # 13. Assumptions
@@ -728,6 +909,12 @@ reader of this document alone can tell assumption from requirement.*
 | 5.1.11 | 50 m and 24 hours defines a duplicate report | Judgement. **Implemented 2026-09-03 with both bounds inclusive** — a report at exactly 50 m or exactly 24 hours old is a duplicate; the prose does not settle this, so the choice is recorded here and tested at 49/50/51 m and 23/25 h (lab4 §2.9, D1–D3) | Genuine reports refused, or duplicates admitted |
 | 6.1.4 | Five new cases is an alert-worthy growth | Judgement. **Implemented 2026-09-03** as the default and **configurable per saved location** (6.1.3), so a resident who finds it noisy raises it rather than muting the location; tested at 4 and 5 (lab4 §2.12, T6) | Alert fatigue or missed escalation |
 | 4.1.8 | Tier cut points at 70.0 and 40.0 | Judgement | Tiers cluster at one end and stop discriminating |
+| 4.2.1 | The 22 severity multipliers | Judgement, from the four-factor rubric in `PEST-PRIORITY-MODEL.md` §4.2. **No outcome data was used.** Configurable per 4.2.2 | The ranking disagrees with operational intuition across pests |
+| 4.3.4–4.3.6 | Three fixed weight sets rather than one per pest | Deliberate simplification: 22 bespoke weight sets are unmaintainable and unarguable. Per-pest override remains possible in configuration | One pest is systematically mis-ranked by a set tuned for its tier rather than for it |
+| 4.3.5 | External observation density weighted at 0.20 | Held deliberately low: an observation is a sighting, not a complaint (4.1.26) | Nature-reserve sightings inflate the ranking of localities with no municipal problem |
+| 4.1.25 | Response capacity deficit weighted at 0.05 in every tier | The VCO registry records **registered offices**, verified 2026-09-16 as concentrated on industrial streets (Bukit Batok Crescent 17, Anson Road 11 of 290). It is a response-capacity signal, not a demand signal | Used at a higher weight it would rank industrial land above the housing estates that generate the complaints |
+| 1.5.7 | 500 m positional accuracy threshold | Measured: median accuracy 111 m over 50 snake records, 34 of 46 within 500 m (2026-09-16) | Too strict discards usable records; too loose binds observations to the wrong locality |
+| 1.5.5 | A 90-day observation window | Judgement, chosen so a driver still has data for a low-volume pest | Too long and the driver stops responding to change |
 | 4.1.16 | 90 days is the default treatment recency | Judgement | Untreated clusters over- or under-weighted |
 | 1.1.1 | A 60-minute poll interval is useful | **Verified 2026-09-03** — the publisher revises on the order of days; 1.1.19–1.1.21 make the hourly cycle a cheap metadata check | See below |
 | 8.1.3 | Five task types match real dispatch | **Unverified** — see the actor note in §Actors | Domain challenge in Q&A |
@@ -799,6 +986,32 @@ by Yen Kit. Material changes:
 - **Normalisation methods and default weights are now documented** (4.1.4, 4.1.5 → `SCORING-SPEC.md`).
 - §13's polling assumption is replaced by measured evidence; the NEA row of the data-verification
   table moves from *partially verified* to *verified*.
+
+**v0.9 (2026-09-16)** — the product is widened from dengue to all common household pests and all wild
+animals requiring NEA or AVS intervention, on the TA's suggestion and Yen Kit's decision. Material
+changes:
+
+- Scope, Actors and Definitions restated for a multi-pest product; actor **A6 External Dispatch
+  Authority** added and the `dispatchAuthority` extension point declared in v0.2 is now exercised.
+- **§4.2 Pest severity**, **§4.3 Evidence tiers** and **§4.4 Critical override** added. The score
+  becomes `severity multiplier x urgency`, specified in `PEST-PRIORITY-MODEL.md`.
+- 4.1.1, 4.1.3, 4.1.7 and 4.1.14 revised in place: the scored subject is a locality and a pest type,
+  the driver set is tier-dependent, and the tie-break no longer relies on case size, which exists for
+  the mosquito alone.
+- **4.2.5 is the compatibility obligation** and is testable: a mosquito score under v0.9 equals its
+  v0.8 score exactly, because the mosquito severity multiplier is 1.000 by construction and the tier
+  A weight set is v0.8's unchanged. The tier thresholds in 4.1.8 are untouched.
+- **§1.5** wildlife observation ingestion and **§1.6** vector control operator registry ingestion
+  added, both against sources verified live on 2026-09-16.
+- **§8.6 Referral** added: the system refuses to dispatch its own crew against wildlife (8.1.14) and
+  refers to the responsible authority instead, without writing a treatment record (8.6.11).
+- 5.1.15–5.1.19 add the pest type, location context and injury fields; 5.1.18 stops a snake report
+  being refused as a duplicate of a cockroach report 40 metres away.
+- §13 gains seven new assumption rows, including the honest statement of what the vector control
+  operator registry does and does not measure.
+
+**Not changed by v0.9:** every dengue requirement in §1.1–1.4, §3, §6 and §9; the tier thresholds;
+the work-order state table; and all 34 non-functional requirements in §10.
 
 **v0.3 (2026-09-02)** — revised after an adversarial review by two independent reviewers. Material
 changes:

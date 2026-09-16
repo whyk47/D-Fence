@@ -16,14 +16,20 @@
  */
 import { RouteHandler, Request, Response } from './RouteHandler';
 import { AccessControlService } from '../../control/AccessControlService';
-import { ReportController, DuplicateReport, ReportRejected } from '../../control/ReportController';
+import { ReportController, DuplicateReport, ReportRejected, ReportDraft } from '../../control/ReportController';
 import { GeoPoint } from '../../entity/valueTypes';
-import { ReportType } from '../../entity/enums';
+import { LocationContext, PestType, ReportType } from '../../entity/enums';
 
 interface SubmitBody {
   latitude?: number;
   longitude?: number;
   type?: string;
+  /** 5.1.15 */
+  pestType?: string;
+  /** 5.1.16 */
+  locationContext?: string;
+  /** 5.1.17 */
+  injuryReported?: boolean;
   description?: string;
   photos?: Array<{ filename?: string; contentType?: string; sizeBytes?: number; storageKey?: string }>;
 }
@@ -92,7 +98,7 @@ export class ReportRoutes extends RouteHandler {
    * 5.1.2, 5.1.3. An absent or unparseable coordinate is refused here rather than defaulted:
    * a report at (0, 0) would bind to Unassigned and look like a legitimate submission.
    */
-  private static draftOf(req: Request): { point: GeoPoint; type: ReportType; description: string; photos: Array<{ filename: string; contentType: string; sizeBytes: number; storageKey: string }> } {
+  private static draftOf(req: Request): ReportDraft {
     const body = (req.body ?? {}) as SubmitBody;
     if (typeof body.latitude !== 'number' || typeof body.longitude !== 'number') {
       throw new ReportRejected('a report needs a location: send latitude and longitude (5.1.2)');
@@ -100,6 +106,13 @@ export class ReportRoutes extends RouteHandler {
     return {
       point: new GeoPoint(body.latitude, body.longitude),
       type: body.type as ReportType, // validated against the five in the controller (5.1.3)
+      // 5.1.15 — validated against the catalogue in the controller, like `type`. Defaulted to
+      // Mosquito only for a client that predates v0.9; the v0.9 form always sends one.
+      pestType: (body.pestType as PestType | undefined) ?? PestType.Mosquito,
+      ...(body.locationContext === undefined
+        ? {}
+        : { locationContext: body.locationContext as LocationContext }), // 5.1.16
+      ...(body.injuryReported === undefined ? {} : { injuryReported: body.injuryReported }), // 5.1.17
       description: body.description ?? '',
       photos: (body.photos ?? []).map((p) => ({
         filename: p.filename ?? 'photo',

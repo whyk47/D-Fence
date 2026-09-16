@@ -1,12 +1,15 @@
 # LAB 3 — DESIGN AND IMPLEMENTATION
 
+> **v0.9 update (2026-09-16).** The product was widened from dengue to all common household pests and all wild animals requiring NEA or AVS intervention. The counts and class names below are updated; the reasoning is unchanged. See `../PEST-PRIORITY-MODEL.md` and `REQUIREMENTS.md` §14.
+
+
 **Project:** D-Fence · **Module:** SC2006 / CZ2006 · **Started:** 2026-09-03
 
 ## Deliverables (lab manual §4)
 
 | # | Deliverable required | File | Status |
 |---|---|---|---|
-| 1 | Complete use case model | `use-case-diagram*.puml` + `.png`/`.svg`, `USE-CASE-DESCRIPTIONS.md` | **Done.** 41 use cases, all described. Carried from Lab 2 unchanged — no requirement added since changes one |
+| 1 | Complete use case model | `use-case-diagram*.puml` + `.png`/`.svg`, `USE-CASE-DESCRIPTIONS.md` | **Done.** 48 use cases, all described. Kept in lockstep with Lab 2; v0.3 adds the seven cross-pest use cases |
 | 2 | Design model — class diagram | `class-diagram-design-entity.puml`, `-control.puml`, `-boundary.puml` | **Done.** Explained in `DESIGN-MODEL.md` |
 | 2 | Design model — dialog map | `dialog-map-design.puml` | **Done.** Routes, operations and self-transitions added |
 | 2 | Design model — system architecture | `architecture.puml` + `DESIGN-MODEL.md` §2 | **Done.** Three tiers plus a separate scheduler process |
@@ -15,11 +18,11 @@
 
 ## The design model in one paragraph
 
-The 23 analysis entities keep their names and gain types, visibility and operations; four value types
-(`GeoPoint`, `Polygon`, `PremisesMix`, `TierThresholds`) are promoted out of loose attributes. The 15
+The 27 analysis entities keep their names and gain types, visibility and operations; four value types
+(`GeoPoint`, `Polygon`, `PremisesMix`, `TierThresholds`) are promoted out of loose attributes. The 20
 control classes gain full signatures and are joined by a startup class (`AppConfigurator`) and three
 coordinators (`ServiceContainer`, `DomainEventPublisher`, `WorkOrderTransitionTable`). Boundary splits
-in two: the HTTP surface the browser talks to, and five adapters to the external services. Five design
+in two: the HTTP surface the browser talks to, and seven adapters to the external services. Five design
 patterns are in the diagrams — Strategy, Template Method, Observer, Adapter, Repository — and one, the
 GoF State pattern, was deliberately rejected in favour of a table-driven state machine. `DESIGN-MODEL.md`
 gives the reasoning for all of it, including the two Bruegge ch. 7.4 questions: persistence and access
@@ -29,11 +32,11 @@ control.
 
 ```
 src/
-  boundary/    http/ (RouteHandler + 8 route classes), gateways/ (5 adapters + HttpClient)
-  control/     15 control classes, 3 coordinators, ingestion/ (Template Method), normalisation/ (Strategy)
+  boundary/    http/ (RouteHandler + 8 route classes), gateways/ (7 adapters + HttpClient)
+  control/     20 control classes, 3 coordinators, ingestion/ (Template Method), normalisation/ (Strategy)
   ports/       ExternalGateway family, AuthProvider, ObjectStorage, Repository, Stores, the DTOs
-  entity/      23 entity classes, 15 enumerations, 4 value types
-  persistence/ 10 repositories, Database, migrations/, memory/ (in-memory stores)
+  entity/      27 entity classes, 19 enumerations, 4 value types
+  persistence/ 13 repositories, Database, migrations/, memory/ (in-memory stores)
   config/      AppConfigurator, ServiceContainer, ConfigSet, ConfigLoader
   tools/       ingest-once.ts — one live ingestion + scoring cycle, printed
 client/src/

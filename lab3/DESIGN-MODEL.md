@@ -28,8 +28,8 @@ deliberately, and each is checkable against the diagrams.
 | 2 | Add actor domain classes | `Account` already existed for all three human actors; `SourceHealth` and `IngestionRun` are the domain record of the system actors | entity diagram |
 | 3 | Add a startup class | `AppConfigurator` — builds the container, registers repositories, gateways and controllers, loads configuration, restores persistent state, resumes ingestion | control diagram |
 | 4 | Convert or add controllers and coordinators | The 15 analysis control classes carried over; **three coordinators added** — `DomainEventPublisher`, `WorkOrderTransitionTable`, `ServiceContainer`. The patterns below add ten more classes (4 ingestion jobs, 6 normalisation strategies), so `src/control/` holds 30 files against the analysis model's 15 control classes | control diagram |
-| 5 | Add classes for data types | Four value types promoted from attributes: `GeoPoint`, `Polygon`, `PremisesMix`, `TierThresholds`. The 13 enumerations were already first-class in Lab 2 | entity diagram |
-| 6 | Convert or add container classes | `ClusterRanking` (the ordered priority list, with `rank()` and `byTier()`), and the ten repositories, which are containers over persistent collections | entity diagram |
+| 5 | Add classes for data types | Four value types promoted from attributes: `GeoPoint`, `Polygon`, `PremisesMix`, `TierThresholds`. The 17 enumerations were already first-class in Lab 2 | entity diagram |
+| 6 | Convert or add container classes | `PriorityRanking` (the ordered priority list, with `rank()` and `byTier()`; renamed from `ClusterRanking` in v0.9 because a ranking now mixes pests, not only clusters), and the thirteen repositories, which are containers over persistent collections (v0.9 adds `ObservationRepository`, `ReferralRepository` and `OperatorRepository`) | entity diagram |
 | 7 | Convert or add engineering relationships | Realization throughout: `NormalisationStrategy`, `ExternalGateway` and its four sub-interfaces, `Repository`, `DomainEventSubscriber`. Generalization for `AbstractIngestionJob` and `RouteHandler` | all three |
 
 **Two promotions worth defending.** `GeoPoint` and `Polygon` exist because latitude and longitude
@@ -59,10 +59,10 @@ and 10.1.5 constrain response time under 50 concurrent users, which a 60-second 
 
 ```
 src/
-  boundary/    route handlers, DTO validation, and the five external gateway adapters
+  boundary/    route handlers, DTO validation, and the seven external gateway adapters
   control/     the 15 control classes, 3 coordinators, 4 ingestion jobs, 6 normalisation strategies
   ports/       interfaces and the data that crosses them: ExternalGateway, Repository, RawPayload
-  entity/      the 23 domain classes, 15 enumerations, 4 value types
+  entity/      the 27 domain classes, 19 enumerations, 4 value types
   persistence/ repository implementations, the Database wrapper, SQL migrations
   config/      AppConfigurator, ServiceContainer, ConfigSet
 ```
@@ -106,7 +106,7 @@ than an ORM's automatic migrations and buys the thing the module grades: the ent
 the source of truth, and the schema can be read against it.
 
 **What is persistent, and when.** Everything in the entity model except `Principal` and the derived
-`ClusterRanking`. Two retention decisions matter to the design rather than to the storage layer:
+`PriorityRanking`. Two retention decisions matter to the design rather than to the storage layer:
 `ClusterSnapshot` rows are never overwritten, because the case delta (1.1.8), the 30-day trend
 (9.1.9) and the trajectory (9.1.10) all depend on the system remembering what the feed said before —
 the NEA feed publishes current values only. And `PriorityScore` rows are appended rather than
@@ -197,7 +197,7 @@ it earn its place — a pattern applied for its own sake is a liability in a viv
 |---|---|---|
 | **Strategy** | `NormalisationStrategy` and its five implementations | 4.1.4 obliges a normalisation method per driver and names none. This was **open item 1 carried out of Lab 2**; the design closes it |
 | **Template Method** | `AbstractIngestionJob` → cluster / rainfall / forecast jobs | 10.2.2 stale-marking, 10.2.3 resume-after-restart and 10.2.4 no-data-loss are identical across three sources. Written once, not three times |
-| **Observer** | `DomainEventPublisher`, subscribers `PriorityScoringEngine` and `AlertTriggerEvaluator` | Ingestion must trigger rescoring and alert evaluation without the jobs knowing who listens |
+| **Observer** | `DomainEventPublisher`, subscribers `PestPriorityCalculator` and `AlertTriggerEvaluator` | Ingestion must trigger rescoring and alert evaluation without the jobs knowing who listens |
 | **Adapter** | Five gateways behind `ExternalGateway` and its sub-interfaces | 10.4.6 rate limits and retry in one place; unit-testable control classes (10.6.3); and the two still-unverified sources isolated to one file each |
 | **Repository** | Ten repositories over `Database` | Spatial predicates stay in the database; control classes test against in-memory fakes |
 
@@ -248,9 +248,9 @@ impossible combination cannot be represented.
 
 | Lab 2 artefact | Becomes | Lab 3 artefact |
 |---|---|---|
-| 23 entity classes | typed, with operations, plus 4 value types | `class-diagram-design-entity.puml` |
-| 15 control classes | full signatures, plus 3 coordinators and a startup class | `class-diagram-design-control.puml` |
-| 27 screens + 5 gateways | React components behind `RouteGuard`; gateways behind interfaces | `class-diagram-design-boundary.puml` |
+| 27 entity classes | typed, with operations, plus 4 value types | `class-diagram-design-entity.puml` |
+| 20 control classes | full signatures, plus 3 coordinators and a startup class | `class-diagram-design-control.puml` |
+| 29 screens + 7 gateways | React components behind `RouteGuard`; gateways behind interfaces | `class-diagram-design-boundary.puml` |
 | Dialog map, 27 states | routes and operations added; self-transitions drawn | `dialog-map-design.puml` |
 | §2.3 access control | `AccessControlService` + `AccessPolicy` + ownership scoping | §3.2 above |
 | §8.3 state table | `WorkOrderTransitionTable`, one `TransitionRule` per row, each citing its requirement | control diagram |

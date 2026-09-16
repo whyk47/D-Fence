@@ -2,8 +2,10 @@
  * D-Fence — NormalisationFactory.
  * Stereotype: <<control>>. Traces: 4.1.3, 4.1.4, 10.6.2.
  *
- * One place that binds each of the seven drivers named by 4.1.3 to the method documented for it in
- * SCORING-SPEC.md §2. It exists because the binding was previously implicit in seven separate
+ * One place that binds each driver named by 4.1.3 to the method documented for it in
+ * SCORING-SPEC.md §2, and each of the four v0.9 drivers (4.1.22-4.1.25) to the method chosen for it
+ * in PEST-PRIORITY-MODEL.md §5. **No new Strategy class was needed** for the generalisation: all
+ * four reuse a method that already existed, which is the note the design class diagram carries. It exists because the binding was previously implicit in seven separate
  * classes, and two drivers — Rainfall72h and VerifiedOpenReportCount — had no strategy at all, so a
  * score computed over them would have thrown at run time rather than at wiring time.
  *
@@ -28,6 +30,14 @@ export interface NormalisationParameters {
   rainfall72hCapMm?: number;
   openReportCap?: number;
   treatmentSaturationDays?: number;
+  /** 4.1.22 — verified reports of one pest in one locality over 14 days. */
+  reportVelocityCap?: number;
+  /** 4.1.23 — mean corroborations on the open verified reports. */
+  corroborationCap?: number;
+  /** 4.1.24 — observation records over 90 days. Long-tailed, so log, like case size. */
+  observationReferenceMax?: number;
+  /** 4.1.25 — metres to the nearest registered operator (1.6.8). */
+  responseDistanceCapMetres?: number;
 }
 
 export const DEFAULT_NORMALISATION: Required<NormalisationParameters> = {
@@ -39,6 +49,19 @@ export const DEFAULT_NORMALISATION: Required<NormalisationParameters> = {
   rainfall72hCapMm: 120,
   openReportCap: 5,
   treatmentSaturationDays: 60,
+  // Five verified reports of one pest in one locality in a fortnight is a lot; above that the
+  // locality is already the problem and more reports do not make it more so.
+  reportVelocityCap: 5,
+  // Corroboration is a confidence signal, not a volume one. Three neighbours agreeing is as strong
+  // a statement as thirty, and treating it otherwise would let one busy block outvote the estate.
+  corroborationCap: 3,
+  // Long-tailed like case size, and for the same reason: Diptera returns 6,903 records island-wide
+  // a year and a snake 3,058. A fixed ceiling, not the observed maximum, so a score means the same
+  // thing tomorrow as today (4.1.11, 4.1.17).
+  observationReferenceMax: 50,
+  // 2 km. Beyond that the nearest operator is far for every practical purpose, and the driver
+  // carries only 0.05 in any case: the registry holds registered offices, not service areas.
+  responseDistanceCapMetres: 2000,
 };
 
 export class NormalisationFactory {
@@ -56,6 +79,11 @@ export class NormalisationFactory {
       new CappedLinearNormalisation(Driver.VerifiedOpenReportCount, p.openReportCap),
       new RecencyDecayNormalisation(p.treatmentSaturationDays),
       new PremisesMixNormalisation(),
+      // v0.9, tiers B and C (4.1.22-4.1.25). Reused methods, no new Strategy class.
+      new CappedLinearNormalisation(Driver.ReportVelocity, p.reportVelocityCap),
+      new CappedLinearNormalisation(Driver.CorroborationDensity, p.corroborationCap),
+      new LogScaleNormalisation(Driver.ExternalObservationDensity, p.observationReferenceMax),
+      new CappedLinearNormalisation(Driver.ResponseCapacityDeficit, p.responseDistanceCapMetres),
     ];
 
     const map = new Map<Driver, NormalisationStrategy>();
@@ -68,8 +96,10 @@ export class NormalisationFactory {
 
     const missing = Object.values(Driver).filter((d) => !map.has(d));
     if (missing.length > 0) {
-      // 4.1.3 names exactly seven drivers. An unbound driver would surface as a thrown error inside
-      // a scoring cycle, which is the worst place to find it.
+      // Every driver any evidence tier can name must be bound here. An unbound driver would surface
+      // as a thrown error inside a scoring cycle, which is the worst place to find it. Iterating the
+      // enum is correct in *this* one place — the factory's job is to bind all of them; what it is
+      // not correct for is deciding which drivers a given score should contain (4.3.4-4.3.6).
       throw new Error(`no normalisation strategy for ${missing.join(', ')} (4.1.3, 4.1.4)`);
     }
     return map;

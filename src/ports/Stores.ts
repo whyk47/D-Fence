@@ -14,6 +14,7 @@ import { Cluster } from '../entity/Cluster';
 import { ClusterSnapshot } from '../entity/ClusterSnapshot';
 import { RegionForecast } from '../entity/RegionForecast';
 import { IngestionRun } from '../entity/IngestionRun';
+import { Referral } from '../entity/Referral';
 import { PriorityScore } from '../entity/PriorityScore';
 import { WorkOrder } from '../entity/WorkOrder';
 import { CompletionEvidence } from '../entity/CompletionEvidence';
@@ -353,4 +354,19 @@ export interface PriorityScoreStore {
   /** 4.1.11 — score history, newest first. */
   historyFor(clusterId: Uuid, limit: number): Promise<PriorityScore[]>;
   latest(): Promise<PriorityScore[]>;
+}
+
+/**
+ * 8.6 — referrals. Traces 8.6.1, 8.6.4, 8.6.7, 8.6.8.
+ *
+ * Separate from `WorkOrderStore` on purpose, and not merely for tidiness: 8.6.10 says a referral
+ * produces no work order, and giving the two the same store is how a future contributor ends up
+ * writing one anyway.
+ */
+export interface ReferralStore {
+  save(referral: Referral): Promise<Referral>;
+  findById(id: Uuid): Promise<Referral | null>;
+  /** 8.6.7 — a referred report is shown as referred, distinct from one with an open work order. */
+  findByReport(reportId: Uuid): Promise<Referral | null>;
+  findOpen(): Promise<Referral[]>;
 }

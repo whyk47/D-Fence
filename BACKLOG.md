@@ -8,6 +8,12 @@
 > decision** — this file assumes Supabase Auth, the Lab 3 skeleton currently hand-rolls it, and
 > `lab3/DESIGN-MODEL.md` §3.3 states the choice and its cost. The feature analysis, effort estimates
 > and build order below remain current.
+>
+> **Further superseded, 2026-09-16.** The scope is no longer dengue alone: the product now covers 22
+> pest types on one comparable ranking. Nothing in this backlog is wrong as far as it goes — every
+> feature below is a mosquito feature and still needed — but it no longer describes the whole product.
+> `EPICS-STORIES.md` **E11** is the backlog for the widening, and `PEST-PRIORITY-MODEL.md` is the
+> model behind it. **Do not add cross-pest work here; add it to E11.**
 
 Written 2026-09-01. Shareable: https://claude.ai/code/artifact/9c6e5fdb-5865-465a-bfbf-d0187e191244
 

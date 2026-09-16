@@ -8,9 +8,11 @@
  * because the team must be able to see and argue over it. Secrets come from the environment only
  * and are never written into a committed file.
  */
-import { Driver, SourceKind } from '../entity/enums';
+import { Driver, EvidenceTier, PestClass, PestType, SourceKind } from '../entity/enums';
 import { TierThresholds } from '../entity/valueTypes';
 import { NormalisationParameters } from '../control/normalisation/NormalisationFactory';
+import { PestProfile, TIER_A_DRIVERS } from '../entity/PestProfile';
+import { CriticalOverrideRule } from '../control/scoring/CriticalOverrideEvaluator';
 
 export interface ClusterSourceConfig {
   datasetId: string;
@@ -27,11 +29,71 @@ export class ConfigSet {
   readonly ingestionIntervals = new Map<SourceKind, number>();
   /** SCORING-SPEC.md §2 — caps and reference ceilings. */
   normalisation: NormalisationParameters = {};
+  /** 4.2.2, 4.2.3 — the pest catalogue, from `config/pests.default.json`. */
+  readonly pestProfiles = new Map<PestType, PestProfile>();
+  /** 4.4.2 — the critical override rules, from the same file. */
+  criticalOverrideRules: CriticalOverrideRule[] = [];
   clusterSource: ClusterSourceConfig = {
     datasetId: 'd_dbfabf16158d1b0e1c420627c0819168',
     metadataBaseUrl: 'https://api-production.data.gov.sg',
     downloadBaseUrl: 'https://api-open.data.gov.sg',
   };
+
+  /**
+   * 4.2.3 — the profile for one pest.
+   *
+   * The mosquito falls back to a profile assembled from `driverWeights` when no catalogue has been
+   * loaded. That fallback is not a convenience: it is what makes 4.2.5 hold in a unit test that
+   * constructs a bare ConfigSet, as every Lab 4 §2 case does. severityMultiplier 1.0 and the tier A
+   * driver set are the two facts that make the mosquito branch numerically identical to v0.8.
+   */
+  pestProfile(pestType: PestType): PestProfile {
+    const configured = this.pestProfiles.get(pestType);
+    if (configured !== undefined) {
+      return configured;
+    }
+    if (pestType === PestType.Mosquito) {
+      return new PestProfile(
+        PestType.Mosquito,
+        PestClass.VectorBorne,
+        EvidenceTier.A,
+        1.0,
+        this.driverWeights,
+        'NEA',
+        '6225 5632',
+        null,
+      );
+    }
+    throw new Error(`no pest profile configured for ${pestType} (4.2.3)`);
+  }
+
+  /**
+   * 4.2.6, 4.2.7, 4.3.7, 4.3.8 — the catalogue as a whole.
+   *
+   * 4.2.7 is the one worth reading twice. The severity multipliers are normalised against the most
+   * severe pest in the catalogue, and the tier thresholds at 40.0 and 70.0 mean what
+   * SCORING-SPEC.md §4 says they mean only while that holds. A catalogue in which every multiplier
+   * had been scaled down by a constant factor would still rank pests correctly against each other
+   * and would quietly make every score, every tier and every alert wrong.
+   */
+  validatePestProfiles(): void {
+    if (this.pestProfiles.size === 0) {
+      throw new Error('no pest profiles configured (4.2.3)');
+    }
+    const problems = [...this.pestProfiles.values()].flatMap((p) => p.problems());
+    if (![...this.pestProfiles.values()].some((p) => p.severityMultiplier === 1.0)) {
+      problems.push(
+        'no pest carries a severity multiplier of 1.0: the catalogue is not normalised against ' +
+          'its most severe pest, so the tier thresholds in 4.1.8 no longer mean what they meant (4.2.7)',
+      );
+    }
+    if (this.criticalOverrideRules.length === 0) {
+      throw new Error('no critical override rules configured (4.4.1, 4.4.2)');
+    }
+    if (problems.length > 0) {
+      throw new Error(`pest profile configuration is invalid:\n  ${problems.join('\n  ')}`);
+    }
+  }
 
   /** Environment values, loaded by AppConfigurator. Secrets live here and nowhere else. */
   private readonly env = new Map<string, string>();
@@ -83,7 +145,7 @@ export class ConfigSet {
   }
 
   /**
-   * 4.1.3 completeness, checked at bootstrap rather than inside validate().
+   * 4.3.4 completeness, checked at bootstrap rather than inside validate().
    *
    * Kept separate on purpose: `validate()` enforces exactly what 4.1.6 says — the weights sum to
    * 1.0 — and a partial weight map is a legitimate thing to validate in a unit test (Lab 4 cases
@@ -93,9 +155,13 @@ export class ConfigSet {
    */
   validateComplete(): void {
     this.validate();
-    const missing = Object.values(Driver).filter((d) => !this.driverWeights.has(d));
+    // TIER_A_DRIVERS, not every member of the Driver enum. `driverWeights` is the *tier A* weight
+    // set — the v0.8 seven, which 4.2.5 keeps unchanged. The four drivers v0.9 added belong to
+    // tiers B and C and are weighted per pest in `pestProfiles`; demanding a tier A weight for
+    // ExternalObservationDensity would refuse a correct configuration at startup.
+    const missing = TIER_A_DRIVERS.filter((d) => !this.driverWeights.has(d));
     if (missing.length > 0) {
-      throw new Error(`no weight configured for ${missing.join(', ')} (4.1.3, 4.1.5)`);
+      throw new Error(`no weight configured for ${missing.join(', ')} (4.3.4, 4.1.5)`);
     }
   }
 }

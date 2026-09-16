@@ -1,5 +1,5 @@
 @startuml D-Fence-Crew-and-System
-' Lab 2 v0.2. Role view 3 of 3 — Cleaning Crew and Scheduler. Subset of use-case-diagram.puml, same IDs.
+' Lab 2/3 v0.3. Role view 3 of 3 — Cleaning Crew and Scheduler. Subset of use-case-diagram.puml, same IDs.
 left to right direction
 skinparam packageStyle rectangle
 skinparam actorStyle awesome
@@ -8,6 +8,7 @@ skinparam shadowing false
 actor "Registered User" as RU
 actor "Cleaning Crew Member" as CCM
 actor "Scheduler" as SCH
+actor "Observation Data Service" as INAT
 actor "NEA Data Service" as NEA
 actor "Weather Data Service" as WX
 actor "OneMap" as ONEMAP
@@ -33,6 +34,10 @@ rectangle "D-Fence — Automated behaviour" {
   usecase "7.5 Compute Priority Scores" as UC75
   usecase "7.6 Evaluate Alert Triggers" as UC76
   usecase "7.7 Refresh Geocoding Token" as UC77
+  usecase "7.8 Ingest Wildlife Observations" as UC78
+  usecase "7.9 Load Operator Registry" as UC79
+  usecase "7.10 Evaluate Critical Override" as UC710
+  usecase "8.5 Apply Pest Severity Profile" as UC85
   usecase "4.3 Notify Resident" as UC43
 }
 
@@ -63,5 +68,17 @@ UC76 ..> UC43 : <<include>>
 note right of UC75
   Triggered by 7.1 completing and by
   6.8 verifying a work order (8.5.3).
+end note
+
+SCH -- UC78
+SCH -- UC79
+UC78 -- INAT
+UC75 ..> UC85 : <<include>>
+UC75 ..> UC710 : <<include>>
+
+note bottom of UC78
+  Observations with obscured coordinates
+  or accuracy worse than 500 m are
+  rejected at ingestion (1.5.6, 1.5.7).
 end note
 @enduml

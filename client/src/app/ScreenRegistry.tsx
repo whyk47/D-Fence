@@ -30,6 +30,7 @@ import { ReportSiteScreen } from '../screens/resident/ReportSiteScreen';
 import { MyReportsScreen } from '../screens/resident/MyReportsScreen';
 import { ReportDetailScreen } from '../screens/resident/ReportDetailScreen';
 import { AlertSettingsScreen } from '../screens/resident/AlertSettingsScreen';
+import { PestReferenceScreen } from '../screens/shared/PestReferenceScreen';
 
 import { OperationsDashboardScreen } from '../screens/operations/OperationsDashboardScreen';
 import { ClusterDetailScreen } from '../screens/operations/ClusterDetailScreen';
@@ -42,6 +43,7 @@ import { WorkOrderDetailScreen } from '../screens/operations/WorkOrderDetailScre
 import { StaffAccountsScreen } from '../screens/operations/StaffAccountsScreen';
 import { DataSourcesScreen } from '../screens/operations/DataSourcesScreen';
 import { AnalyticsScreen } from '../screens/operations/AnalyticsScreen';
+import { ReferralScreen } from '../screens/operations/ReferralScreen';
 
 import { MyJobsScreen } from '../screens/crew/MyJobsScreen';
 import { JobDetailScreen } from '../screens/crew/JobDetailScreen';
@@ -66,6 +68,7 @@ export const SCREENS: Record<string, Screen> = {
   MyReports: MyReportsScreen,
   ReportDetail: ReportDetailScreen,
   AlertSettings: AlertSettingsScreen,
+  PestReference: PestReferenceScreen, // 11.2.27
 
   OpsDashboard: OperationsDashboardScreen,
   ClusterDetail: ClusterDetailScreen,
@@ -78,6 +81,7 @@ export const SCREENS: Record<string, Screen> = {
   StaffAccounts: StaffAccountsScreen,
   DataSources: DataSourcesScreen,
   Analytics: AnalyticsScreen,
+  Referral: ReferralScreen, // 11.2.28
 
   MyJobs: MyJobsScreen,
   JobDetail: JobDetailScreen,

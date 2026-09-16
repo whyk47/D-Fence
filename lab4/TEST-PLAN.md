@@ -1,14 +1,24 @@
 # TEST PLAN — D-Fence
 
-Lab 4 deliverable 3, started early. Version 0.1, 2026-09-03.
+Lab 4 deliverable 3, started early. Version 0.3, 2026-09-16.
 
 **Status.** This covers lab §3.2.1–3.2.4 for the parts of the system that are implemented. It is
 started ahead of Lab 4 because the two subjects the lab asks for were *chosen at design time* rather
 than found afterwards, and both are now real code that runs. What is not here is anything requiring a
 database, an HTTP call or a browser — those tests follow the implementation.
 
-**Everything below has been executed.** The Actual Output columns are transcribed from a real run,
-not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
+**Everything in §2 to §4 has been executed.** Those Actual Output columns are transcribed from a real
+run, not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
+
+**§6 was designed before the code, and is now partly executed.** v0.2 added the test design for the
+cross-pest generalisation in `REQUIREMENTS.md` v0.9. v0.3 records what happened when it was built:
+**§6.1 to §6.4 are executed and passing** — `tests/pest-compatibility.test.ts` (16 cases) and
+`tests/pest-scoring.test.ts` (25 cases). §6.5 and §6.6 remain designed and not executed, because the
+two external gateways they test are build steps 7 and 8 and are not written.
+
+**The whole suite: `npx vitest run`, 749 tests in 36 files, 748 passing.** The one failure is
+`rainfall.test.ts` J2, and it **predates this work** — verified by running the suite at the previous
+commit in a clean worktree. It is a real defect in backfill de-duplication and is recorded in §5.
 
 ---
 
@@ -38,7 +48,10 @@ not predicted: `npx vitest run`, 55 tests, 3 files, all passing.
 | US-10.x (§11) The twenty-seven screens, by audience | **Done 2026-09-04.** 64 cases — `tests/client-screens-{shared,resident,ops}.test.tsx`, designed in §2.23 |
 | §3.2 (extension) The four Postgres repositories, against live PostGIS | **Done 2026-09-04.** 11 cases — `tests/repository.test.ts`, designed in §2.24 |
 | §3.2.4 (extension) Acceptance runs over HTTP and through the served bundle | **Done 2026-09-04.** 49 + 9 checks — `src/tools/uat.ts`, `src/tools/client-uat.ts`, designed in §2.25 |
-| §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts` |
+| §3.2.2 Basis-path cases for **2 methods with complex logic** | **Done.** `isTransitionPermitted` and `ClusterRanking.rank`, 15 cases — `tests/basis-path.test.ts`. The class is renamed `PriorityRanking` in the v0.9 design; the results in §3.2 predate the rename and the rename is an E11 build step, not a re-test |
+| **4.2.5 the compatibility obligation** | **Done 2026-09-16.** 16 cases — `tests/pest-compatibility.test.ts`, designed in §6.1. Written first, before any other E11 code, as US-11.2 requires. Five v0.8 goldens reproduced bit-identically |
+| **§4.4 the critical override, §4.3 evidence tiers, §8.6 referral** | **Done 2026-09-16.** 25 cases — `tests/pest-scoring.test.ts`, designed in §6.2 to §6.4 |
+| §1.5, §1.6 — observation ingestion and the operator registry | **Designed 2026-09-16, not executed** — §6.5 and §6.6. The gateways are build steps 7 and 8 and are not written |
 | §3.2.3 Minimise redundant cases while keeping coverage | Applied — see §4 |
 | §3.2.4 Execute and document `Test Input / Expected / Actual` | **Done** for the above — §2.4 and §3.3 |
 | Integration and end-to-end tests | **Done 2026-09-04.** The §2.6, §2.8 and §2.9 suites are integration tests in all but name — several controllers, real stores, no fakes below the gateway. Above them, §2.25's two harnesses run against a live server and a live database: the API path end to end, and the served bundle driven in jsdom. What remains untested is rendering, which needs a real browser and a human — see §5 |
@@ -1502,6 +1515,13 @@ test is why it cannot recur.
 
 ### 3.2 `ClusterRanking.rank` (4.1.14)
 
+> **v0.9 note (2026-09-16).** This class is renamed `PriorityRanking` in the design, and 4.1.14 as
+> revised orders by score, then severity multiplier, then verified open report count, then locality
+> name — because case size exists only for the mosquito and cannot order a mixed-pest queue. The six
+> paths below were executed against the code as it stands today and are recorded unchanged. R3 will
+> need its input changed when the rename lands, and a seventh path appears for the severity key;
+> that is an E11 build step, tracked in §6.1 case C1 and in `EPICS-STORIES.md` US-11.2.
+
 4.1.14 defines a three-key ordering: score descending, then case size, then locality name.
 
 **Cyclomatic complexity.** Decision points: the sort iteration (1), the score comparison (1), the two
@@ -1594,6 +1614,8 @@ green suite**, because nothing here renders.
 | **Visual regressions in the stylesheet (11.9.x)** | Rendering. The `> header nav` defect (§2.33, M19) was invisible to 704 green tests and obvious in the first screenshot. Until something renders in CI, a layout change is verified by a human looking at a browser - which is now a step in the demo-drive run rather than an intention |
 | **Contrast, tap-target size, sunlight legibility (11.7.1, 11.7.4, 11.7.7)** | A human with a phone, outdoors. jsdom renders no pixels, and no test in this suite can substitute — recorded here rather than left implied by the screen tests' green results |
 | **10.1.5 does not hold: p95 2125 ms against a 1000 ms budget** | Nothing — it is measured (§2.26). What it needs is a *fix*: `/api/ops/dashboard` computes `reportSourceHealth()` and `findAllOpen()` twice per request across its two halves, in fifteen-odd serial round trips. Awaiting a decision rather than blocked |
+| ~~Everything in §6~~ | **§6.1 to §6.4 done 2026-09-16** — 41 cases across `tests/pest-compatibility.test.ts` and `tests/pest-scoring.test.ts`. §6.5 and §6.6 remain blocked on build steps 7 and 8, the two external gateways |
+| **`rainfall.test.ts` J2 — backfill double-counts an overlapping page** | Nothing; it is a defect, not a gap. A second `backfill()` of the same page inserts the readings again — expected 0, got 2. **It predates the v0.9 work**, confirmed by running the suite at the previous commit in a clean worktree, and it has nothing to do with pests. It needs fixing on its own terms: an overlapping page is exactly what a recovery after an outage produces, and double-counted rainfall inflates two drivers of every dengue score |
 | The manual run's `1.1.12` ingestion-failure **event** | Implementation. `DomainEventPublisher` is still a `not implemented` skeleton; the failure is recorded as a FAILED run and surfaces on the health and attention panels, but no event is raised, so there is nothing to test yet |
 | `NEAFeedGateway.fetchLastUpdatedAt` / `fetchClusters` against a fixture | Implementation. The two-hop download (poll-download → signed S3 URL) is the part worth a test, since the signed URL expires |
 
@@ -1601,3 +1623,219 @@ green suite**, because nothing here renders.
 map. That claim is checkable mechanically once the router exists, and if it is left to eyeballing it
 will be false within a fortnight — the Lab 2 and Lab 3 reviews each found dialog-map defects that a
 test of this kind would have caught the day they were introduced.
+
+---
+
+## 6. Designed but not executed — the v0.9 cross-pest generalisation
+
+**Read this heading literally.** Everything in §2 and §3 above was transcribed from a real run.
+Nothing in this section has been executed, because none of the code exists yet: `REQUIREMENTS.md`
+v0.9 and the Lab 2/Lab 3 diagrams were updated on 2026-09-16 ahead of any implementation, and this
+section is the test design that goes with them. The Actual Output column is therefore **absent**, not
+blank — a blank column invites someone to fill it in with what they expect, which is exactly the
+failure a test plan exists to prevent. When `EPICS-STORIES.md` E11 is built, these tables move up into
+§2 with real results, and this section shrinks to what remains undone.
+
+Design-time status is itself a §3.2.3 decision: the cases below were chosen now, while the
+requirements were being written, for the same reason `PriorityScoringEngine` was chosen at design time
+rather than found afterwards.
+
+### 6.1 §2.34 — the compatibility obligation, requirement 4.2.5
+
+> **Executed 2026-09-16 — `tests/pest-compatibility.test.ts`, 16 cases, all passing.** C1 runs once
+> per fixture through `it.each`, and two cases were added while building that the design did not
+> foresee: **C1b** and **C6**, both below.
+
+**This is the first test to be written in E11, before any other line of E11 code.** 4.2.5 says the
+mosquito's priority score shall equal the weighted sum of the seven v0.8 drivers on the same 0–100
+scale. It is the requirement that makes the generalisation provably additive, and it is the only one
+whose failure means the widening must be backed out rather than fixed.
+
+**Why it can pass.** Severity multipliers are normalised against the most severe pest in the
+catalogue, so σ(Mosquito) = σ(Rat) = 1.000 by construction (4.2.7 refuses a catalogue where no pest
+carries 1.0), and the tier A weight set is v0.8's unchanged (4.3.4). Score = 1.000 × urgency =
+the v0.8 weighted sum. The arithmetic is an identity, not an approximation, and the cases below are
+what stop it quietly ceasing to be one.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| C1 | `PestPriorityCalculator.score` | every driver fixture already used by `tests/priority-scoring.test.ts` | **bit-identical** to the v0.8 expected value, not merely within a tolerance |
+| C2 | `PestProfileRegistry.severityOf` | `Mosquito` | exactly 1.0 |
+| C3 | `PestPriorityCalculator.assignTier` | the BV1–BV8 scores of §2.4, pest type `Mosquito` | the same tiers §2.4 recorded |
+| C4 | `PestProfileRegistry.driversFor` | tier A | the seven drivers of 4.1.3, in the v0.8 order |
+| C5 | `ConfigSet.validatePestProfiles` | a catalogue whose highest severity multiplier is 0.9 | rejected — 4.2.7 |
+| **C1b** | `scoreOne` | fixture D5, two rainfall drivers absent | `excludedDrivers` is exactly `[Rainfall24h, Rainfall72h]` |
+| **C6** | `applySeverity` | urgency 0.626 at severity 1.0 | 62.6 |
+
+**C1b was not in the design, and it is the case that caught a real defect.** v0.8 derived
+`excludedDrivers` by walking the whole `Driver` enum. In v0.9 that enum has four more members, so
+every dengue score would have come back marked DEGRADED, naming four drivers a mosquito can never
+have — the score itself unchanged, so C1 alone would have passed. The fix is in `UrgencyCalculator`:
+exclusion is computed against `profile.drivers()`, the tier's set, not against the enum. The same
+mistake was waiting in `ConfigSet.validateComplete` and in `NormalisationFactory.build`; both are
+fixed, and the enum-walking that remains in the factory carries a comment saying why it is correct
+there and nowhere else.
+
+**The v0.8 goldens, for the record.** Produced by `tests/fixtures/generate-v08-goldens.ts` against
+the v0.8 engine *before* the split, and reproduced exactly by the generalised scorer:
+
+| Fixture | v0.8 score | tier | contributions |
+|---|---:|---|---:|
+| D1 large active cluster | 62.6 | Medium | 7 |
+| D2 small new cluster | 30.0 | Low | 7 |
+| D3 mid cluster, saturating rainfall | 63.7 | Medium | 7 |
+| D4 zero everywhere | 0.0 | Low | 7 |
+| D5 two drivers absent | 57.0 | Medium | 5 |
+
+**C1 is the case that matters and C5 is the case that protects it.** C1 alone would pass on a
+catalogue where every multiplier had been scaled down by the same factor — the mosquito would still be
+top of its own ranking and every score would be wrong. C5 is what makes the normalisation invariant
+enforceable rather than conventional.
+
+**C3 is not redundant with §2.4** even though it reuses those inputs. §2.4 tests `assignTier` on a
+bare number; C3 tests it through the new severity path, where a defect would be a multiplication, not
+a comparison. Same inputs, different subject — which is the distinction §4 rule 1 turns on.
+
+### 6.2 §2.35 — the critical override, requirement group 4.4
+
+> **Executed 2026-09-16 — `tests/pest-scoring.test.ts`, cases O1 to O10, all passing.**
+
+§4.4 exists because a linear weighted sum cannot express acute life-safety: a snake indoors in a
+locality with two reports scores low and is correct to score low, and is still the thing the manager
+must see first. The override is deliberately **not** arithmetic — it does not add points — so the
+cases test a branch, not a number.
+
+**Equivalence classes for `CriticalOverrideEvaluator.evaluate`:**
+
+| Class | Report | Expected | Valid? |
+|---|---|---|---|
+| EC-O1 | pest class Wildlife, location context Indoor | Critical (4.4.7) | valid |
+| EC-O2 | pest class Wildlife, location context Outdoor | no override | valid |
+| EC-O3 | any pest class, injury recorded | Critical (4.4.8) | valid |
+| EC-O4 | pest class not Wildlife, no injury | no override | valid |
+| EC-O5 | unverified report | not evaluated at all — 4.4.1 says *verified* | valid, and easy to get wrong |
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| O1 | `evaluate` | verified snake report, Indoor | Critical, rule named `wildlife-indoors` |
+| O2 | `evaluate` | verified snake report, Outdoor | tier from score alone |
+| O3 | `evaluate` | verified ant report, `injuryReported` true | Critical, rule named `injury` |
+| O4 | `evaluate` | verified ant report, no injury, score 12.0 | Low |
+| O5 | `evaluate` | **unverified** snake report, Indoor | no override (4.4.1) |
+| O6 | `evaluate` | verified snake report, Indoor, score 12.0 | tier Critical **and** score still 12.0 (4.4.5) |
+| O7 | `PriorityRanking.rank` | one Critical at 12.0, one High at 88.0 | the 12.0 row ranks first (4.4.4) |
+| O8 | `evaluate` | a report matching both rules | Critical, both rules named (4.4.6) |
+| O9 | `CriticalOverrideEvaluator` | rules absent from configuration | start-up refused, not silently unarmed |
+| O10 | notification path | a subject raised to Critical | manager notified within 60 s (4.4.9) |
+
+**O6 and O7 are the pair that carry the requirement.** An implementation that raises the *score* to
+100 instead of raising the *tier* passes O1, O3 and O7 and fails O6 — and it would have destroyed the
+only honest thing about the override, which is that it tells the manager the case is dangerous
+*without* pretending the evidence is stronger than it is. O7 then proves the ranking respects a tier
+the arithmetic disagrees with.
+
+**O9 is a configuration case in a behaviour suite on purpose.** An override that silently fails to
+load looks exactly like an override that never matched. Every other failure here is loud; this one
+would be silent, so it is tested at start-up rather than at evaluation.
+
+### 6.3 §2.36 — evidence tiers and driver availability, requirement group 4.3
+
+> **Executed 2026-09-16 — cases T1 to T6, all passing.** T6 was added while building: the same
+> urgency produces a fourfold difference in score between a rat (sigma 1.00) and a pangolin (sigma
+> 0.25), which is the cross-pest comparability claim stated as an assertion. Note what it does
+> **not** assert — that the rat's score is exactly four times the pangolin's. 4.2.4 rounds each
+> score independently, so four times 15.9 is 63.6 while the rat's own score is 63.4. Asserting the
+> first would be asserting that rounding does not happen.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| T1 | `driversFor` | tier B | the six drivers of 4.3.5 |
+| T2 | `driversFor` | tier C | the five drivers of 4.3.6 |
+| T3 | `ConfigSet.validate` | a tier C weight set naming `Rainfall72h` | rejected — 4.3.8 |
+| T4 | `ConfigSet.validate` | a tier B weight set summing to 0.95 | rejected — 4.3.7 |
+| T5 | `PestPriorityCalculator.score` | a tier C pest, **every gateway unreachable** | a score is produced — 4.3.10 |
+| T6 | `PestPriorityCalculator.score` | bed bug, no observations, no feed | a score, and evidence tier C displayed with it (4.3.9) |
+
+**T5 is the point of the whole tier scheme.** Bed bugs and fleas returned **one iNaturalist record
+each in twelve months** when the feed was screened on 2026-09-16 — that measurement is why tier C
+exists, and T5 is the assertion that the system does not degrade to zero when it has nothing but its
+own reports. It should run with the network stubbed out entirely.
+
+### 6.4 §2.37 — referral, requirement group 8.6
+
+> **Executed 2026-09-16 — cases F1 to F7, all passing**, with F1b and F1c added for 8.1.16 and 8.1.17.
+>
+> **What building F2 found.** The report transition table has no `Verified -> Actioned` rule for an
+> Operations Manager: 5.2.6's rule is `SYSTEM`, because the status change is a *consequence* of an
+> action rather than the action itself, exactly as when a work order is raised. The referral
+> controller therefore transitions as `SYSTEM`, and who referred it is recorded on the `Referral`
+> (8.6.4) and in the audit trail. That is the design agreeing with itself rather than a rule being
+> added to suit a new caller, and it is worth saying out loud in a viva: the table refused, and the
+> table was right.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| F1 | `WorkOrderController.create` | a verified wild boar report | refused — 8.1.14 — and the referral action offered (8.1.15) |
+| F2 | `ReferralController.refer` | a verified macaque report | referral recorded with destination, referrer, timestamp, reason; report status Actioned |
+| F3 | `ReferralController.refer` | as F2 | **no `WorkOrder` row and no `TreatmentRecord` row exists afterwards** (8.6.10, 8.6.11) |
+| F4 | recency driver | a locality whose only case was referred | days-since-last-treatment unchanged by the referral (8.6.11) |
+| F5 | `ReferralController.recordOutcome` | an open referral | report status Closed (8.6.9) |
+| F6 | `ReferralController.refer` | a pest whose profile names no dispatch authority | refused with a stated cause (6.10.EX.2) |
+| F7 | notification path | a referral | the reporting resident is told, and the destination authority is named (8.6.6) |
+
+**F3 and F4 are one defect in two places.** Writing a treatment record on referral is the natural
+thing for a developer to do — the case is closed, after all — and it would corrupt 4.1.17's feedback
+loop by telling the scorer a locality was treated when nobody treated it. F3 catches the write; F4
+catches the consequence, so that removing the write without understanding why still leaves a test
+standing.
+
+### 6.5 §2.38 — observation ingestion, requirement group 1.5
+
+> **Still designed, not executed.** `INaturalistGateway` is build step 8 and is not written. The
+> taxon ids these cases need are already in `config/pests.default.json`, each resolved by id rather
+> than by name search — B2 and B3 can be written the day the gateway exists.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| B1 | `INaturalistGateway.parse` | a record with `obscured: true` | rejected — 1.5.6 |
+| B2 | `INaturalistGateway.parse` | `positional_accuracy` 500 / 501 | accepted / rejected — 1.5.7, at the boundary |
+| B3 | `INaturalistGateway.parse` | observed 90 / 91 days ago | accepted / rejected — 1.5.5, at the boundary |
+| B4 | `INaturalistGateway.parse` | a record with no latitude | rejected — 1.5.4 |
+| B5 | `ObservationIngestionJob.run` | a batch of 10, 4 rejected across all four rules | per-rule rejection counts recorded — 1.5.8 |
+| B6 | `ObservationIngestionJob.run` | the same batch twice | stored once, nothing overwritten — 1.5.11 |
+| B7 | `ObservationIngestionJob.run` | a record outside every locality | discarded — 1.5.10 |
+| B8 | `ObservationIngestionJob.run` | gateway failing three times | three retries at five minutes, then last-good served — 1.5.12, 1.5.13 |
+
+**B2 and B3 are boundary cases in the §2.2 sense** — 500 and 90 are stated in the requirement, so an
+implementation using `>` where it should use `>=` fails exactly here and nowhere else.
+
+**B1 is the one to run against a real payload before trusting any of it.** Macaque, otter and pangolin
+records sampled on 2026-09-16 were **100% obscured**; a parser that mishandles the flag would admit
+coordinates randomised across a 22 km box and bind them to whichever locality they happened to land
+in. That is not a wrong number, it is a fabricated one.
+
+### 6.6 §2.39 — the operator registry, requirement group 1.6
+
+> **Still designed, not executed.** `VCORegistryGateway` is build step 7 and is not written.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| G1 | `VCORegistryGateway.parse` | postal code `52` and `528844` | rejected / accepted — 1.6.3 |
+| G2 | `OperatorRegistryLoader.load` | the 290-row fixture | all valid rows loaded with coordinates |
+| G3 | `OperatorRegistryLoader.load` | the same postal code twice | geocoded once — 1.6.5 |
+| G4 | `OperatorRegistryLoader.load` | geocoder unavailable, warm cache | previous registry retained — 1.6.6 |
+| G5 | nearest-operator distance | a locality with a known nearest office | the straight-line distance, to the metre — 1.6.8 |
+| G6 | any surface displaying the registry | — | the source publication date is present — 1.6.7 |
+
+**G6 is not cosmetic.** 1.6.7 exists because this registry is static reference data presented beside
+live feeds, and the one thing a viewer must not conclude is that 290 offices were where they are
+today. It is a display obligation and it is testable, so it is tested.
+
+### 6.7 What this section does *not* cover, and why
+
+| Not designed | Reason |
+|---|---|
+| Basis-path cases for `PestPriorityCalculator.score` | The method is a multiplication and a tier lookup. V(G) is 2. §3.2.2 asks for methods with *complex* logic, and inventing a third subject with no branches would be padding — the two existing subjects stand |
+| The severity multipliers themselves | They are judgement, from the rubric in `PEST-PRIORITY-MODEL.md` §4, not measurement. A test asserting σ(Macaque) = 0.92 asserts only that someone typed 0.92 twice. What *is* tested is the invariant they must satisfy — C2 and C5 |
+| The 22-row catalogue's contents | Same reason. C4 tests the tier A driver set because 4.3.4 states it; nothing states which pest is third-most severe |
+| Cross-pest ranking *correctness* | There is no ground truth to test against. O7 tests that the ranking respects the tier, and §2.34 tests that dengue is unchanged. Whether a rat in Bedok should outrank a mosquito in Yishun is a question for the demo's Q&A, not for a test |

@@ -252,7 +252,7 @@ describe('7.3.2 — the tier distribution', () => {
     ]);
     const full = await new AnalyticsController(ac(), clusters, scored).tierDistribution();
     expect(full.sufficient).toBe(true);
-    expect(full.points).toEqual({ High: 2, Medium: 1, Low: 1 });
+    expect(full.points).toEqual({ Critical: 0, High: 2, Medium: 1, Low: 1 });
   });
 
   it('C7b — a closed cluster leaves the distribution, and the total tracks the cluster count', async () => {
@@ -271,13 +271,13 @@ describe('7.3.2 — the tier distribution', () => {
     const analytics = new AnalyticsController(ac(), clusters, scores);
 
     const before = await analytics.tierDistribution();
-    expect(before.points).toEqual({ High: 1, Medium: 1, Low: 1 });
+    expect(before.points).toEqual({ Critical: 0, High: 1, Medium: 1, Low: 1 });
 
     // NEA stops publishing 'a'. Its score row is untouched — nothing deletes priority history.
     await clusters.deactivateAbsent(new Set(['b', 'c']));
 
     const after = await analytics.tierDistribution();
-    expect(after.points).toEqual({ High: 0, Medium: 1, Low: 1 });
+    expect(after.points).toEqual({ Critical: 0, High: 0, Medium: 1, Low: 1 });
     expect(sum(after.points)).toBe((await clusters.findActive()).length);
   });
 

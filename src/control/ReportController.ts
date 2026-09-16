@@ -6,7 +6,11 @@
  * `ReportLifecycleController`, and every later move belongs there too. Same rule as §8, and for the
  * same reason — one owner of the state machine, or the model claims one and has two.
  */
-import { ReportStatus, ReportType, Role } from '../entity/enums';
+import {
+  LocationContext, PestClass, PestType, ReportStatus, ReportType, Role,
+} from '../entity/enums';
+import { ConfigSet } from '../config/ConfigSet';
+import { PestProfile } from '../entity/PestProfile';
 import { GeoPoint, Uuid } from '../entity/valueTypes';
 import { Report, UNASSIGNED_LOCALITY } from '../entity/Report';
 import { Corroboration } from '../entity/Corroboration';
@@ -37,7 +41,14 @@ export const MAX_DESCRIPTION_CHARS = 500;
 
 export interface ReportDraft {
   point: GeoPoint;
+  /** 5.1.19 — the condition observed. Orthogonal to `pestType` and unchanged by v0.9. */
   type: ReportType;
+  /** 5.1.15 — the pest observed. Mandatory. */
+  pestType: PestType;
+  /** 5.1.16 — mandatory when the pest class is Wildlife; 4.4.7 turns on it. */
+  locationContext?: LocationContext;
+  /** 5.1.17 — optional on any report; 4.4.8 turns on it. */
+  injuryReported?: boolean;
   description: string;
   photos?: PhotoUpload[];
 }
@@ -82,6 +93,12 @@ export class ReportController {
      * parameter existed.
      */
     private readonly storage: PhotoExistence | null = null,
+    /**
+     * 4.2.3 — the pest catalogue, for the 5.1.16 check and for anything needing a pest's class.
+     * Optional so that every existing construction site keeps compiling and keeps taking mosquito
+     * reports; when it is absent the profile-dependent checks are skipped rather than failing.
+     */
+    private readonly config: ConfigSet | null = null,
   ) {}
 
   /**
@@ -130,7 +147,26 @@ export class ReportController {
       }
     }
 
-    const existing = await this.detectDuplicate(draft.point, draft.type, now);
+    // 5.1.15 — exactly one pest type, from the catalogue. Refused rather than defaulted to
+    // Mosquito: a defaulted pest type would be indistinguishable from a chosen one, and it decides
+    // the severity multiplier, the evidence tier and who the case is dispatched or referred to.
+    if (!Object.values(PestType).includes(draft.pestType)) {
+      throw new ReportRejected(`${String(draft.pestType)} is not a covered pest type (5.1.15)`);
+    }
+    // 5.1.16 — a wildlife report must say indoors or outdoors, because 4.4.7 raises an indoor one
+    // to Critical and cannot do so from a value nobody supplied.
+    const profile = this.profileFor(draft.pestType);
+    if (
+      profile !== null &&
+      profile.pestClass === PestClass.Wildlife &&
+      draft.locationContext === undefined
+    ) {
+      throw new ReportRejected(
+        'a wildlife report must say whether the animal was indoors or outdoors (5.1.16)',
+      );
+    }
+
+    const existing = await this.detectDuplicate(draft.point, draft.type, now, draft.pestType);
     if (existing.length > 0) {
       throw new DuplicateReport(existing[0] as Report); // 5.1.11, 5.1.12
     }
@@ -139,6 +175,9 @@ export class ReportController {
     report.reporterId = by.accountId; // 5.1.10
     report.point = draft.point; // 5.1.2
     report.type = draft.type;
+    report.pestType = draft.pestType; // 5.1.15
+    report.locationContext = draft.locationContext ?? null; // 5.1.16
+    report.injuryReported = draft.injuryReported ?? false; // 5.1.17
     report.description = description;
     report.corroborationCount = 0;
     report.submittedAt = now; // 5.1.10
@@ -186,13 +225,39 @@ export class ReportController {
   }
 
   /**
-   * 5.1.11 — open reports of the same type within 50 m of the point in the preceding 24 hours,
-   * nearest first, so 5.1.12 offers the most plausible one to confirm.
+   * 5.1.11, 5.1.18 — open reports of the same type **and the same pest** within 50 m of the point in
+   * the preceding 24 hours, nearest first, so 5.1.12 offers the most plausible one to confirm.
+   *
+   * 5.1.18 is the v0.9 addition and it is not a refinement, it is a correctness fix: without the
+   * pest-type test a snake report filed within 50 m of an open cockroach report would be refused as
+   * a duplicate, and the resident would be offered a cockroach to confirm.
+   *
+   * @param pestType omitted only by callers that predate v0.9, which are all mosquito callers.
    */
-  async detectDuplicate(point: GeoPoint, type: ReportType, now = new Date()): Promise<Report[]> {
+  async detectDuplicate(
+    point: GeoPoint,
+    type: ReportType,
+    now = new Date(),
+    pestType: PestType = PestType.Mosquito,
+  ): Promise<Report[]> {
     const since = new Date(now.getTime() - DUPLICATE_WINDOW_HOURS * 3_600_000);
     const nearby = await this.reports.findNearbyOpen(point, type, DUPLICATE_RADIUS_METRES, since);
-    return nearby.sort((a, b) => point.distanceTo(a.point) - point.distanceTo(b.point));
+    return nearby
+      .filter((r) => r.pestType === pestType) // 5.1.18
+      .sort((a, b) => point.distanceTo(a.point) - point.distanceTo(b.point));
+  }
+
+  /**
+   * The pest profile, when a catalogue is configured. Null when one is not, which is the v0.8
+   * deployment: the checks that depend on a profile are then skipped rather than failing, so a
+   * system that has not adopted the catalogue still takes mosquito reports.
+   */
+  private profileFor(pestType: PestType): PestProfile | null {
+    try {
+      return this.config?.pestProfile(pestType) ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /**

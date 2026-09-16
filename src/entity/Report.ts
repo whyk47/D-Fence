@@ -1,6 +1,6 @@
 /**
  * D-Fence — entity class `Report`
- * Stereotype: <<entity>>. Traces: 5.1.1–5.1.14, 5.2.1–5.2.9, 5.3.5.
+ * Stereotype: <<entity>>. Traces: 5.1.1–5.1.19, 5.2.1–5.2.9, 5.3.5.
  *
  * `status` is private for the same reason it is on `WorkOrder`: 5.2.1 defines a status set and
  * 5.2.3 says who may move it, and those are rules the type system can hold rather than a convention
@@ -8,7 +8,7 @@
  */
 
 import { Uuid, GeoPoint } from './valueTypes';
-import { ReportStatus, ReportType } from './enums';
+import { LocationContext, PestType, ReportStatus, ReportType } from './enums';
 
 /** 5.1.9 — a value of the locality binding, not a status. */
 export const UNASSIGNED_LOCALITY = 'Unassigned';
@@ -24,7 +24,17 @@ export class Report {
    */
   reporterId!: Uuid | null;
   point!: GeoPoint;
+  /**
+   * 5.1.19 — the *condition* observed. Orthogonal to `pestType`, and unchanged by v0.9: a blocked
+   * drain is a condition, a cockroach is a pest, and a report may carry both.
+   */
   type!: ReportType;
+  /** 5.1.15 — exactly one pest type, mandatory. */
+  pestType: PestType = PestType.Mosquito;
+  /** 5.1.16 — mandatory when the pest class is Wildlife, because 4.4.7 turns on it. */
+  locationContext: LocationContext | null = null;
+  /** 5.1.17 — optional on any report; 4.4.8 turns on it. */
+  injuryReported = false;
   description!: string;
   /** 5.1.7 — the active cluster containing the point, or null when none does. */
   clusterId!: Uuid | null;

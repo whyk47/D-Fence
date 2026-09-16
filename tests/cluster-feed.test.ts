@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ClusterFeedParser, RawClusterProperties } from '../src/control/ingestion/ClusterFeedParser';
+import { TIER_A_DRIVERS } from '../src/entity/PestProfile';
 import { NormalisationFactory } from '../src/control/normalisation/NormalisationFactory';
 import { Driver } from '../src/entity/enums';
 import { NormalisationContext } from '../src/control/normalisation/NormalisationStrategy';
@@ -196,14 +197,18 @@ describe('EC/BV: FMEL_UPD_D parses as Singapore local time', () => {
  * have thrown at run time.
  */
 describe('EC: every driver named by 4.1.3 has a normalisation strategy (4.1.4)', () => {
-  it('F1 — the factory binds all seven drivers, each to itself', () => {
+  it('F1 — the factory binds every driver, each to itself', () => {
+    // Seven in v0.8, eleven in v0.9: the four added for evidence tiers B and C (4.1.22-4.1.25) are
+    // bound here too, and each reuses a method that already existed. If this count ever rises
+    // because someone added a Strategy class as well as a driver, that is worth a second look.
     const map = NormalisationFactory.build();
     for (const driver of Object.values(Driver)) {
       const strategy = map.get(driver);
       expect(strategy, `no strategy for ${driver}`).toBeDefined();
       expect(strategy?.driver()).toBe(driver);
     }
-    expect(map.size).toBe(7);
+    expect(map.size).toBe(11);
+    expect(TIER_A_DRIVERS.length).toBe(7);
   });
 
   it('F2 — the two rainfall windows share a method but not a cap (SCORING-SPEC §2.2)', () => {

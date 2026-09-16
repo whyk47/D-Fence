@@ -1,5 +1,5 @@
 @startuml D-Fence-Operations
-' Lab 2 v0.2. Role view 2 of 3 — Operations Manager. Subset of use-case-diagram.puml, same IDs.
+' Lab 2/3 v0.3. Role view 2 of 3 — Operations Manager. Subset of use-case-diagram.puml, same IDs.
 left to right direction
 skinparam packageStyle rectangle
 skinparam actorStyle awesome
@@ -8,6 +8,7 @@ skinparam shadowing false
 actor "Registered User" as RU
 actor "Operations Manager" as OM
 actor "Telegram Service" as TG
+actor "Wildlife Authority (AVS)" as AVS
 
 OM --|> RU
 
@@ -15,6 +16,8 @@ rectangle "D-Fence — Operations" {
   usecase "1.2 Sign In" as UC12
   usecase "1.4 Manage Staff Accounts" as UC14
   usecase "3.4 Moderate Report" as UC34
+  usecase "5.5 Filter Ranking by Pest Type" as UC55
+  usecase "6.10 Refer Case to External Authority" as UC610
   usecase "4.3 Notify Resident" as UC43
   usecase "4.4 Notify Crew Member" as UC44
   usecase "5.1 Monitor Operations Dashboard" as UC51
@@ -59,5 +62,16 @@ note bottom of UC84
   Writing a treatment record lowers the
   cluster's next priority score (4.1.17).
   This closes the loop.
+end note
+
+OM  -- UC55
+OM  -- UC610
+UC610 -- AVS
+UC610 ..> UC34 : <<extend>>\n(pest class is Wildlife)
+
+note bottom of UC610
+  8.1.14 refuses a work order against
+  wildlife; 8.6 refers to AVS instead and
+  writes no treatment record (8.6.11).
 end note
 @enduml

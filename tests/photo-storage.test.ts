@@ -39,7 +39,7 @@ import { ReportController, ReportRejected } from '../src/control/ReportControlle
 import { ReportLifecycleController } from '../src/control/ReportLifecycleController';
 import { ReportTransitionTable } from '../src/control/ReportTransitionTable';
 import { InMemoryClusterLocator, InMemoryReportStore } from '../src/persistence/memory/InMemoryReportStores';
-import { ReportType } from '../src/entity/enums';
+import { PestType, ReportType } from '../src/entity/enums';
 import { Cluster } from '../src/entity/Cluster';
 import { CompletionEvidence } from '../src/entity/CompletionEvidence';
 import { GeoPoint, PremisesMix } from '../src/entity/valueTypes';
@@ -387,6 +387,7 @@ describe('A report carries photographs, not strings — §5.1.5, §10.3.6', () =
       {
         point: new GeoPoint(1.3521, 103.8198),
         type: ReportType.StandingWater,
+        pestType: PestType.Mosquito, // 5.1.15 — a breeding-site report is a mosquito report
         description: 'Standing water in a discarded pail behind the block.',
         photos: keys.map((storageKey) => ({
           filename: 'site.png',

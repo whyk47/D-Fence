@@ -1,7 +1,10 @@
 @startuml D-Fence-DesignBoundary
+' v0.2 (2026-09-16) - cross-pest generalisation, REQUIREMENTS.md v0.9:
+'   +INaturalistGateway (1.5), +VCORegistryGateway (1.6),
+'   +PestReferenceScreen (11.2.27), +ReferralScreen (11.2.28).
 ' D-Fence — Design class model, boundary layer (Lab 3 deliverable 2, part 1c)
 ' Fox heuristic 1: analysis actors become interface classes. Two kinds of boundary exist here —
-' the HTTP surface the browser talks to, and the adapters to the five external services.
+' the HTTP surface the browser talks to, and the adapters to the seven external services.
 
 skinparam shadowing false
 skinparam classAttributeIconSize 0
@@ -57,6 +60,12 @@ package "Ports — external service interfaces (src/ports)" #F2F7F2 {
   interface GeocodingSource <<interface>> {
     + search(address : string) : Promise<GeoPoint[]>
   }
+  interface ObservationSource <<interface>> {
+    + fetchObservations(taxonId : number, since : IsoDate) : Promise<RawPayload>
+  }
+  interface OperatorRegistrySource <<interface>> {
+    + fetchRegistry() : Promise<RawPayload>
+  }
   interface NotificationChannel <<interface>> {
     + send(chatId : string, text : string) : Promise<DeliveryOutcome>
   }
@@ -94,6 +103,23 @@ package "Boundary — external gateway adapters (src/boundary/gateways)" #F7FAFD
     - tokenExpiry : Date
     + requestToken() : Promise<void>
     - ensureToken() : Promise<void>
+    + search(address : string) : Promise<GeoPoint[]>
+  }
+  note bottom of OneMapGateway
+    **search() needs no token** — verified 2026-09-16 against
+    common/elastic/search, which answered 528844 keyless. The
+    token machinery stays for the map tiles, which do require
+    it. This matters to 1.6.4: geocoding 290 operator
+    addresses is a zero-credential operation.
+  end note
+  class INaturalistGateway <<boundary>> {
+    - placeId : number
+    + fetchObservations(taxonId : number, since : IsoDate) : Promise<RawPayload>
+    - isAdmissible(raw : RawObservation) : boolean
+  }
+  class VCORegistryGateway <<boundary>> {
+    - datasetId : string
+    + fetchRegistry() : Promise<RawPayload>
   }
   class TelegramGateway <<boundary>>
   class SupabaseAuthGateway <<boundary>> {
@@ -109,6 +135,10 @@ package "Boundary — external gateway adapters (src/boundary/gateways)" #F7FAFD
   ExternalGateway <|-- RainfallSource
   ExternalGateway <|-- ForecastSource
   ExternalGateway <|-- GeocodingSource
+  ExternalGateway <|-- ObservationSource
+  ExternalGateway <|-- OperatorRegistrySource
+  ObservationSource <|.. INaturalistGateway
+  OperatorRegistrySource <|.. VCORegistryGateway
   ClusterSource <|.. NEAFeedGateway
   RainfallSource <|.. RainfallGateway
   ForecastSource <|.. ForecastGateway
@@ -126,6 +156,28 @@ package "Boundary — external gateway adapters (src/boundary/gateways)" #F7FAFD
   ForecastGateway --> HttpClient
   OneMapGateway --> HttpClient
   TelegramGateway --> HttpClient
+  INaturalistGateway --> HttpClient
+  VCORegistryGateway --> HttpClient
+
+  note bottom of INaturalistGateway
+    **The only live feed for any pest but the mosquito.**
+    No Singapore government API publishes cockroach, rat,
+    boar or snake reports — verified against all 4,615
+    data.gov.sg datasets on 2026-09-16. isAdmissible()
+    applies 1.5.4 to 1.5.7 at the boundary rather than in
+    the ingestion job, because three of the four rejections
+    are properties of the supplier's payload: the obscured
+    flag, the positional accuracy and the observed date.
+  end note
+
+  note bottom of VCORegistryGateway
+    **Static reference data, not a feed** (1.6.7). 290 rows,
+    loaded at start-up and geocoded once through OneMap's
+    search endpoint, which needs no credentials — verified
+    2026-09-16. These are registered offices, not service
+    areas, so the driver they feed is response capacity
+    (4.1.25) at weight 0.05, never demand.
+  end note
 }
 
 package "Boundary — web client (React)" #FDFDF7 {
@@ -141,6 +193,19 @@ package "Boundary — web client (React)" #FDFDF7 {
     + post(path : string, body : unknown) : Promise<T>
     - onUnauthorised() : void
   }
+  class PestReferenceScreen <<boundary>> {
+    + pests : PestProfileView[]
+    + onCall(authority : string) : void
+  }
+  class ReferralScreen <<boundary>> {
+    + report : ReportView
+    + destination : string
+    + onRefer(reason : string) : void
+    + onRecordOutcome(outcome : string) : void
+  }
+  ScreenComponent <|-- PestReferenceScreen
+  ScreenComponent <|-- ReferralScreen
+
   class ScreenComponent <<boundary>> {
     + state : LoadState
     + render() : Element
