@@ -243,9 +243,20 @@ class FakeRainSource implements RainfallSource {
   }
 }
 
+/**
+ * The store prunes against the wall clock, and NOW is a fixed date in the fixture. Left to the real
+ * clock, every reading here is older than the 80-hour retention floor the moment it is written, the
+ * deduplication map empties between calls, and J2 reports two fresh writes for a page it has already
+ * seen — a deduplication failure that is really a fixture that aged. Pinning the clock to the
+ * fixture's own date is what makes these cases mean the same thing on any day they are run.
+ */
+function storeAtFixtureTime(): InMemoryRainfallStore {
+  return new InMemoryRainfallStore(80, () => NOW.getTime());
+}
+
 describe('The rainfall ingestion job', () => {
   it('J1 — stores stations and fresh readings, and reports what 1.2.4 discarded', async () => {
-    const store = new InMemoryRainfallStore();
+    const store = storeAtFixtureTime();
     const job = new RainfallIngestionJob(
       new FakeRainSource(payload([{ minutesAgo: 5, values: { S111: 1 } }, { minutesAgo: 90, values: { S111: 9 } }])),
       new InMemoryIngestionRunStore(),
@@ -260,7 +271,7 @@ describe('The rainfall ingestion job', () => {
   });
 
   it('J2 — an overlapping backfill page cannot double-count a reading into the accumulation', async () => {
-    const store = new InMemoryRainfallStore();
+    const store = storeAtFixtureTime();
     const job = new RainfallIngestionJob(new FakeRainSource(payload([])), new InMemoryIngestionRunStore(), store);
     const page = { retrievedAt: NOW, body: payload([{ minutesAgo: 5, values: { S111: 2, S222: 2 } }]) };
 

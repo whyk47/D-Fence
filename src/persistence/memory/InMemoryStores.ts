@@ -230,9 +230,20 @@ export class InMemoryRainfallStore implements RainfallStore {
    *  into the accumulation — which would silently inflate a scoring driver. */
   private readonly readings = new Map<string, ParsedReading>();
 
-  /** 72 hours plus a margin. Nothing older can affect 1.2.8, and an unbounded map is a leak in a
-   *  process meant to run for weeks. */
-  constructor(private readonly retentionHours = 80) {}
+  /**
+   * 72 hours plus a margin. Nothing older can affect 1.2.8, and an unbounded map is a leak in a
+   * process meant to run for weeks.
+   *
+   * `now` is injected because retention is the one thing here that depends on the wall clock, and a
+   * store that reads the clock itself cannot be tested with a dated fixture: the fixture ages, and
+   * one day every reading in it is older than the retention floor. What that looks like is not a
+   * pruning failure but a *deduplication* failure — an entry evicted between two writes is written
+   * again, and the caller is told it saved a new reading. The clock stays real in production.
+   */
+  constructor(
+    private readonly retentionHours = 80,
+    private readonly now: () => number = Date.now,
+  ) {}
 
   async saveStations(stations: ParsedStation[]): Promise<void> {
     for (const station of stations) {
@@ -273,7 +284,7 @@ export class InMemoryRainfallStore implements RainfallStore {
   }
 
   private prune(): void {
-    const floor = Date.now() - this.retentionHours * 3_600_000;
+    const floor = this.now() - this.retentionHours * 3_600_000;
     for (const [key, reading] of this.readings) {
       if (reading.readingAt.getTime() < floor) {
         this.readings.delete(key);

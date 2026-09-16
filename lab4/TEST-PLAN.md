@@ -16,9 +16,9 @@ cross-pest generalisation in `REQUIREMENTS.md` v0.9. v0.3 records what happened 
 `tests/pest-scoring.test.ts` (25 cases). §6.5 and §6.6 remain designed and not executed, because the
 two external gateways they test are build steps 7 and 8 and are not written.
 
-**The whole suite: `npx vitest run`, 749 tests in 36 files, 748 passing.** The one failure is
-`rainfall.test.ts` J2, and it **predates this work** — verified by running the suite at the previous
-commit in a clean worktree. It is a real defect in backfill de-duplication and is recorded in §5.
+**The whole suite: `npx vitest run`, 749 tests in 36 files, 749 passing.** One case,
+`rainfall.test.ts` J2, was failing when this pass began; it predated the v0.9 work and has since been
+fixed. What it was is worth reading in §5, because it was not the defect it appeared to be.
 
 ---
 
@@ -1615,7 +1615,7 @@ green suite**, because nothing here renders.
 | **Contrast, tap-target size, sunlight legibility (11.7.1, 11.7.4, 11.7.7)** | A human with a phone, outdoors. jsdom renders no pixels, and no test in this suite can substitute — recorded here rather than left implied by the screen tests' green results |
 | **10.1.5 does not hold: p95 2125 ms against a 1000 ms budget** | Nothing — it is measured (§2.26). What it needs is a *fix*: `/api/ops/dashboard` computes `reportSourceHealth()` and `findAllOpen()` twice per request across its two halves, in fifteen-odd serial round trips. Awaiting a decision rather than blocked |
 | ~~Everything in §6~~ | **§6.1 to §6.4 done 2026-09-16** — 41 cases across `tests/pest-compatibility.test.ts` and `tests/pest-scoring.test.ts`. §6.5 and §6.6 remain blocked on build steps 7 and 8, the two external gateways |
-| **`rainfall.test.ts` J2 — backfill double-counts an overlapping page** | Nothing; it is a defect, not a gap. A second `backfill()` of the same page inserts the readings again — expected 0, got 2. **It predates the v0.9 work**, confirmed by running the suite at the previous commit in a clean worktree, and it has nothing to do with pests. It needs fixing on its own terms: an overlapping page is exactly what a recovery after an outage produces, and double-counted rainfall inflates two drivers of every dengue score |
+| **`rainfall.test.ts` J2 — fixed, and it was not what it looked like** | It read as a de-duplication defect: a second `backfill()` of the same page reported two fresh writes instead of zero. De-duplication was correct. `InMemoryRainfallStore` pruned against `Date.now()`, and this file's fixture is dated 2026-09-03, so from 2026-09-06 onwards every reading was older than the 80-hour retention floor the moment it was written — the map emptied between the two calls, and the second call genuinely was writing new rows. **The case would have failed on demo day**, and it would have been read on demo day as the accumulation double-counting rain. The store now takes its clock as a constructor argument, real in production and pinned to the fixture's date in the test. 749/749 |
 | The manual run's `1.1.12` ingestion-failure **event** | Implementation. `DomainEventPublisher` is still a `not implemented` skeleton; the failure is recorded as a FAILED run and surfaces on the health and attention panels, but no event is raised, so there is nothing to test yet |
 | `NEAFeedGateway.fetchLastUpdatedAt` / `fetchClusters` against a fixture | Implementation. The two-hop download (poll-download → signed S3 URL) is the part worth a test, since the signed URL expires |
 
