@@ -339,9 +339,8 @@ Read the four rows in order, because each makes a separate point:
 
 Ordered so each step is independently demonstrable. Estimate assumes the existing code structure.
 
-> **Status 2026-09-16: steps 1 to 6 are built.** That is the milestone this section itself names —
-> "stop after 6 and the model is still complete and demonstrable". Steps 7, 8 and 9, the three that
-> add external evidence rather than capability, are not built. Test results are in
+> **Status 2026-09-16: steps 1 to 8 are built.** Step 9 is not, and that is a decision rather than
+> a remainder — see the note below the table. Test results are in
 > `lab4/TEST-PLAN.md` §6; story-level status is in `EPICS-STORIES.md` E11.
 
 | # | Change | Files | Size | Built |
@@ -352,9 +351,29 @@ Ordered so each step is independently demonstrable. Estimate assumes the existin
 | 4 | Split the scorer: today's calculator becomes `UrgencyCalculator`; `PestPriorityCalculator` applies σ. `PriorityScore` keyed by (locality, pest) | `control/scoring/` | M | **yes** — and `ClusterRanking` became `PriorityRanking` with 4.1.14's new keys |
 | 5 | Weight renormalisation when a driver is unavailable, + the existing `DriverContribution` breakdown extended per pest (4.1.10) | `control/scoring/` | S | **yes** — and the exclusion set is now the tier's drivers, not the whole enum. See `lab4/TEST-PLAN.md` §6.1 C1b |
 | 6 | Critical override evaluator + AVS routing with crew dispatch suppressed | `control/WorkOrderController.ts` | M | **yes** — `CriticalOverrideEvaluator`, `ReferralController`, 8.1.14's refusal, both screens. **Not wired: 4.4.9's one-minute notification and 8.6.6's resident notice** |
-| 7 | `VCORegistryGateway` — one-off CSV load, OneMap keyless geocode of 290 postal codes, cached to disk | `boundary/gateways/` | S | no |
-| 8 | `INaturalistGateway` + `ObservationIngestionJob` on the `ClusterIngestionJob` pattern, dropping `obscured=true` | `boundary/gateways/`, `control/ingestion/` | M | no — but the taxon ids are already in the catalogue, each resolved by id |
-| 9 | NEA Gravitrap feed `d_5d060d8b7838a15e8906fb22c50dbf51` as an eighth Tier A driver | `control/ingestion/` | S | no — and note it would change the tier A driver set, which 4.2.5 constrains |
+| 7 | `VCORegistryGateway` — one-off CSV load, OneMap keyless geocode of 290 postal codes, cached to disk | `boundary/gateways/` | S | **yes** — plus `OperatorRegistryLoader`, the cache keyed by postal code, and 1.6.8's nearest-operator distance |
+| 8 | `INaturalistGateway` + `ObservationIngestionJob` on the `ClusterIngestionJob` pattern, dropping `obscured=true` | `boundary/gateways/`, `control/ingestion/` | M | **yes** — one job per tier B pest; admissibility applied at the boundary, counted per rule |
+| 9 | NEA Gravitrap feed `d_5d060d8b7838a15e8906fb22c50dbf51` as an eighth Tier A driver | `control/ingestion/` | S | **no — deliberately. See below** |
+
+**Why step 9 is not built, and what it would take.**
+
+It is the only step on this list that is not a generalisation. Steps 1 to 8 widen the model to more
+pests without changing what a dengue score means; step 9 adds an eighth driver to tier A, which
+changes every dengue score there is. Three things follow, and none of them is a reason not to do it
+— only a reason not to do it quietly, as the last item of an unrelated pass:
+
+1. **It contradicts 4.2.5 as currently written.** The compatibility test pins five v0.8 goldens, and
+   an eighth tier A driver moves all five. Either the requirement gains a clause saying the freeze
+   covers the *generalisation* and not later model revisions, or the goldens are re-cut against a
+   new baseline. That is a requirements decision, not an implementation one.
+2. **There are no requirements for it.** Groups 1.5 and 1.6 were written before their code; a
+   Gravitrap feed has no group, no story and no acceptance criteria. Writing the code first would
+   invert the order every other feed in this project followed.
+3. **The weights would have to be re-derived.** 4.1.6 requires the tier A set to sum to 1.000, so an
+   eighth driver is not an addition — it is a redistribution across all eight, and the current seven
+   were argued for individually in §5.2.
+
+The gateway itself is a day's work. The decision in front of it belongs to the team.
 
 **Steps 1–6 deliver the entire generalised model with no new external dependency**, because Tier C
 runs on entities that already exist. Steps 7–9 add evidence, not capability. If time runs short,

@@ -43,6 +43,27 @@ export interface GeocodeCandidate {
   postalCode: string | null;
 }
 
+/**
+ * 1.5 — third-party wildlife observations. One taxon per call (1.5.2), because the supplier's API
+ * takes one `taxon_id` and because a combined call would make a per-pest rejection count (1.5.8)
+ * impossible to attribute.
+ */
+export interface ObservationSource extends ExternalGateway {
+  /** @param since ISO date, `YYYY-MM-DD`. 1.5.5's 90-day window is the caller's to choose. */
+  fetchObservations(taxonId: number, since: string): Promise<RawPayload>;
+}
+
+/**
+ * 1.6 — the NEA registered vector control operator registry. **Reference data, not a feed.** It has
+ * no `since`, no polling and no freshness: the dataset's own `lastUpdatedAt` was 2024-06-06 when it
+ * was verified, and 1.6.7 forbids presenting it as live.
+ */
+export interface OperatorRegistrySource extends ExternalGateway {
+  fetchRegistry(): Promise<RawPayload>;
+  /** 1.6.7 — the source dataset's publication date. Null when the publisher gives none. */
+  fetchPublishedAt(): Promise<Date | null>;
+}
+
 export interface GeocodingSource extends ExternalGateway {
   /** 3.1.3. Empty when the address does not exist (3.1.5); throws when the service is unwell (3.1.17). */
   search(address: string): Promise<GeocodeCandidate[]>;

@@ -9,7 +9,7 @@
  * database, which is what lets `npm run ingest` pull live NEA data before Supabase exists.
  */
 import { Uuid, GeoPoint } from '../entity/valueTypes';
-import { AlertTrigger, ForecastRegion, ReportStatus, ReportType, Role, SourceKind } from '../entity/enums';
+import { AlertTrigger, ForecastRegion, PestType, ReportStatus, ReportType, Role, SourceKind } from '../entity/enums';
 import { Cluster } from '../entity/Cluster';
 import { ClusterSnapshot } from '../entity/ClusterSnapshot';
 import { RegionForecast } from '../entity/RegionForecast';
@@ -27,6 +27,8 @@ import { SavedLocation } from '../entity/SavedLocation';
 import { Alert } from '../entity/Alert';
 import { AlertSubscription } from '../entity/AlertSubscription';
 import { TreatmentRecord } from '../entity/TreatmentRecord';
+import { VectorControlOperator } from '../entity/VectorControlOperator';
+import { ObservationRecord } from '../entity/ObservationRecord';
 import { ParsedBatch } from './types';
 import { ParsedReading, ParsedStation } from '../control/ingestion/RainfallFeedParser';
 
@@ -363,6 +365,39 @@ export interface PriorityScoreStore {
  * produces no work order, and giving the two the same store is how a future contributor ends up
  * writing one anyway.
  */
+/**
+ * 1.6 — the operator registry and the geocode cache behind it.
+ *
+ * The two live in one port because 1.6.5 and 1.6.6 are two views of the same fact: the cache is
+ * what makes a reload cheap, and the stored registry is what makes a *failed* reload harmless.
+ * Splitting them would let a deployment hold one without the other, which is the only combination
+ * that behaves worse than holding neither — a warm cache with no registry re-geocodes nothing and
+ * still has nothing to serve.
+ */
+export interface OperatorRegistryStore {
+  /** 1.6.6 — replaces the registry only on a successful load. */
+  saveRegistry(operators: VectorControlOperator[], publishedAt: Date | null): Promise<void>;
+  registry(): Promise<VectorControlOperator[]>;
+  /** 1.6.7 — the source dataset's publication date, for every surface that displays the registry. */
+  publishedAt(): Promise<Date | null>;
+  /** 1.6.5 — null when the postal code has never been resolved. */
+  cachedCoordinate(postalCode: string): Promise<GeoPoint | null>;
+  cacheCoordinate(postalCode: string, point: GeoPoint): Promise<void>;
+}
+
+/**
+ * 1.5 — wildlife observations. Keyed by the supplier's observation id, which is what makes 1.5.11
+ * true rather than aspirational: overlapping runs re-present records we already hold, and counting
+ * those again would inflate the driver by exactly the overlap.
+ */
+export interface ObservationStore {
+  /** @returns the number of records that were new. Existing ids are left untouched — 1.5.11. */
+  save(observations: ObservationRecord[]): Promise<number>;
+  /** 4.1.24 — the density driver's input: how many observations of this pest, in this locality. */
+  countByLocality(pestType: PestType, localityId: string, since: Date): Promise<number>;
+  all(): Promise<ObservationRecord[]>;
+}
+
 export interface ReferralStore {
   save(referral: Referral): Promise<Referral>;
   findById(id: Uuid): Promise<Referral | null>;

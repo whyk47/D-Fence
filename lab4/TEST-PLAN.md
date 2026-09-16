@@ -16,7 +16,7 @@ cross-pest generalisation in `REQUIREMENTS.md` v0.9. v0.3 records what happened 
 `tests/pest-scoring.test.ts` (25 cases). §6.5 and §6.6 remain designed and not executed, because the
 two external gateways they test are build steps 7 and 8 and are not written.
 
-**The whole suite: `npx vitest run`, 749 tests in 36 files, 749 passing.** One case,
+**The whole suite: `npx vitest run`, 769 tests in 38 files, 769 passing.** One case,
 `rainfall.test.ts` J2, was failing when this pass began; it predated the v0.9 work and has since been
 fixed. What it was is worth reading in §5, because it was not the defect it appeared to be.
 
@@ -1791,9 +1791,16 @@ standing.
 
 ### 6.5 §2.38 — observation ingestion, requirement group 1.5
 
-> **Still designed, not executed.** `INaturalistGateway` is build step 8 and is not written. The
-> taxon ids these cases need are already in `config/pests.default.json`, each resolved by id rather
-> than by name search — B2 and B3 can be written the day the gateway exists.
+> **Executed.** `tests/observation-ingestion.test.ts`, 11 cases — B1 to B8 as designed, plus B4b,
+> B9 and B10. Build step 8 is written.
+>
+> **B3 failed on its first run, and the code was wrong, not the test.** `isAdmissible` measured the
+> 90-day window in elapsed milliseconds against a bare `observed_on` date, which parses to midnight.
+> A record exactly 90 days old was therefore admitted at 00:30 and rejected at 02:00 the same
+> morning: the rule depended on what time of day the job happened to run, and the feed would have
+> quietly shrunk for whoever scheduled the cycle later. The comparison is now whole days between
+> calendar dates, on Singapore's calendar for the reason J3 records. This is what a boundary case is
+> for — an implementation that is wrong by hours fails here and nowhere else.
 
 | # | Method | Test input | Expected output |
 |---|---|---|---|
@@ -1816,7 +1823,13 @@ in. That is not a wrong number, it is a fabricated one.
 
 ### 6.6 §2.39 — the operator registry, requirement group 1.6
 
-> **Still designed, not executed.** `VCORegistryGateway` is build step 7 and is not written.
+> **Executed.** `tests/operator-registry.test.ts`, 9 cases — G1 to G6 as designed, plus G1b, G4b and
+> G5b. Build step 7 is written.
+>
+> **G1b was added beyond the design.** A `split(',')` reader passes G1 and fails G1b, and the symptom
+> would not look like a parsing bug: company names in this file contain commas
+> ("PEST-PRO MANAGEMENT PTE. LTD., SINGAPORE"), so shearing one shifts every later column one place
+> left and the file arrives as 290 rows with invalid postal codes.
 
 | # | Method | Test input | Expected output |
 |---|---|---|---|

@@ -2005,8 +2005,9 @@ dengue score is unchanged.*
 > **Built 2026-09-16: US-11.1, US-11.2, US-11.3, US-11.6, US-11.7 and US-11.8.** That is build
 > steps 1 to 6 of `PEST-PRIORITY-MODEL.md` §8, which the model doc calls the point at which "the
 > model is still complete and demonstrable". 4.2.5's compatibility test was written first and passes
-> on five v0.8 goldens, bit-identically. The suite stands at 749 tests, all passing; the one failure
-> at the start of the pass, `rainfall.test.ts` J2, predated this work and has been fixed.
+> on five v0.8 goldens, bit-identically. Build steps 7 and 8 followed — the operator registry and
+> the observation feed, with the test cases §6.5 and §6.6 had designed in advance. The suite stands
+> at 769 tests, all passing; `rainfall.test.ts` J2, which predated this work, has been fixed.
 >
 > **Not built: US-11.4 and US-11.5**, the two external gateways — build steps 7 and 8, and the two
 > stories the cut list already had at position 1. Tier C runs on stored reports alone, so nothing

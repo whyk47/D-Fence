@@ -21,6 +21,8 @@ import { HttpClient } from './boundary/gateways/HttpClient';
 import { NEAFeedGateway } from './boundary/gateways/NEAFeedGateway';
 import { RainfallGateway } from './boundary/gateways/RainfallGateway';
 import { ForecastGateway } from './boundary/gateways/ForecastGateway';
+import { INaturalistGateway } from './boundary/gateways/INaturalistGateway';
+import { VCORegistryGateway } from './boundary/gateways/VCORegistryGateway';
 import { ExpressApp } from './boundary/http/ExpressApp';
 import { DashboardRoutes } from './boundary/http/DashboardRoutes';
 import { ReportRoutes } from './boundary/http/ReportRoutes';
@@ -103,6 +105,13 @@ import { PrivacyController } from './control/PrivacyController';
 import { ClusterIngestionJob } from './control/ingestion/ClusterIngestionJob';
 import { RainfallIngestionJob } from './control/ingestion/RainfallIngestionJob';
 import { ForecastIngestionJob } from './control/ingestion/ForecastIngestionJob';
+import { ObservationIngestionJob } from './control/ingestion/ObservationIngestionJob';
+import { OperatorRegistryLoader } from './control/OperatorRegistryLoader';
+import {
+  InMemoryObservationStore,
+  InMemoryOperatorRegistryStore,
+} from './persistence/memory/InMemoryPestReferenceStores';
+import { EvidenceTier } from './entity/enums';
 import { RainfallAccumulator } from './control/RainfallAccumulator';
 import { NormalisationFactory } from './control/normalisation/NormalisationFactory';
 import { PriorityScoringEngine, DriverInputs } from './control/PriorityScoringEngine';
@@ -323,6 +332,29 @@ async function main(): Promise<void> {
   // that job just wrote. A forecast joined to yesterday's cluster list is a flag on the wrong map.
   const forecastJob = new ForecastIngestionJob(new ForecastGateway(http), runs, forecasts, clusters);
 
+  // 1.5, 1.6 — the two v0.9 evidence sources.
+  //
+  // Both are in-memory only. That is a real limitation and not an oversight: neither has a
+  // migration yet, so a restart re-geocodes the registry and re-fetches the observation window.
+  // Both are cheap enough to survive it (one cached pass, one 90-day page per tier B pest) and
+  // neither feeds a dengue score, so the cost of the gap falls entirely on the new pests.
+  const operatorRegistry = new InMemoryOperatorRegistryStore();
+  const observations = new InMemoryObservationStore();
+  const registryLoader = new OperatorRegistryLoader(new VCORegistryGateway(http), oneMap, operatorRegistry);
+
+  // 1.5.1 — one job per tier B pest, because 1.5.2 makes the supplier call taxon by taxon and
+  // 1.5.14 records the pest type on the run. A pest whose profile carries no taxon id is skipped
+  // rather than fetched without one: an unfiltered call returns every observation in Singapore.
+  const observationJobs = [...config.pestProfiles.values()]
+    .filter((p) => p.evidenceTier === EvidenceTier.B && p.observationTaxonId !== null)
+    .map((profile) => new ObservationIngestionJob(
+      new INaturalistGateway(http),
+      runs,
+      observations,
+      locator,
+      profile,
+    ));
+
   const engine = new PriorityScoringEngine(NormalisationFactory.build(config.normalisation), config, scores);
   const accumulator = new RainfallAccumulator();
 
@@ -334,11 +366,16 @@ async function main(): Promise<void> {
     // the five-minute rainfall beat — 288 requests a day for a payload that changes four times is
     // exactly the discourtesy 10.4.6 asks us not to commit against a free public API.
     const forecastRun = await forecastCycle(trigger);
+    // 1.5.1 allows 24 hours, and the supplier is a volunteer-run free API. Throttled for the same
+    // reason the forecast is, and after the cluster job because 1.5.9 binds each observation to a
+    // locality — binding to yesterday's cluster list would put sightings in closed clusters.
+    const observationRun = await observationCycle(trigger);
     await scoreAndAlert(rainRun.outcome === 'FAILED');
     console.log(
       `cycle: clusters ${clusterRun.outcome} (${clusterRun.featureCount}), ` +
         `rainfall ${rainRun.outcome} (${rainRun.featureCount}), ` +
-        `forecast ${forecastRun ?? 'SKIPPED'}`,
+        `forecast ${forecastRun ?? 'SKIPPED'}, ` +
+        `observations ${observationRun ?? 'SKIPPED'}`,
     );
   }
 
@@ -435,6 +472,51 @@ async function main(): Promise<void> {
     }
     return `${run.outcome} (${run.featureCount} cluster(s) flagged)`;
   }
+
+  /**
+   * 1.5.1 — at most one observation sweep per interval, across every tier B pest.
+   *
+   * The jobs run in sequence rather than in parallel. Six concurrent requests to a free,
+   * volunteer-funded API is the discourtesy 10.4.6 asks us not to commit, and nothing here is
+   * time-critical: the window is ninety days wide.
+   */
+  let lastObservationAt = 0;
+  const observationInterval = (config.ingestionIntervals.get(SourceKind.Observations) ?? 24 * 3600) * 1000;
+  async function observationCycle(trigger: 'SCHEDULED' | 'MANUAL'): Promise<string | null> {
+    if (observationJobs.length === 0) {
+      return null;
+    }
+    if (trigger === 'SCHEDULED' && Date.now() - lastObservationAt < observationInterval) {
+      return null;
+    }
+    lastObservationAt = Date.now();
+    let accepted = 0;
+    let rejected = 0;
+    for (const job of observationJobs) {
+      const run = await job.run(trigger);
+      accepted += run.acceptedCount ?? 0;
+      rejected += run.rejectedCount ?? 0;
+    }
+    return `${observationJobs.length} pest(s), ${accepted} accepted, ${rejected} rejected`;
+  }
+
+  /**
+   * 1.6.1 — loaded once, at start-up, and never scheduled. The dataset's own publication date is
+   * 2024-06-06; there is nothing to poll for. A failure here is logged and tolerated, because
+   * 1.6.6 says the previous registry survives and 4.1.9 excludes a driver whose value is unknown —
+   * so the worst case is that one driver at weight 0.05 drops out of the renormalisation.
+   */
+  void registryLoader
+    .load()
+    .then((result) => {
+      console.log(
+        result.retainedPrevious
+          ? 'VCO registry: load failed, previous registry retained (1.6.6)'
+          : `VCO registry: ${result.loaded} operator(s) geocoded, ${result.ungeocoded} without a coordinate, ` +
+              `${result.cacheHits} from cache`,
+      );
+    })
+    .catch((e: unknown) => console.error('VCO registry load failed:', e));
 
   if (telegramLink !== null) {
     telegramLink.start();
