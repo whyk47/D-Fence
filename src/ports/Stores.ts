@@ -197,6 +197,19 @@ export interface ReportStore {
   submittedSince(since: Date): Promise<Report[]>;
   /** 5.2.5 into 4.1.3 — the verified open report count, per cluster, in one query per cycle. */
   verifiedOpenCountByCluster(): Promise<Map<Uuid, number>>;
+  /**
+   * 4.1.3, 4.1.23, 4.1.26 — the three report-derived drivers, per (locality, pest), in one pass.
+   *
+   * One method rather than three because the alternative is three full scans of the report table
+   * per cycle for what is a single grouping, and because the three numbers must describe the same
+   * set of reports: computed separately, a report verified between two of those queries would be
+   * counted in one driver and not the next, and the inconsistency would show up as a score that
+   * cannot be reproduced from the breakdown beside it.
+   *
+   * @param since the velocity window's start (4.1.23). Corroborations and the verified-open count
+   *   are not windowed — 4.1.3 counts what is open now, whenever it was reported.
+   */
+  reportDriversByLocalityAndPest(since: Date): Promise<Map<string, PestReportCounts>>;
   /** 8.5.1, 8.3.21 — every report linked to a work order. */
   findForWorkOrder(workOrderId: Uuid): Promise<Report[]>;
   /**
@@ -211,6 +224,26 @@ export interface ReportStore {
   /** 5.1.5, 5.3.5 */
   savePhoto(photo: ReportPhoto): Promise<void>;
   photosFor(reportId: Uuid): Promise<ReportPhoto[]>;
+}
+
+/**
+ * The three report-derived drivers for one (locality, pest) pair.
+ *
+ * Keyed in the returned map by `localityId + '|' + pestType`; `pestReportKey` builds that key so
+ * the writer and every reader agree on its shape. A pair absent from the map has no reports at
+ * all, which is genuinely zero rather than unknown — 5.2.5 is the reason that distinction is safe
+ * here and not for rainfall.
+ */
+export interface PestReportCounts {
+  verifiedOpen: number;
+  /** 4.1.23 — reports submitted inside the velocity window. */
+  recent: number;
+  /** 4.1.26 — corroborations on this pair's reports. */
+  corroborations: number;
+}
+
+export function pestReportKey(localityId: Uuid, pestType: PestType): string {
+  return `${localityId}|${pestType}`;
 }
 
 /**

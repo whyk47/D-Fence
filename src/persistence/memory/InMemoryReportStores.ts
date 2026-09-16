@@ -7,7 +7,7 @@
  * driven to 49 and 51 metres without a database.
  */
 import { randomUUID } from 'node:crypto';
-import { ClusterLocator, ClusterStore, ReportStore } from '../../ports/Stores';
+import { ClusterLocator, ClusterStore, PestReportCounts, pestReportKey, ReportStore } from '../../ports/Stores';
 import { GeoPoint, Uuid } from '../../entity/valueTypes';
 import { ReportStatus, ReportType } from '../../entity/enums';
 import { Report } from '../../entity/Report';
@@ -60,6 +60,34 @@ export class InMemoryReportStore implements ReportStore {
 
   async findByReporter(reporterId: Uuid): Promise<Report[]> {
     return [...this.reports.values()].filter((r) => r.reporterId === reporterId);
+  }
+
+  /** 4.1.3, 4.1.23, 4.1.26 — the three report-derived drivers, grouped by (locality, pest). */
+  async reportDriversByLocalityAndPest(since: Date): Promise<Map<string, PestReportCounts>> {
+    const counts = new Map<string, PestReportCounts>();
+    const corroborated = new Map<Uuid, number>();
+    for (const c of this.corroborations) {
+      corroborated.set(c.reportId, (corroborated.get(c.reportId) ?? 0) + 1);
+    }
+
+    for (const report of this.reports.values()) {
+      if (report.clusterId === null) {
+        continue; // 5.1.9 — a report bound to no locality contributes to no locality's score.
+      }
+      const key = pestReportKey(report.clusterId, report.pestType);
+      const row = counts.get(key) ?? { verifiedOpen: 0, recent: 0, corroborations: 0 };
+      if (report.isVerified()) {
+        row.verifiedOpen += 1;
+        row.corroborations += corroborated.get(report.id) ?? 0;
+      }
+      // Velocity counts submissions, verified or not: 4.1.23 measures how fast a place is
+      // complaining, and moderation lag is a property of us rather than of the place.
+      if (report.submittedAt.getTime() >= since.getTime()) {
+        row.recent += 1;
+      }
+      counts.set(key, row);
+    }
+    return counts;
   }
 
   /** 5.2.5 — Verified and Actioned only, and only where a cluster binding exists (5.1.9). */

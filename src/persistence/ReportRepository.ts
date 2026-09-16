@@ -23,14 +23,14 @@ import { Report } from '../entity/Report';
 import { ReportPhoto } from '../entity/ReportPhoto';
 import { Corroboration } from '../entity/Corroboration';
 import { GeoPoint, Uuid } from '../entity/valueTypes';
-import { ReportStatus, ReportType } from '../entity/enums';
-import { ReportStore } from '../ports/Stores';
+import { LocationContext, PestType, ReportStatus, ReportType } from '../entity/enums';
+import { PestReportCounts, pestReportKey, ReportStore } from '../ports/Stores';
 
 /** Every column, once. `point` comes back as GeoJSON because `geography` has no useful text form. */
 const COLUMNS = `
   id, reporter_id, ST_AsGeoJSON(point) AS point, type, description, status, cluster_id,
   locality_binding, corroboration_count, submitted_at, moderator_id, moderated_at,
-  moderation_reason, work_order_id`;
+  moderation_reason, work_order_id, pest_type, location_context, injury_reported`;
 
 /** 5.1.11, 5.2.5 — the three live statuses, kept in one place so the two queries cannot drift. */
 const OPEN_STATUSES = [ReportStatus.Submitted, ReportStatus.Verified, ReportStatus.Actioned];
@@ -54,8 +54,9 @@ export class ReportRepository implements ReportStore {
       `INSERT INTO report (
          id, reporter_id, point, type, description, status, cluster_id, locality_binding,
          corroboration_count, submitted_at, moderator_id, moderated_at, moderation_reason,
-         work_order_id)
-       VALUES ($1, $2, ST_MakePoint($4, $3)::geography, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+         work_order_id, pest_type, location_context, injury_reported)
+       VALUES ($1, $2, ST_MakePoint($4, $3)::geography, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+               $15, $16, $17, $18)
        ON CONFLICT (id) DO UPDATE SET
          reporter_id         = EXCLUDED.reporter_id,
          point               = EXCLUDED.point,
@@ -69,7 +70,10 @@ export class ReportRepository implements ReportStore {
          moderator_id        = EXCLUDED.moderator_id,
          moderated_at        = EXCLUDED.moderated_at,
          moderation_reason   = EXCLUDED.moderation_reason,
-         work_order_id       = EXCLUDED.work_order_id`,
+         work_order_id       = EXCLUDED.work_order_id,
+         pest_type           = EXCLUDED.pest_type,
+         location_context    = EXCLUDED.location_context,
+         injury_reported     = EXCLUDED.injury_reported`,
       [
         report.id,
         report.reporterId,
@@ -86,6 +90,9 @@ export class ReportRepository implements ReportStore {
         report.moderatedAt,
         report.moderationReason,
         report.workOrderId,
+        report.pestType, // 5.1.15
+        report.locationContext, // 5.1.16
+        report.injuryReported, // 5.1.17
       ],
     );
     return report;
@@ -150,6 +157,39 @@ export class ReportRepository implements ReportStore {
     const counts = new Map<Uuid, number>();
     for (const row of rows) {
       counts.set(row.cluster_id as Uuid, Number(row.n));
+    }
+    return counts;
+  }
+
+  /**
+   * 4.1.3, 4.1.23, 4.1.26 — the three report-derived drivers, grouped by (locality, pest).
+   *
+   * One query, matching the in-memory store's one pass, and for the same reason: the three numbers
+   * must describe the same set of reports. Computed as three queries, a report verified between
+   * two of them would be counted in one driver and not the next, and the score would stop being
+   * reproducible from the breakdown printed beside it.
+   */
+  async reportDriversByLocalityAndPest(since: Date): Promise<Map<string, PestReportCounts>> {
+    const rows = await this.db.query(
+      `SELECT r.cluster_id,
+              r.pest_type,
+              count(*) FILTER (WHERE r.status IN ('Verified','Actioned'))::int          AS verified_open,
+              count(*) FILTER (WHERE r.submitted_at >= $1)::int                        AS recent,
+              coalesce(sum(c.n) FILTER (WHERE r.status IN ('Verified','Actioned')), 0)::int AS corroborations
+         FROM report r
+         LEFT JOIN (SELECT report_id, count(*)::int AS n FROM corroboration GROUP BY report_id) c
+                ON c.report_id = r.id
+        WHERE r.cluster_id IS NOT NULL
+        GROUP BY r.cluster_id, r.pest_type`,
+      [since],
+    );
+    const counts = new Map<string, PestReportCounts>();
+    for (const row of rows) {
+      counts.set(pestReportKey(row.cluster_id as Uuid, row.pest_type as PestType), {
+        verifiedOpen: Number(row.verified_open),
+        recent: Number(row.recent),
+        corroborations: Number(row.corroborations),
+      });
     }
     return counts;
   }
@@ -264,6 +304,11 @@ export class ReportRepository implements ReportStore {
     report.moderatedAt = (row.moderated_at as Date | null) ?? null;
     report.moderationReason = (row.moderation_reason as string | null) ?? null;
     report.workOrderId = (row.work_order_id as Uuid | null) ?? null;
+    // Defaulted rather than left undefined when the column is absent, so a repository reading a
+    // row written before migration 005 produces the same Report the in-memory store would.
+    report.pestType = (row.pest_type as PestType | null) ?? PestType.Mosquito;
+    report.locationContext = (row.location_context as LocationContext | null) ?? null;
+    report.injuryReported = row.injury_reported === true;
     report.applyStatus(row.status as ReportStatus);
     return report;
   }

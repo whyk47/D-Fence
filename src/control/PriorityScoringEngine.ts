@@ -32,6 +32,18 @@ export class PriorityScoringEngine implements DomainEventSubscriber {
   private readonly urgencies: UrgencyCalculator;
   private readonly calculator: PestPriorityCalculator;
 
+  /**
+   * The shared calculator, for scorers of other pests.
+   *
+   * Exposed rather than constructed a second time so that every pest is scored by one object
+   * holding one set of normalisation strategies and one set of tier thresholds. Two instances
+   * would drift the moment configuration was reloaded into one of them, and the symptom would be
+   * a rat and a mosquito in the same queue judged against different thresholds.
+   */
+  sharedCalculator(): PestPriorityCalculator {
+    return this.calculator;
+  }
+
   constructor(
     strategies: Map<Driver, NormalisationStrategy>,
     private readonly config: ConfigSet,
@@ -76,10 +88,18 @@ export class PriorityScoringEngine implements DomainEventSubscriber {
    *   no entry is scored on what is available and marked DEGRADED, never scored as if the missing
    *   values were zero (4.1.12, 4.1.13).
    */
+  /**
+   * @param additional scores for other pests, computed elsewhere (`CrossPestScoringService`).
+   *   They are ranked and saved *with* the mosquito scores rather than after them, because 4.1.14
+   *   orders one queue: ranking the mosquito alone and appending the rest would give every
+   *   mosquito a rank derived from a list it is not actually in, and 4.4.4's Critical-first rule
+   *   could not lift a snake above a dengue cluster at all.
+   */
   async computeScores(
     clusters: Cluster[],
     inputs: Map<string, DriverInputs> = new Map(),
     now: Date = new Date(),
+    additional: Array<{ score: PriorityScore; locality: string }> = [],
   ): Promise<PriorityRanking> {
     const ranking = new PriorityRanking();
     if (clusters.length === 0) {
@@ -106,6 +126,11 @@ export class PriorityScoringEngine implements DomainEventSubscriber {
         locality: cluster.locality,
       };
       ranking.add(score, key);
+    }
+
+    for (const { score, locality } of additional) {
+      scored.push(score);
+      ranking.add(score, PriorityRanking.keyFor(score, locality));
     }
 
     ranking.rank();

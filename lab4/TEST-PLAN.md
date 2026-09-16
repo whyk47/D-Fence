@@ -16,7 +16,9 @@ cross-pest generalisation in `REQUIREMENTS.md` v0.9. v0.3 records what happened 
 `tests/pest-scoring.test.ts` (25 cases). §6.5 and §6.6 remain designed and not executed, because the
 two external gateways they test are build steps 7 and 8 and are not written.
 
-**The whole suite: `npx vitest run`, 769 tests in 38 files, 769 passing.** One case,
+**The whole suite: `npx vitest run`, 776 tests in 39 files, 776 passing** — including
+`tests/repository.test.ts`, which runs against live PostGIS and is the suite that caught the missing
+schema described in §6.8. One case,
 `rainfall.test.ts` J2, was failing when this pass began; it predated the v0.9 work and has since been
 fixed. What it was is worth reading in §5, because it was not the defect it appeared to be.
 
@@ -1852,3 +1854,39 @@ today. It is a display obligation and it is testable, so it is tested.
 | The severity multipliers themselves | They are judgement, from the rubric in `PEST-PRIORITY-MODEL.md` §4, not measurement. A test asserting σ(Macaque) = 0.92 asserts only that someone typed 0.92 twice. What *is* tested is the invariant they must satisfy — C2 and C5 |
 | The 22-row catalogue's contents | Same reason. C4 tests the tier A driver set because 4.3.4 states it; nothing states which pest is third-most severe |
 | Cross-pest ranking *correctness* | There is no ground truth to test against. O7 tests that the ranking respects the tier, and §2.34 tests that dengue is unchanged. Whether a rat in Bedok should outrank a mosquito in Yishun is a question for the demo's Q&A, not for a test |
+
+### 6.8 §2.40 — the evidence actually reaching a score, and the schema underneath it
+
+> **Executed.** `tests/cross-pest-scoring.test.ts`, 7 cases.
+>
+> This section was not in the original design, and why it exists is worth recording. Build steps 7
+> and 8 delivered two evidence sources with twenty passing cases between them — and nothing read
+> what they collected. `ExternalObservationDensity` and `ResponseCapacityDeficit` were declared as
+> driver inputs and populated by nobody, so a locality with wildlife sightings and no reports scored
+> nothing at all. Every case in §6.5 and §6.6 passed throughout.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| X1 | `reportDriversByLocalityAndPest` | rats and cockroaches in one locality | counted separately — 4.1.3 |
+| X2 | same | verified, unverified, and one outside the window | velocity counts submissions; 4.1.3 counts verified — 4.1.23 |
+| X3 | `CrossPestScoringService.scoreAll` | a locality with one rat report | one score, not 22 |
+| X4 | same | a mosquito report and a rat report | the mosquito is not scored here |
+| X5 | same | an observation and no reports | the tier B pest is scored — 1.5.9 into 4.1.24 |
+| X6 | same | registry loaded / not loaded | the driver is fed / excluded and the score degraded — 1.6.8, 4.1.9 |
+| X7 | same | a tier C pest | five drivers, no observation driver — 4.3.6 |
+
+**X5 is the case that would have failed before this pass**, and so would X6's first half.
+
+**The schema gap sat underneath all of it.** `Report.pestType` was written by the form, enforced by
+the controller and read by 8.1.14 to decide whether a crew is sent — and `ReportRepository` had no
+column to put it in. A deployed instance would have accepted a snake report, stored a report of no
+particular pest, and dispatched a cleaning crew to it. Nothing would have errored. The suite was
+blind to this by construction: every other test runs against the in-memory stores, so the only
+configuration that lost data was the deployed one. `tests/repository.test.ts`, which runs against
+live PostGIS, failed within seconds of the query changing — which is the argument for keeping a
+live-database suite at all. Migration `005_pest_generalisation.sql` closes it, and is applied.
+
+**Two migrations report a checksum mismatch** — `001_initial_schema.sql` and
+`002_task_type_alignment.sql` were edited after being applied. The runner warns rather than fails,
+and it predates this work. It means a freshly migrated database and the current one are not
+guaranteed identical, which is worth resolving before anyone sets up a second environment.

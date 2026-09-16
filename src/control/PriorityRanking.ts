@@ -11,7 +11,7 @@
  * changed with the name — v0.8 broke ties on case size, which exists for the mosquito alone and
  * cannot order a queue containing a rat and a snake.
  */
-import { PriorityTier } from '../entity/enums';
+import { Driver, PriorityTier } from '../entity/enums';
 import { Uuid } from '../entity/valueTypes';
 import { PriorityScore } from '../entity/PriorityScore';
 
@@ -32,6 +32,24 @@ export interface RankingKey {
 export class PriorityRanking {
   private readonly ordered: PriorityScore[] = [];
   private readonly keys = new Map<Uuid, RankingKey>();
+
+  /**
+   * 4.1.14's tie-breakers read off the score itself.
+   *
+   * The mosquito cycle passes its key explicitly because it has the driver inputs to hand; every
+   * other pest is scored somewhere that does not, so the key is derived from the breakdown the
+   * score already carries. Both produce the same numbers — `rawValue` for
+   * `VerifiedOpenReportCount` *is* the count that was fed in — and having one derivation means a
+   * pest cannot be ranked by a rule the mosquito is not ranked by.
+   */
+  static keyFor(score: PriorityScore, locality: string): RankingKey {
+    const reports = score.contributions.find((c) => c.driver === Driver.VerifiedOpenReportCount);
+    return {
+      severityMultiplier: score.severityMultiplier,
+      verifiedOpenReportCount: reports?.rawValue ?? 0,
+      locality,
+    };
+  }
 
   add(score: PriorityScore, key: RankingKey): void {
     this.ordered.push(score);

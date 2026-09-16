@@ -2007,7 +2007,13 @@ dengue score is unchanged.*
 > model is still complete and demonstrable". 4.2.5's compatibility test was written first and passes
 > on five v0.8 goldens, bit-identically. Build steps 7 and 8 followed — the operator registry and
 > the observation feed, with the test cases §6.5 and §6.6 had designed in advance. The suite stands
-> at 769 tests, all passing; `rainfall.test.ts` J2, which predated this work, has been fixed.
+> at 776 tests, all passing; `rainfall.test.ts` J2, which predated this work, has been fixed.
+>
+> **Then the gap between the two.** Steps 7 and 8 collected evidence that nothing read:
+> `CrossPestScoringService` now scores every (locality, pest) pair that has any, and migration
+> `005_pest_generalisation.sql` gives the v0.9 model a schema — `report.pest_type` had no column at
+> all, so a deployed instance would have stored every snake report as a report of no particular pest
+> and dispatched a cleaning crew to it.
 >
 > **Not built: US-11.4 and US-11.5**, the two external gateways — build steps 7 and 8, and the two
 > stories the cut list already had at position 1. Tier C runs on stored reports alone, so nothing

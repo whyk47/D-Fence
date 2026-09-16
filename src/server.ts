@@ -107,6 +107,7 @@ import { RainfallIngestionJob } from './control/ingestion/RainfallIngestionJob';
 import { ForecastIngestionJob } from './control/ingestion/ForecastIngestionJob';
 import { ObservationIngestionJob } from './control/ingestion/ObservationIngestionJob';
 import { OperatorRegistryLoader } from './control/OperatorRegistryLoader';
+import { CrossPestScoringService } from './control/scoring/CrossPestScoringService';
 import {
   InMemoryObservationStore,
   InMemoryOperatorRegistryStore,
@@ -356,6 +357,13 @@ async function main(): Promise<void> {
     ));
 
   const engine = new PriorityScoringEngine(NormalisationFactory.build(config.normalisation), config, scores);
+  const crossPest = new CrossPestScoringService(
+    engine.sharedCalculator(),
+    reports,
+    observations,
+    operatorRegistry,
+    treatments,
+  );
   const accumulator = new RainfallAccumulator();
 
   /** One full cycle: ingest both sources, then score. Scheduled, and run once at boot. */
@@ -434,7 +442,20 @@ async function main(): Promise<void> {
         daysSinceLastTreatment: await treatments.daysSinceLastTreatment(cluster.id, now),
       });
     }
-    await engine.computeScores(active, inputs, now);
+    // 4.2.1-4.2.4 — every other pest with evidence in these same localities. Ranked and saved in
+    // the same call as the mosquito scores, because 4.1.14 orders one queue and 4.4.4 has to be
+    // able to lift a snake above a dengue cluster.
+    const pestScores = (
+      await crossPest.scoreAll(active, config.pestProfiles, {
+        observedMin: 0,
+        observedMax: Math.max(...active.map((c) => c.caseSize), 1),
+        now,
+      })
+    ).map((score) => ({
+      score,
+      locality: active.find((c) => c.id === score.localityId)?.locality ?? '',
+    }));
+    await engine.computeScores(active, inputs, now, pestScores);
     // 3.1.8 — every saved location is re-evaluated against the boundaries this cycle just wrote.
     // After scoring rather than before: the clusters have to be current for the answer to be.
     const moved = await locations.evaluateAll(now);
@@ -449,7 +470,10 @@ async function main(): Promise<void> {
       const tally = await notifications.deliverAll(due, now);
       console.log(`  alerts: ${tally.Sent} sent, ${tally.Failed} failed, ${tally.Suppressed} suppressed`);
     }
-    console.log(`  scored ${active.length} active cluster(s)`);
+    console.log(
+      `  scored ${active.length} active locality(ies) for dengue` +
+        (pestScores.length > 0 ? `, plus ${pestScores.length} other (locality, pest) pair(s)` : ''),
+    );
   }
 
   /**

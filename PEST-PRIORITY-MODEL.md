@@ -206,7 +206,13 @@ Expect this question in the demo; it has a good answer.
 | `CorroborationDensity` | own `Corroboration` | capped linear, 3 | — | ✓ | ✓ |
 | `ExternalObservationDensity` | iNaturalist | log, ref 20 / 90 days | — | ✓ | — |
 | `DaysSinceLastTreatment` | own `TreatmentRecord` | recency decay, 60 d | ✓ | ✓ | ✓ |
-| `ResponseCapacityDeficit` | **NEA VCO registry** | capped linear, 8 km | ✓ | ✓ | ✓ |
+| `ResponseCapacityDeficit` | **NEA VCO registry** | capped linear, 8 km | — | ✓ | ✓ |
+
+> **Corrected 2026-09-17.** The `A` column for `ResponseCapacityDeficit` read ✓ and was wrong. It
+> contradicted §5.2 immediately below — which states in words that the driver is *not* added to the
+> mosquito set — and it contradicted 4.2.5, since an eighth tier A driver moves every dengue score.
+> The code was right; the table was not. Worth noting because this is the same mistake step 9 would
+> make, written down as though it were already settled.
 
 Every normalisation method is one of the four Strategy classes already implemented in
 `src/control/normalisation/` — `LogScaleNormalisation`, `CappedLinearNormalisation`,
