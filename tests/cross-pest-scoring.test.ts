@@ -7,6 +7,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import { CrossPestScoringService } from '../src/control/scoring/CrossPestScoringService';
+import { CriticalOverrideEvaluator } from '../src/control/scoring/CriticalOverrideEvaluator';
+import { CriticalEscalationNotifier } from '../src/control/CriticalEscalationNotifier';
+import { InMemoryAccountStore } from '../src/persistence/memory/InMemoryAccountStores';
+import { RecordingNotifier } from '../src/persistence/memory/InMemoryWorkOrderStores';
+import { Account } from '../src/entity/Account';
+import { PriorityScore } from '../src/entity/PriorityScore';
 import { PestPriorityCalculator } from '../src/control/scoring/PestPriorityCalculator';
 import { UrgencyCalculator } from '../src/control/scoring/UrgencyCalculator';
 import { NormalisationFactory } from '../src/control/normalisation/NormalisationFactory';
@@ -22,7 +28,15 @@ import { ObservationRecord } from '../src/entity/ObservationRecord';
 import { VectorControlOperator } from '../src/entity/VectorControlOperator';
 import { Report } from '../src/entity/Report';
 import { Cluster } from '../src/entity/Cluster';
-import { Driver, PestType, ReportStatus, ReportType } from '../src/entity/enums';
+import {
+  Driver,
+  LocationContext,
+  PestType,
+  PriorityTier,
+  ReportStatus,
+  ReportType,
+  Role,
+} from '../src/entity/enums';
 import { GeoPoint, Polygon, Uuid } from '../src/entity/valueTypes';
 import { pestReportKey } from '../src/ports/Stores';
 
@@ -51,6 +65,7 @@ function report(
   status: ReportStatus,
   submittedAt: Date,
   id: Uuid = `r-${Math.random()}`,
+  over: Partial<Report> = {},
 ): Report {
   const r = new Report();
   r.id = id;
@@ -63,11 +78,17 @@ function report(
   r.localityBinding = 'Bedok North Ave 1';
   r.corroborationCount = 0;
   r.submittedAt = submittedAt;
+  Object.assign(r, over);
   r.applyStatus(status);
   return r;
 }
 
-function service(reports: InMemoryReportStore, observations: InMemoryObservationStore, registry: InMemoryOperatorRegistryStore): {
+function service(
+  reports: InMemoryReportStore,
+  observations: InMemoryObservationStore,
+  registry: InMemoryOperatorRegistryStore,
+  withOverride = false,
+): {
   svc: CrossPestScoringService;
   config: ConfigSet;
 } {
@@ -83,6 +104,7 @@ function service(reports: InMemoryReportStore, observations: InMemoryObservation
       observations,
       registry,
       new InMemoryTreatmentRecordStore(),
+      withOverride ? new CriticalOverrideEvaluator(config.criticalOverrideRules) : null,
     ),
     config,
   };
@@ -232,5 +254,165 @@ describe('Cross-pest scoring (4.2.1-4.2.4, 4.3.4-4.3.6)', () => {
     // misleading in the breakdown at worst.
     expect(bedbug?.contributions.map((c) => c.driver)).not.toContain(Driver.ExternalObservationDensity);
     expect(bedbug?.isDegraded).toBe(false);
+  });
+});
+
+describe('The critical override, in the cycle rather than in a test (4.4.1-4.4.6, 4.4.9)', () => {
+  /**
+   * X8 is the case that would have failed before this pass, and it is worth saying why it could
+   * not have been caught by the §6.3 override cases. Those construct a `CriticalOverrideEvaluator`
+   * and call it directly, so they prove the rules are right. Nothing proved anything *called* it:
+   * `withOverride` and the evaluator were reached only by their own tests and by type-imports.
+   * Requirement group 4.4 was implemented, green, and never executed against a real score.
+   */
+  it('X8 — a snake reported indoors is raised to Critical by the scoring cycle', async () => {
+    const reports = new InMemoryReportStore();
+    await reports.save(
+      report(PestType.Snake, ReportStatus.Verified, NOW, 'r-snake', {
+        locationContext: LocationContext.Indoor,
+      }),
+    );
+    const { svc, config } = service(
+      reports,
+      new InMemoryObservationStore(),
+      new InMemoryOperatorRegistryStore(),
+      true,
+    );
+
+    const scores = await svc.scoreAll([locality()], config.pestProfiles, ctx);
+    const snake = scores.find((s) => s.pestType === PestType.Snake);
+
+    expect(snake?.tier).toBe(PriorityTier.Critical);
+    expect(snake?.overrideRuleName).toContain('wildlife-indoors');
+  });
+
+  it('X9 — the override raises the tier and leaves the score exactly where it was (4.4.5)', async () => {
+    const indoors = (): Report =>
+      report(PestType.Snake, ReportStatus.Verified, NOW, 'r-snake', {
+        locationContext: LocationContext.Indoor,
+      });
+
+    const plainStore = new InMemoryReportStore();
+    await plainStore.save(indoors());
+    const plain = service(plainStore, new InMemoryObservationStore(), new InMemoryOperatorRegistryStore(), false);
+
+    const raisedStore = new InMemoryReportStore();
+    await raisedStore.save(indoors());
+    const raised = service(raisedStore, new InMemoryObservationStore(), new InMemoryOperatorRegistryStore(), true);
+
+    const before = (await plain.svc.scoreAll([locality()], plain.config.pestProfiles, ctx))[0];
+    const after = (await raised.svc.scoreAll([locality()], raised.config.pestProfiles, ctx))[0];
+
+    // The whole of 4.4.5 in one assertion. Raising the score to 100 instead would put the case at
+    // the top of the table and also tell every downstream reader the evidence is overwhelming,
+    // which it is not: this is one report.
+    expect(after?.score).toBe(before?.score);
+    expect(before?.tier).not.toBe(PriorityTier.Critical);
+    expect(after?.tier).toBe(PriorityTier.Critical);
+  });
+
+  it('X10 — an unverified report does not raise anything (4.4.1)', async () => {
+    const reports = new InMemoryReportStore();
+    await reports.save(
+      report(PestType.Snake, ReportStatus.Submitted, NOW, 'r-snake', {
+        locationContext: LocationContext.Indoor,
+      }),
+    );
+    // Velocity counts it, so the pair is still a subject — it is the *override* that must not fire.
+    const { svc, config } = service(
+      reports,
+      new InMemoryObservationStore(),
+      new InMemoryOperatorRegistryStore(),
+      true,
+    );
+
+    const snake = (await svc.scoreAll([locality()], config.pestProfiles, ctx)).find(
+      (s) => s.pestType === PestType.Snake,
+    );
+
+    // A Critical tier anyone could trigger by filing a report is a denial of service against the
+    // manager's attention.
+    expect(snake).toBeDefined();
+    expect(snake?.tier).not.toBe(PriorityTier.Critical);
+  });
+});
+
+describe('N: the Operations Manager is told (4.4.9)', () => {
+  function critical(pestType: PestType, localityId = LOCALITY_ID): PriorityScore {
+    const s = new PriorityScore();
+    s.localityId = localityId;
+    s.clusterId = localityId;
+    s.pestType = pestType;
+    s.score = 21.4;
+    s.tier = PriorityTier.Critical;
+    s.overrideRuleName = 'wildlife-indoors';
+    return s;
+  }
+
+  async function managers(): Promise<{ accounts: InMemoryAccountStore; sent: RecordingNotifier; id: string }> {
+    const accounts = new InMemoryAccountStore();
+    const account = new Account();
+    account.email = 'ops@dfence.sg';
+    account.authUserId = 'auth-ops';
+    account.role = Role.OperationsManager;
+    account.isActive = true;
+    account.emailVerified = true;
+    const saved = await accounts.save(account);
+    return { accounts, sent: new RecordingNotifier(), id: saved.id };
+  }
+
+  it('N1 — a subject raised to Critical is announced, naming the pest, the place and the rule', async () => {
+    const { accounts, sent, id } = await managers();
+    const notifier = new CriticalEscalationNotifier(accounts, sent);
+
+    await notifier.announce([{ score: critical(PestType.Snake), locality: 'Bedok North Ave 1' }]);
+
+    const messages = sent.to(id);
+    expect(messages).toHaveLength(1);
+    // 4.4.6 — "Critical" alone tells a manager to look; the rule tells them what they are looking
+    // at, and whether it needs a call to AVS tonight or a visit tomorrow.
+    expect(messages[0]).toContain('Snake');
+    expect(messages[0]).toContain('Bedok North Ave 1');
+    expect(messages[0]).toContain('wildlife-indoors');
+  });
+
+  it('N2 — the same subject still Critical next cycle is not announced again', async () => {
+    const { accounts, sent, id } = await managers();
+    const notifier = new CriticalEscalationNotifier(accounts, sent);
+    const subject = [{ score: critical(PestType.Snake), locality: 'Bedok North Ave 1' }];
+
+    await notifier.announce(subject);
+    await notifier.announce(subject);
+
+    // 4.4.9 is "raised to", a transition, not a state. Announcing the state every cycle would send
+    // the same snake every fifteen minutes until someone dealt with it, and a stream that repeats
+    // is one a manager learns to ignore — which defeats the requirement rather than meeting it.
+    expect(sent.to(id)).toHaveLength(1);
+  });
+
+  it('N3 — a subject that falls out of Critical and returns is announced again', async () => {
+    const { accounts, sent, id } = await managers();
+    const notifier = new CriticalEscalationNotifier(accounts, sent);
+    const subject = [{ score: critical(PestType.Snake), locality: 'Bedok North Ave 1' }];
+
+    await notifier.announce(subject);
+    await notifier.announce([]); // the report was closed; the subject is no longer Critical
+    await notifier.announce(subject); // and it happens again
+
+    // The second escalation is a new event. Suppressing it would be the failure mode N2 guards
+    // against, applied to a case nobody has seen.
+    expect(sent.to(id)).toHaveLength(2);
+  });
+
+  it('N4 — a non-Critical score notifies nobody', async () => {
+    const { accounts, sent, id } = await managers();
+    const notifier = new CriticalEscalationNotifier(accounts, sent);
+    const high = critical(PestType.Rat);
+    high.tier = PriorityTier.High;
+
+    const raised = await notifier.announce([{ score: high, locality: 'Bedok North Ave 1' }]);
+
+    expect(raised).toHaveLength(0);
+    expect(sent.to(id)).toHaveLength(0);
   });
 });

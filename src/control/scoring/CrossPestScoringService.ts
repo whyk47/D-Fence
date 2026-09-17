@@ -19,9 +19,11 @@ import { Cluster } from '../../entity/Cluster';
 import { PriorityScore } from '../../entity/PriorityScore';
 import { PestProfile } from '../../entity/PestProfile';
 import { ObservationStore, OperatorRegistryStore, PestReportCounts, pestReportKey, ReportStore, TreatmentRecordStore } from '../../ports/Stores';
-import { PestType } from '../../entity/enums';
+import { PestType, ReportStatus } from '../../entity/enums';
+import { Report } from '../../entity/Report';
 import { DriverInputs } from './UrgencyCalculator';
 import { PestPriorityCalculator } from './PestPriorityCalculator';
+import { CriticalOverrideEvaluator } from './CriticalOverrideEvaluator';
 import { OperatorRegistryLoader } from '../OperatorRegistryLoader';
 import { NormalisationContext } from '../normalisation/NormalisationStrategy';
 
@@ -37,6 +39,17 @@ export class CrossPestScoringService {
     private readonly observations: ObservationStore,
     private readonly registry: OperatorRegistryStore,
     private readonly treatments: TreatmentRecordStore,
+    /**
+     * 4.4.1–4.4.6. Optional only so that a unit test can score without it; the running system
+     * always supplies one.
+     *
+     * The override is applied *here*, in the cycle, and that is the point of this parameter. Until
+     * now `CriticalOverrideEvaluator` and `PestPriorityCalculator.withOverride` were reached by
+     * nothing but their own tests: requirement group 4.4 was implemented, tested, green, and never
+     * executed against a real score. A venomous snake indoors would have been ranked on its two
+     * reports like any other thin case, which is the exact outcome 4.4 exists to prevent.
+     */
+    private readonly override: CriticalOverrideEvaluator | null = null,
   ) {}
 
   /**
@@ -58,6 +71,10 @@ export class CrossPestScoringService {
     // while the cycle runs.
     const reportCounts = await this.reports.reportDriversByLocalityAndPest(velocitySince);
     const operators = await this.registry.registry();
+    // 4.4.1 — verified reports only, and every one of them, whenever it was filed. An override is
+    // not windowed: a snake reported indoors three months ago and never dealt with is still indoors.
+    // One read for the cycle, grouped once, for the same reason the counts are.
+    const verified = this.override === null ? new Map<string, Report[]>() : await this.verifiedByPair();
 
     const scores: PriorityScore[] = [];
     for (const locality of localities) {
@@ -73,19 +90,24 @@ export class CrossPestScoringService {
         if (profile.pestType === PestType.Mosquito) {
           continue; // scored by the tier A cycle; see the note at the top of this file.
         }
-        const counts = reportCounts.get(pestReportKey(locality.id, profile.pestType)) ?? null;
+        const key = pestReportKey(locality.id, profile.pestType);
+        const counts = reportCounts.get(key) ?? null;
         const observed = await this.observationCount(profile, locality.id, observationSince);
         if (!CrossPestScoringService.hasEvidence(counts, observed)) {
           continue;
         }
-        scores.push(
-          this.calculator.score(
-            { localityId: locality.id, locality: locality.locality, pestType: profile.pestType },
-            profile,
-            this.inputsFor(profile, counts, observed, daysSinceTreatment, nearestOperatorM),
-            ctx,
-          ),
+        const score = this.calculator.score(
+          { localityId: locality.id, locality: locality.locality, pestType: profile.pestType },
+          profile,
+          this.inputsFor(profile, counts, observed, daysSinceTreatment, nearestOperatorM),
+          ctx,
         );
+        // 4.4.3–4.4.5 — the tier is raised, the score is not. `withOverride` returns the score
+        // untouched when nothing matched, so this is unconditional rather than guarded.
+        if (this.override !== null) {
+          this.calculator.withOverride(score, this.override.evaluate(verified.get(key) ?? [], profile));
+        }
+        scores.push(score);
       }
     }
     return scores;
@@ -104,6 +126,30 @@ export class CrossPestScoringService {
       return null;
     }
     return this.observations.countByLocality(profile.pestType, localityId, since);
+  }
+
+  /**
+   * Every verified report, grouped by (locality, pest) — the same key the counts use.
+   *
+   * A report with no locality is dropped rather than grouped under a blank key: 4.4.3 raises a
+   * *subject*, a subject is a (locality, pest) pair, and a report bound to no locality belongs to
+   * no subject that could be raised.
+   */
+  private async verifiedByPair(): Promise<Map<string, Report[]>> {
+    const grouped = new Map<string, Report[]>();
+    for (const report of await this.reports.findByStatus(ReportStatus.Verified)) {
+      if (report.clusterId === null) {
+        continue;
+      }
+      const key = pestReportKey(report.clusterId, report.pestType);
+      const bucket = grouped.get(key);
+      if (bucket === undefined) {
+        grouped.set(key, [report]);
+      } else {
+        bucket.push(report);
+      }
+    }
+    return grouped;
   }
 
   private static hasEvidence(counts: PestReportCounts | null, observed: number | null): boolean {

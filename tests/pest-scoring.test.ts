@@ -296,6 +296,7 @@ describe('F: referral to an external authority (8.6, 8.1.14)', () => {
   let treatments: InMemoryTreatmentRecordStore;
   let dispatch: DispatchController;
   let clusters: InMemoryClusterStore;
+  let resident: RecordingNotifier;
   let storedClusterId = '';
   const clusterId = (): string => storedClusterId;
 
@@ -306,7 +307,10 @@ describe('F: referral to an external authority (8.6, 8.1.14)', () => {
     workOrders = new InMemoryWorkOrderStore();
     treatments = new InMemoryTreatmentRecordStore();
     clusters = new InMemoryClusterStore();
-    const lifecycle = new ReportLifecycleController(new ReportTransitionTable(), reports, null);
+    // A real notifier, not null: 8.6.6 is a message, and a null notifier makes every assertion
+    // about what the resident was told vacuously true.
+    resident = new RecordingNotifier();
+    const lifecycle = new ReportLifecycleController(new ReportTransitionTable(), reports, resident);
     controller = new ReferralController(ac, reports, referrals, lifecycle, c, new InMemoryAuditStore());
 
     const cluster = new Cluster();
@@ -430,5 +434,38 @@ describe('F: referral to an external authority (8.6, 8.1.14)', () => {
 
     const verified = await verifiedWildlifeReport();
     await expect(controller.refer(verified.id, 'n/a', MANAGER, NOW)).rejects.toThrow(/at least 10/);
+  });
+
+  /**
+   * F8 and F9 were not in the designed set. They are here because 8.6.6 was unwired *and* the
+   * behaviour standing in its place was a false statement to the resident: the referral sets the
+   * report Actioned (8.6.5), 5.2.8 fires on that move, and the default Actioned wording told a
+   * resident whose snake went to AVS that it "has been scheduled for treatment". Nothing was
+   * scheduled and nothing was treated. A missing notification is a gap; a wrong one is a defect.
+   */
+  it('F8 — the resident is told their report was referred, and to whom (8.6.6)', async () => {
+    const r = await verifiedWildlifeReport();
+    await controller.refer(r.id, 'Boar seen repeatedly at the void deck bins.', MANAGER, NOW);
+
+    const sent = resident.to(RESIDENT.accountId);
+    expect(sent).toHaveLength(1);
+    // Naming the authority is the requirement, so it is asserted literally rather than by a
+    // "referred" keyword that would pass on a message naming nobody.
+    expect(sent[0]).toContain('AVS');
+    expect(sent[0]).toMatch(/referred to/i);
+    // The sentence this replaced. If it ever comes back, this is the line that fails.
+    expect(sent[0]).not.toMatch(/scheduled for treatment/);
+  });
+
+  it('F9 — closing a referral does not claim D-Fence treated anything (8.6.9, 8.6.11)', async () => {
+    const r = await verifiedWildlifeReport();
+    const referral = await controller.refer(r.id, 'Boar seen repeatedly at the void deck bins.', MANAGER, NOW);
+    await controller.recordOutcome(referral.id, 'AVS attended and relocated the animal.', MANAGER, NOW);
+
+    const closing = resident.to(RESIDENT.accountId)[1] ?? '';
+    expect(closing).toContain('AVS');
+    expect(closing).toContain('relocated the animal');
+    // 8.6.11 writes no TreatmentRecord, so the resident must not be told there was a treatment.
+    expect(closing).not.toMatch(/has been treated/);
   });
 });

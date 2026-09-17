@@ -49,13 +49,21 @@ export class ReportLifecycleController implements ReportLinkage {
    * than at each call site — a hook on the one write path cannot be forgotten by a future caller,
    * which is exactly what happened to the equivalent rule in the Lab 2 model.
    *
+   * `options.residentNotice` replaces the sentence the resident is sent, and exists because the
+   * default wording is a claim about what we did, not merely a label for a state. A referred report
+   * reaches `Actioned` without anything being scheduled, so 8.6.5's transition was telling the
+   * resident their snake report "has been scheduled for treatment" — false, and false in the one
+   * direction that matters, because it implies D-Fence is handling a case it has just handed to
+   * someone else. The override keeps delivery on this one path (5.2.8) while letting the caller
+   * that knows *why* the status moved supply the true sentence.
+   *
    * @throws ReportTransitionRefused
    */
   async transition(
     id: Uuid,
     to: ReportStatus,
     by: ReportActor,
-    options: { reason?: string; moderatorId?: Uuid; at?: Date } = {},
+    options: { reason?: string; moderatorId?: Uuid; at?: Date; residentNotice?: string } = {},
   ): Promise<Report> {
     const report = await this.require(id);
     const from = report.currentStatus();
@@ -94,7 +102,7 @@ export class ReportLifecycleController implements ReportLinkage {
       'Report',
       report.id,
     );
-    await this.notifyReporter(report, from, to);
+    await this.notifyReporter(report, from, to, options.residentNotice);
     return report;
   }
 
@@ -160,8 +168,13 @@ export class ReportLifecycleController implements ReportLinkage {
     return null;
   }
 
-  /** 5.2.8, 8.5.2. Worded for the resident, not for the log (10.5.3). */
-  private async notifyReporter(report: Report, from: ReportStatus, to: ReportStatus): Promise<void> {
+  /** 5.2.8, 8.5.2, 8.6.6. Worded for the resident, not for the log (10.5.3). */
+  private async notifyReporter(
+    report: Report,
+    from: ReportStatus,
+    to: ReportStatus,
+    residentNotice?: string,
+  ): Promise<void> {
     const wording: Record<ReportStatus, string> = {
       [ReportStatus.Submitted]: 'has been received',
       [ReportStatus.Verified]: 'has been verified by our operations team',
@@ -176,7 +189,7 @@ export class ReportLifecycleController implements ReportLinkage {
     }
     await this.notifier?.notify(
       report.reporterId,
-      `Your report of ${report.type} at ${report.localityBinding} ${wording[to]}. (was ${from})`,
+      `Your report of ${report.type} at ${report.localityBinding} ${residentNotice ?? wording[to]}. (was ${from})`,
     );
   }
 

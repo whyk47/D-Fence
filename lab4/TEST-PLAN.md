@@ -16,7 +16,7 @@ cross-pest generalisation in `REQUIREMENTS.md` v0.9. v0.3 records what happened 
 `tests/pest-scoring.test.ts` (25 cases). §6.5 and §6.6 remain designed and not executed, because the
 two external gateways they test are build steps 7 and 8 and are not written.
 
-**The whole suite: `npx vitest run`, 776 tests in 39 files, 776 passing** — including
+**The whole suite: `npx vitest run`, 785 tests in 39 files, 785 passing** — including
 `tests/repository.test.ts`, which runs against live PostGIS and is the suite that caught the missing
 schema described in §6.8. One case,
 `rainfall.test.ts` J2, was failing when this pass began; it predated the v0.9 work and has since been
@@ -1890,3 +1890,60 @@ live-database suite at all. Migration `005_pest_generalisation.sql` closes it, a
 `002_task_type_alignment.sql` were edited after being applied. The runner warns rather than fails,
 and it predates this work. It means a freshly migrated database and the current one are not
 guaranteed identical, which is worth resolving before anyone sets up a second environment.
+
+### 6.9 §2.41 — the two requirements that were wired to nothing (4.4.9, 8.6.6)
+
+Executed. `tests/cross-pest-scoring.test.ts` (X8–X10, N1–N4) and `tests/pest-scoring.test.ts`
+(F8, F9). Nine cases, all passing.
+
+Both subjects here are the same *kind* of defect as §6.8's, found the same way — by asking what
+calls a thing rather than what tests it — and one of them is worse than a gap.
+
+**8.6.6 was not missing; it was wrong.** The requirement is that the reporting Resident is told
+their report has been referred, naming the destination authority. No such message was sent. What
+was sent instead came from 8.6.5: referral sets the report `Actioned`, 5.2.8 fires on every status
+change, and the default `Actioned` wording is "has been scheduled for treatment". So a resident who
+reported a snake was told D-Fence had scheduled a treatment for it, when the case had just been
+handed to AVS and nothing was scheduled or treated. 8.6.9's closing message had the same fault:
+"has been treated and closed", with 8.6.11 explicitly forbidding the TreatmentRecord that would
+have made it true.
+
+The fix keeps delivery on the single write path 5.2.8 requires — `ReportLifecycleController.transition`
+now accepts an optional resident-facing notice, and `ReferralController` supplies the true sentence,
+which names the authority and gives its number so the resident can follow the case up with the body
+that now holds it.
+
+**4.4.9 could not be wired, because 4.4 was not running.** `CriticalOverrideEvaluator` and
+`PestPriorityCalculator.withOverride` were reached by nothing in `src/` — only by their own tests
+in §6.2 and by two type-imports. The override rules were correct, tested and never executed against
+a real score, so a venomous snake indoors was ranked on its two reports like any other thin case:
+precisely the outcome requirement group 4.4 exists to prevent. §6.2's ten cases all passed
+throughout, and could not have caught this — they construct the evaluator and call it directly.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| F8 | `ReferralController.refer` | a verified wild boar report | the resident is told it was referred, naming AVS — 8.6.6 |
+| F9 | `recordOutcome` | the authority reports back | the closing message claims no treatment — 8.6.9, 8.6.11 |
+| X8 | `CrossPestScoringService.scoreAll` | a verified snake report, indoors | the subject is Critical — 4.4.3, 4.4.7 |
+| X9 | same | with and without the evaluator | same score, higher tier — 4.4.5 |
+| X10 | same | the same report, unverified | scored, not raised — 4.4.1 |
+| N1 | `CriticalEscalationNotifier.announce` | one newly Critical subject | the manager is told, naming pest, place and rule — 4.4.6, 4.4.9 |
+| N2 | same | the same subject, next cycle | announced once, not every cycle |
+| N3 | same | Critical, then not, then Critical | announced twice |
+| N4 | same | a High subject | nobody is notified |
+
+**N2 is the case that decides the design.** 4.4.9 says "raised to", which is a transition and not a
+state. Announcing the state every cycle would send a manager the same snake every fifteen minutes
+until someone dealt with it, and a notification stream that repeats is one a manager learns to
+ignore — defeating the requirement rather than meeting it. N3 is the other half: a subject that
+drops out of Critical and returns is a new event and is announced again.
+
+The one-minute deadline is met by construction rather than by a timer: `announce` is called inline
+in `scoreAndAlert`, immediately after the scores are saved, so the only latency between the
+escalation and the message is delivery itself.
+
+**A note on the case ids.** The designed §6.4 table gave F7 to "the reporting resident is told, and
+the destination authority is named". When §6.4 was executed, F7 was written against 8.6.1 and 8.6.4
+instead and the notification case was not written at all — which is how an unwired requirement kept
+a row in a table of passing tests. F8 is the designed F7. The id is not reused, per the same rule
+the requirements follow: numbers are permanent.

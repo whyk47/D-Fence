@@ -108,6 +108,8 @@ import { ForecastIngestionJob } from './control/ingestion/ForecastIngestionJob';
 import { ObservationIngestionJob } from './control/ingestion/ObservationIngestionJob';
 import { OperatorRegistryLoader } from './control/OperatorRegistryLoader';
 import { CrossPestScoringService } from './control/scoring/CrossPestScoringService';
+import { CriticalOverrideEvaluator } from './control/scoring/CriticalOverrideEvaluator';
+import { CriticalEscalationNotifier } from './control/CriticalEscalationNotifier';
 import {
   InMemoryObservationStore,
   InMemoryOperatorRegistryStore,
@@ -363,7 +365,17 @@ async function main(): Promise<void> {
     observations,
     operatorRegistry,
     treatments,
+    // 4.4.1–4.4.6. Constructed from configuration, and only when a catalogue was loaded: a bare
+    // ConfigSet has no rules and `CriticalOverrideEvaluator` refuses to be built from none, which
+    // is deliberate (4.4.2) and must not stop a v0.8 deployment from booting.
+    config.criticalOverrideRules.length === 0
+      ? null
+      : new CriticalOverrideEvaluator(config.criticalOverrideRules),
   );
+  // 4.4.9 — the Operations Manager is told when a subject is raised. Constructed once and kept for
+  // the process lifetime, because it remembers which subjects it has already announced; a new one
+  // per cycle would re-announce everything Critical every fifteen minutes.
+  const escalations = new CriticalEscalationNotifier(accounts, notifications);
   const accumulator = new RainfallAccumulator();
 
   /** One full cycle: ingest both sources, then score. Scheduled, and run once at boot. */
@@ -456,6 +468,14 @@ async function main(): Promise<void> {
       locality: active.find((c) => c.id === score.localityId)?.locality ?? '',
     }));
     await engine.computeScores(active, inputs, now, pestScores);
+    // 4.4.9 — immediately after the scores are saved, not on a queue. The requirement is a
+    // one-minute deadline, and the only way to be sure of it is to leave nothing between the
+    // escalation and the message but delivery itself. Awaited so a failure is logged here rather
+    // than becoming an unhandled rejection.
+    const raised = await escalations.announce(pestScores);
+    if (raised.length > 0) {
+      console.log(`cycle: ${raised.length} subject(s) raised to Critical (4.4.9): ${raised.join(', ')}`);
+    }
     // 3.1.8 — every saved location is re-evaluated against the boundaries this cycle just wrote.
     // After scoring rather than before: the clusters have to be current for the answer to be.
     const moved = await locations.evaluateAll(now);

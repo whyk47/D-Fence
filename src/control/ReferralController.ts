@@ -148,10 +148,16 @@ export class ReferralController {
     // it: 5.2.6's Verified -> Actioned rule is SYSTEM because the status change is a *consequence*
     // of an action, not the action itself. Raising a work order works the same way. Who referred it
     // is recorded on the Referral (8.6.4) and in the audit trail, which is where that fact belongs.
+    //
+    // 8.6.6 — the resident is told, and told *who it went to*. The notice rides on this transition
+    // rather than being sent separately because 5.2.8 already fires here: a second notification
+    // would give the resident two messages for one event, one of them the default "has been
+    // scheduled for treatment", which is exactly the false sentence this replaces.
     await this.lifecycle.transition(reportId, ReportStatus.Actioned, 'SYSTEM', {
       moderatorId: by.accountId,
       reason: trimmed,
       at: now,
+      residentNotice: ReferralController.referralNotice(profile),
     });
     await this.record(by, 'report:refer', reportId);
     return saved;
@@ -183,13 +189,35 @@ export class ReferralController {
     const saved = await this.referrals.save(referral);
     // 8.6.9 — the outcome closes the report, through the same lifecycle rules a dispatched report
     // follows. Nothing here writes a TreatmentRecord (8.6.11).
+    // The notice is overridden here for the same reason it is in `refer`: the default Closed
+    // wording is "has been treated and closed", and nobody from D-Fence treated anything. 8.6.11
+    // says no TreatmentRecord is written, and a message claiming a treatment is the same untruth
+    // told to the resident instead of to the database.
     await this.lifecycle.transition(referral.reportId, ReportStatus.Closed, 'SYSTEM', {
       moderatorId: by.accountId,
       reason: referral.outcome ?? '',
       at: now,
+      residentNotice:
+        `was closed by ${referral.destinationAuthority}, who reported: ${referral.outcome ?? ''}`,
     });
     await this.record(by, 'referral:outcome', referral.reportId);
     return saved;
+  }
+
+  /**
+   * 8.6.6 — the sentence the resident receives when their report is referred.
+   *
+   * It names the authority, which is the whole requirement, and gives the number beside it so the
+   * resident can follow the case up with the body that now holds it. D-Fence cannot answer for a
+   * referred case, and a message that does not say who can is a dead end.
+   *
+   * Static and public so the wording is testable without a store, a principal or a transition.
+   */
+  static referralNotice(profile: PestProfile): string {
+    return (
+      `has been referred to ${profile.dispatchAuthority}, who handle ${profile.pestType} cases. ` +
+      `You can reach them on ${profile.authorityContactNumber}`
+    );
   }
 
   /** 8.6.7 — the dashboard needs to tell a referred report from one with an open work order. */

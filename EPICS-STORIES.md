@@ -2188,7 +2188,7 @@ operator ranks slightly higher than one next door to twelve.
 demand proxy. `PEST-PRIORITY-MODEL.md` §5.3 carries the measured distribution.
 
 ### US-11.6 — Raise acute danger above the arithmetic
-> **Built 2026-09-16.** `CriticalOverrideEvaluator`, `PriorityTier.Critical`, and the ranking comparator that puts Critical above every High. 4.4.9's one-minute notification is **not** wired to the alert path yet.
+> **Built 2026-09-16.** `CriticalOverrideEvaluator`, `PriorityTier.Critical`, and the ranking comparator that puts Critical above every High. 4.4.9's one-minute notification is wired as of 2026-09-17: `CriticalEscalationNotifier`, called inline from `scoreAndAlert`. The override is now evaluated in `CrossPestScoringService.scoreAll` — until that pass it had no production caller at all, so 4.4 was correct, tested and never executed.
 **As** an Operations Manager, **I want** a snake indoors to reach me immediately **so that** a weighted
 sum's opinion about a low-volume locality cannot bury it.
 
@@ -2257,7 +2257,7 @@ than mosquitoes.
 - Change the duplicate-window query to match on pest type.
 
 ### US-11.8 — Refer what we have no authority to do
-> **Built 2026-09-16.** `Referral`, `ReferralController`, `ReferralRoutes`, and both screens (11.2.27 Pest Reference, 11.2.28 Referral). 8.1.14 refuses a wildlife work order and 8.1.17 restricts task types by pest class. 8.6.6's resident notification is **not** wired.
+> **Built 2026-09-16.** `Referral`, `ReferralController`, `ReferralRoutes`, and both screens (11.2.27 Pest Reference, 11.2.28 Referral). 8.1.14 refuses a wildlife work order and 8.1.17 restricts task types by pest class. 8.6.6's resident notification is wired as of 2026-09-17, and it replaced a false message: the referral's 8.6.5 transition was telling the resident their report "has been scheduled for treatment".
 **As** an Operations Manager, **I want** to route a wildlife case to AVS and record what came of it
 **so that** widening the product is honest rather than cosmetic.
 
