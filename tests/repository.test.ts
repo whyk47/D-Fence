@@ -41,6 +41,9 @@ import { WorkOrder } from '../src/entity/WorkOrder';
 import { TreatmentRecord } from '../src/entity/TreatmentRecord';
 import { GeoPoint } from '../src/entity/valueTypes';
 import { Role, ReportStatus, ReportType, TaskType, WorkOrderStatus, PriorityTier } from '../src/entity/enums';
+import { RainfallRepository } from '../src/persistence/RainfallRepository';
+import { RainfallAccumulator } from '../src/control/RainfallAccumulator';
+import { ParsedReading, ParsedStation } from '../src/control/ingestion/RainfallFeedParser';
 
 const url = ConfigLoader.load().get('DATABASE_URL');
 const live = url !== '';
@@ -684,5 +687,126 @@ describe.skipIf(!live)('Local credentials against live Postgres — §2.1.x, §1
     // The cascade, not a second DELETE in the application: an orphaned token is a live link to an
     // account that no longer exists.
     expect(await provider.consumeVerification(token)).toBeNull();
+  });
+});
+
+/**
+ * §2.42 — the rainfall aggregation, against live Postgres.
+ *
+ * This block exists for one reason: `RainfallRepository.stationWindows` replaced reading every row
+ * in the 72-hour window with a `GROUP BY`, and the reason it had to is that the old shape was
+ * moving ~3.2 MB out of Supabase every five minutes — 13.31 GB against a 5.5 GB allowance, three
+ * days from the project being cut off.
+ *
+ * An in-memory test cannot check this. `rainfall.test.ts` Q1–Q6 prove the *design* agrees with
+ * `accumulate`; what is left is whether the SQL does, and the traps are all SQL's own: `sum()` over
+ * no rows is NULL rather than 0, `numeric` comes back as a string and would concatenate rather than
+ * add, and a `FILTER` clause with the wrong bound silently sums the wrong window. Every one of those
+ * yields a plausible number, not an error.
+ */
+describe.skipIf(!live)('The rainfall aggregation against live Postgres — §1.2.7, §1.2.8', () => {
+  let db: Database;
+  let rainfall: RainfallRepository;
+  const accumulator = new RainfallAccumulator();
+  /** Well away from any real station, and prefixed so a stray row is obvious in the table. */
+  const ids = ['ZZTEST-A', 'ZZTEST-B', 'ZZTEST-C'];
+  const NOW = new Date('2026-09-17T04:00:00Z');
+  const stations: ParsedStation[] = [
+    { stationId: ids[0] as string, name: 'test A', point: new GeoPoint(1.2, 103.6) },
+    { stationId: ids[1] as string, name: 'test B', point: new GeoPoint(1.21, 103.6) },
+    { stationId: ids[2] as string, name: 'test C', point: new GeoPoint(1.22, 103.6) },
+  ];
+
+  function reading(stationId: string, minutesAgo: number, valueMm: number): ParsedReading {
+    return { stationId, readingAt: new Date(NOW.getTime() - minutesAgo * 60_000), valueMm };
+  }
+
+  beforeAll(async () => {
+    db = new Database(url);
+    rainfall = new RainfallRepository(db);
+    await rainfall.saveStations(stations);
+    await rainfall.saveReadings([
+      // Inside the 5-minute window, and therefore inside all three.
+      reading(ids[0] as string, 3, 1.5),
+      reading(ids[1] as string, 3, 0.5),
+      reading(ids[2] as string, 3, 0),
+      // Inside 24 hours, outside 5 minutes.
+      reading(ids[0] as string, 60 * 6, 2.25),
+      reading(ids[1] as string, 60 * 6, 4),
+      // Inside 72 hours, outside 24.
+      reading(ids[0] as string, 60 * 40, 8),
+      reading(ids[2] as string, 60 * 40, 3),
+      // Outside 72 hours entirely — must not be counted anywhere.
+      reading(ids[0] as string, 60 * 90, 999),
+      // In the future. The feed has published these; a total for a period that has not happened yet
+      // is not a total.
+      reading(ids[0] as string, -60, 777),
+    ]);
+  });
+
+  afterAll(async () => {
+    await db.query(`DELETE FROM rainfall_reading WHERE station_id = ANY($1)`, [ids]);
+    await db.query(`DELETE FROM rainfall_station WHERE station_id = ANY($1)`, [ids]);
+    await db.close?.();
+  });
+
+  it('R1 — the sums match the readings they were computed from, window by window', async () => {
+    const windows = await rainfall.stationWindows(NOW);
+    const a = windows.find((w) => w.stationId === ids[0]);
+
+    // 1.5 + 2.25 = 3.75 in 24 hours; + 8 = 11.75 in 72. Neither 999 nor 777 appears in either,
+    // which is the whole of the bounds check.
+    expect(a?.total24hMm).toBeCloseTo(3.75, 2);
+    expect(a?.total72hMm).toBeCloseTo(11.75, 2);
+    expect(a?.currentMm).toBeCloseTo(1.5, 2);
+    // A number, not a string. `numeric` arrives from pg as a string and `+` would concatenate:
+    // "1.5" + "2.25" is "1.52.25", and a 72-hour accumulation becomes nonsense that still renders.
+    expect(typeof a?.total72hMm).toBe('number');
+  });
+
+  it('R2 — a station with nothing in a window reports null for it, never 0 (4.1.12)', async () => {
+    const windows = await rainfall.stationWindows(NOW);
+    const c = windows.find((w) => w.stationId === ids[2]);
+
+    // Station C reported 0 mm three minutes ago and 3 mm forty hours ago, and nothing in between.
+    expect(c?.total24hMm).toBeCloseTo(0, 5); // it *did* report — 0 mm is a measurement
+    expect(c?.total72hMm).toBeCloseTo(3, 2);
+
+    const b = windows.find((w) => w.stationId === ids[1]);
+    expect(b?.total24hMm).toBeCloseTo(4.5, 2);
+    // Every station here reported inside 72 hours, so the null case is exercised by asking for a
+    // window none of them reached: `sum()` over no rows is NULL, and a mapping that wrote 0 would
+    // assert "no rain" where the truth is "no data".
+    const future = await rainfall.stationWindows(new Date(NOW.getTime() + 100 * 3_600_000));
+    expect(future.filter((w) => ids.includes(w.stationId))).toHaveLength(0);
+  });
+
+  it('R3 — the aggregate and the row-by-row accumulation give the same cluster rainfall', async () => {
+    const centroid = new GeoPoint(1.2, 103.6);
+    const readings = (await rainfall.readingsSince(new Date(NOW.getTime() - 72 * 3_600_000))).filter(
+      (r) => ids.includes(r.stationId) && r.readingAt <= NOW,
+    );
+    const windows = (await rainfall.stationWindows(NOW)).filter((w) => ids.includes(w.stationId));
+
+    const direct = accumulator.accumulate(centroid, stations, readings, NOW);
+    const summed = accumulator.accumulateWindows(centroid, stations, windows, NOW);
+
+    // The assertion the change stands on. Everything else in this file is about a repository being
+    // faithful to an entity; this is about a repository being faithful to an arithmetic.
+    expect(summed.accum24hMm).toBeCloseTo(direct.accum24hMm, 5);
+    expect(summed.accum72hMm).toBeCloseTo(direct.accum72hMm, 5);
+    expect(summed.currentMm).toBeCloseTo(direct.currentMm, 5);
+    expect(summed.observed24hHours).toBeCloseTo(direct.observed24hHours, 3);
+    expect(summed.observed72hHours).toBeCloseTo(direct.observed72hHours, 3);
+  });
+
+  it('R4 — one row per station, whatever the number of readings', async () => {
+    const readings = await rainfall.readingsSince(new Date(NOW.getTime() - 72 * 3_600_000));
+    const windows = await rainfall.stationWindows(NOW);
+
+    // On the live table this is the difference between 66,866 rows and 88. Asserted as a ratio
+    // rather than a constant, because the live table keeps filling.
+    expect(windows.length).toBeLessThan(readings.length);
+    expect(new Set(windows.map((w) => w.stationId)).size).toBe(windows.length);
   });
 });

@@ -31,6 +31,7 @@ import { VectorControlOperator } from '../entity/VectorControlOperator';
 import { ObservationRecord } from '../entity/ObservationRecord';
 import { ParsedBatch } from './types';
 import { ParsedReading, ParsedStation } from '../control/ingestion/RainfallFeedParser';
+import { StationWindow } from '../control/RainfallAccumulator';
 
 export interface ClusterStore {
   findById(id: Uuid): Promise<Cluster | null>;
@@ -107,8 +108,24 @@ export interface RainfallStore {
   stations(): Promise<ParsedStation[]>;
   /** @returns the number of readings newly stored; duplicates from an overlapping page are ignored. */
   saveReadings(readings: ParsedReading[]): Promise<number>;
-  /** Readings within the window, for the 1.2.7 and 1.2.8 accumulations. */
+  /**
+   * Readings within the window.
+   *
+   * **Not for scoring.** `stationWindows` is what 1.2.7 and 1.2.8 should ask for; this returns
+   * every row and exists for the ingestion tools and the tests that check the sums against the
+   * readings they were computed from. Calling it in a cycle moved ~3.2 MB out of the database every
+   * five minutes to produce six numbers per station.
+   */
   readingsSince(since: Date): Promise<ParsedReading[]>;
+  /**
+   * 1.2.7, 1.2.8, 1.2.10 — each station's windows, summed by the database.
+   *
+   * @param now the cycle time. Passed rather than read from the database clock so that the windows
+   *   are measured from the same instant the rest of the cycle uses; a score whose rainfall was
+   *   measured from a slightly different `now` than its other drivers is not reproducible from the
+   *   breakdown beside it.
+   */
+  stationWindows(now: Date): Promise<StationWindow[]>;
   /** 1.2.10 — the newest reading held, or null when nothing has ever been stored. */
   newestReadingAt(): Promise<Date | null>;
 }

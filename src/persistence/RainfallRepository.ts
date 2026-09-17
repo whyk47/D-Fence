@@ -14,6 +14,7 @@ import { Database, Row } from './Database';
 import { GeoPoint } from '../entity/valueTypes';
 import { ParsedReading, ParsedStation } from '../control/ingestion/RainfallFeedParser';
 import { RainfallStore } from '../ports/Stores';
+import { StationWindow } from '../control/RainfallAccumulator';
 
 export class RainfallRepository implements RainfallStore {
   constructor(private readonly db: Database) {}
@@ -78,6 +79,58 @@ export class RainfallRepository implements RainfallStore {
       [since],
     );
     return rows.map((r) => RainfallRepository.toReading(r));
+  }
+
+  /**
+   * 1.2.7, 1.2.8, 1.2.10 — one row per station instead of one row per reading.
+   *
+   * This is the same computation `RainfallAccumulator` used to do in Node, moved to where the data
+   * already is. The previous shape selected every reading in the 72-hour window — 66,866 rows, some
+   * 3.2 MB — every five minutes, and again on every resident's saved-location lookup, to produce
+   * four sums and two timestamps per station. It is now 88 rows.
+   *
+   * `count(*) FILTER` rather than `coalesce(sum(...), 0)`: a station that reported nothing in a
+   * window must come back as `null`, because 4.1.12 excludes an absent value and scoring it as zero
+   * asserts "no rain here" on the strength of no data at all.
+   *
+   * The window bounds are closed at both ends. `now` is a parameter and the upper bound is real:
+   * a reading stamped in the future — the feed has published them — would otherwise be counted in
+   * a total for a period that has not happened.
+   */
+  async stationWindows(now: Date): Promise<StationWindow[]> {
+    const rows = await this.db.query(
+      `SELECT station_id,
+              min(reading_at) AS oldest,
+              max(reading_at) AS newest,
+              sum(value_mm) FILTER (WHERE reading_at >= $1::timestamptz - interval '24 hours') AS t24,
+              count(*)       FILTER (WHERE reading_at >= $1::timestamptz - interval '24 hours') AS n24,
+              sum(value_mm)  AS t72,
+              sum(value_mm) FILTER (WHERE reading_at >= $1::timestamptz - interval '5 minutes') AS tnow,
+              count(*)      FILTER (WHERE reading_at >= $1::timestamptz - interval '5 minutes') AS nnow
+         FROM rainfall_reading
+        WHERE reading_at >= $1::timestamptz - interval '72 hours'
+          AND reading_at <= $1::timestamptz
+        GROUP BY station_id`,
+      [now],
+    );
+    return rows.map((r) => RainfallRepository.toWindow(r));
+  }
+
+  private static toWindow(row: Row): StationWindow {
+    // `numeric` arrives from pg as a string, deliberately — it is arbitrary precision, and left
+    // implicit it would concatenate rather than add. The same trap `toReading` documents below.
+    const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+    const count = (v: unknown): number => Number(v ?? 0);
+    return {
+      stationId: String(row.station_id),
+      total24hMm: count(row.n24) === 0 ? null : (num(row.t24) ?? 0),
+      // The outer WHERE already bounds this to 72 hours, so the unfiltered sum is the 72-hour sum.
+      // A station appearing in these rows at all reported at least once in the window.
+      total72hMm: num(row.t72) ?? 0,
+      currentMm: count(row.nnow) === 0 ? null : (num(row.tnow) ?? 0),
+      oldestReadingAt: row.oldest as Date,
+      newestReadingAt: row.newest as Date,
+    };
   }
 
   /** 1.2.10 — the newest reading held, or null when nothing has ever been stored. */

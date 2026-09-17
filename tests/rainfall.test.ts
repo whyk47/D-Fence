@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { RainfallFeedParser, RawRainfallPayload } from '../src/control/ingestion/RainfallFeedParser';
 import { RainfallAccumulator } from '../src/control/RainfallAccumulator';
+import { ClusterRainfall } from '../src/entity/ClusterRainfall';
 import { RainfallIngestionJob } from '../src/control/ingestion/RainfallIngestionJob';
 import { RainfallGateway } from '../src/boundary/gateways/RainfallGateway';
 import { HttpClient } from '../src/boundary/gateways/HttpClient';
@@ -220,6 +221,126 @@ describe('EC/BV: rolling accumulations and staleness (1.2.7, 1.2.8, 1.2.10)', ()
     expect(rain.accum72hMm).toBe(0);
     expect(rain.observed72hHours).toBe(0);
     expect(RainfallAccumulator.sufficientFor(rain.observed72hHours, 72)).toBe(false);
+  });
+});
+
+/**
+ * EC: the summed windows agree with the readings they were summed from (1.2.7, 1.2.8, 1.2.10).
+ *
+ * **Why this block exists.** Scoring read every reading in the 72-hour window out of the database
+ * on every cycle — 66,866 rows, about 3.2 MB, 288 times a day — to compute four sums and two
+ * timestamps per station. It also did it on every resident's saved-location lookup. That is the
+ * whole of the Supabase egress overrun: 13.31 GB against a 5.5 GB allowance, three days from the
+ * project being cut off.
+ *
+ * The aggregation moved into SQL. What must not move with it is the answer, and these cases are the
+ * proof: each one computes a cluster's rainfall both ways from identical data and requires the two
+ * to be indistinguishable — including the three distinctions this component was built around, which
+ * are exactly the ones an aggregate query is most likely to flatten. `sum()` over no rows is NULL
+ * in SQL and 0 in a naive mapping, and every one of those three collapses if that is got wrong.
+ */
+describe('EC: the summed windows agree with the readings they were summed from (1.2.7, 1.2.8)', () => {
+  const accumulator = new RainfallAccumulator();
+  const stations = RainfallFeedParser.parseStations(payload([]));
+
+  async function bothWays(
+    rows: Array<{ minutesAgo: number; values: Record<string, number> }>,
+  ): Promise<{ direct: ClusterRainfall; summed: ClusterRainfall }> {
+    const readings = RainfallFeedParser.parseReadings(payload(rows));
+    const store = storeAtFixtureTime();
+    await store.saveReadings(readings);
+    const windows = await store.stationWindows(NOW);
+    return {
+      direct: accumulator.accumulate(CENTROID, stations, readings, NOW),
+      summed: accumulator.accumulateWindows(CENTROID, stations, windows, NOW),
+    };
+  }
+
+  it('Q1 — an ordinary three-window fixture gives the same numbers both ways', async () => {
+    const { direct, summed } = await bothWays([
+      { minutesAgo: 10, values: { S111: 2, S222: 2, S333: 2 } },
+      { minutesAgo: 60 * 20, values: { S111: 3, S222: 3, S333: 3 } },
+      { minutesAgo: 60 * 40, values: { S111: 5, S222: 5, S333: 5 } },
+    ]);
+
+    expect(summed.accum24hMm).toBeCloseTo(direct.accum24hMm, 5);
+    expect(summed.accum72hMm).toBeCloseTo(direct.accum72hMm, 5);
+    expect(summed.observed24hHours).toBeCloseTo(direct.observed24hHours, 5);
+    expect(summed.observed72hHours).toBeCloseTo(direct.observed72hHours, 5);
+    expect(summed.isStale).toBe(direct.isStale);
+  });
+
+  it('Q2 — an unequal fixture agrees, so the weighting survives the aggregation (1.2.6)', async () => {
+    // Equal values at all three stations would agree under any weighting, including a plain mean.
+    // These do not: S111 is co-located with the centroid and must dominate.
+    const { direct, summed } = await bothWays([
+      { minutesAgo: 15, values: { S111: 12, S222: 1, S333: 0 } },
+      { minutesAgo: 60 * 30, values: { S111: 4, S222: 9, S333: 2 } },
+    ]);
+
+    expect(summed.accum24hMm).toBeCloseTo(direct.accum24hMm, 5);
+    expect(summed.accum72hMm).toBeCloseTo(direct.accum72hMm, 5);
+    expect(summed.currentMm).toBeCloseTo(direct.currentMm, 5);
+  });
+
+  it('Q3 — an empty 24-hour window stays 0 mm with no coverage, not 0 mm measured (4.1.12)', async () => {
+    // W3's fixture. `sum()` over no rows is NULL in SQL and 0 in a careless mapping, and that one
+    // difference would publish "no rain in 24 hours" for a station that reported nothing at all —
+    // the same class of false claim W6 was written for.
+    const { direct, summed } = await bothWays([{ minutesAgo: 60 * 30, values: { S111: 6, S222: 6, S333: 6 } }]);
+
+    expect(summed.accum24hMm).toBe(0);
+    expect(summed.observed24hHours).toBe(0);
+    expect(summed.observed24hHours).toBe(direct.observed24hHours);
+    expect(summed.accum72hMm).toBeCloseTo(direct.accum72hMm, 5);
+    expect(RainfallAccumulator.sufficientFor(summed.observed24hHours, 24)).toBe(false);
+  });
+
+  it('Q4 — short history is still reported as short (1.2.8, W6 through the new path)', async () => {
+    const { direct, summed } = await bothWays([
+      { minutesAgo: 26 * 60, values: { S111: 0, S222: 0, S333: 0 } },
+      { minutesAgo: 5, values: { S111: 0, S222: 0, S333: 0 } },
+    ]);
+
+    expect(summed.observed72hHours).toBeCloseTo(26, 0);
+    expect(summed.observed72hHours).toBeCloseTo(direct.observed72hHours, 5);
+    expect(RainfallAccumulator.sufficientFor(summed.observed72hHours, 72)).toBe(false);
+    // And 0 mm over 26 hours is still 0 mm: the exclusion is about coverage, not about the sum.
+    expect(summed.accum72hMm).toBe(0);
+  });
+
+  it('Q5 — staleness agrees, including when every reading has aged out of the window (1.2.10)', async () => {
+    const stale = await bothWays([{ minutesAgo: 45, values: { S111: 1, S222: 1, S333: 1 } }]);
+    const fresh = await bothWays([{ minutesAgo: 5, values: { S111: 1, S222: 1, S333: 1 } }]);
+    const gone = await bothWays([{ minutesAgo: 80 * 60, values: { S111: 9, S222: 9, S333: 9 } }]);
+
+    expect(stale.summed.isStale).toBe(true);
+    expect(stale.summed.isStale).toBe(stale.direct.isStale);
+    expect(fresh.summed.isStale).toBe(false);
+    expect(fresh.summed.isStale).toBe(fresh.direct.isStale);
+    // Nothing inside the window at all. Stale, and reporting no coverage — a store with no recent
+    // data must not look like a dry three days.
+    expect(gone.summed.isStale).toBe(true);
+    expect(gone.summed.observed72hHours).toBe(0);
+  });
+
+  it('Q6 — the query returns one row per station, not one per reading', async () => {
+    const readings = RainfallFeedParser.parseReadings(
+      payload([
+        { minutesAgo: 5, values: { S111: 1, S222: 1, S333: 1 } },
+        { minutesAgo: 10, values: { S111: 1, S222: 1, S333: 1 } },
+        { minutesAgo: 15, values: { S111: 1, S222: 1, S333: 1 } },
+      ]),
+    );
+    const store = storeAtFixtureTime();
+    await store.saveReadings(readings);
+
+    const windows = await store.stationWindows(NOW);
+
+    // The whole point, as an assertion: nine readings in, three rows out. On the live database this
+    // is 66,866 rows in and 88 out, which is a ~750-fold reduction in what crosses the wire.
+    expect(readings).toHaveLength(9);
+    expect(windows).toHaveLength(3);
   });
 });
 

@@ -27,6 +27,7 @@ import {
   RainfallStore,
 } from '../../ports/Stores';
 import { ParsedReading, ParsedStation } from '../../control/ingestion/RainfallFeedParser';
+import { StationWindow } from '../../control/RainfallAccumulator';
 import { ParsedBatch } from '../../ports/types';
 import { Uuid } from '../../entity/valueTypes';
 import { ForecastRegion, SourceKind } from '../../entity/enums';
@@ -270,6 +271,48 @@ export class InMemoryRainfallStore implements RainfallStore {
 
   async readingsSince(since: Date): Promise<ParsedReading[]> {
     return [...this.readings.values()].filter((r) => r.readingAt.getTime() >= since.getTime());
+  }
+
+  /**
+   * The same grouping the SQL does, so the two stores answer identically — which is the whole point
+   * of having both, and what `rainfall.test.ts` checks against `accumulate`.
+   */
+  async stationWindows(now: Date): Promise<StationWindow[]> {
+    const upper = now.getTime();
+    const floor72 = upper - 72 * 3_600_000;
+    const floor24 = upper - 24 * 3_600_000;
+    const floorNow = upper - 5 * 60_000;
+
+    const byStation = new Map<string, ParsedReading[]>();
+    for (const reading of this.readings.values()) {
+      const t = reading.readingAt.getTime();
+      if (t < floor72 || t > upper) {
+        continue;
+      }
+      const bucket = byStation.get(reading.stationId);
+      if (bucket === undefined) {
+        byStation.set(reading.stationId, [reading]);
+      } else {
+        bucket.push(reading);
+      }
+    }
+
+    const sum = (rows: ParsedReading[], floor: number): number | null => {
+      const inside = rows.filter((r) => r.readingAt.getTime() >= floor);
+      return inside.length === 0 ? null : inside.reduce((a, r) => a + r.valueMm, 0);
+    };
+
+    return [...byStation.entries()].map(([stationId, rows]) => {
+      const times = rows.map((r) => r.readingAt.getTime());
+      return {
+        stationId,
+        total24hMm: sum(rows, floor24),
+        total72hMm: sum(rows, floor72),
+        currentMm: sum(rows, floorNow),
+        oldestReadingAt: new Date(Math.min(...times)),
+        newestReadingAt: new Date(Math.max(...times)),
+      };
+    });
   }
 
   async newestReadingAt(): Promise<Date | null> {

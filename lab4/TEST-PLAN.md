@@ -16,7 +16,7 @@ cross-pest generalisation in `REQUIREMENTS.md` v0.9. v0.3 records what happened 
 `tests/pest-scoring.test.ts` (25 cases). §6.5 and §6.6 remain designed and not executed, because the
 two external gateways they test are build steps 7 and 8 and are not written.
 
-**The whole suite: `npx vitest run`, 785 tests in 39 files, 785 passing** — including
+**The whole suite: `npx vitest run`, 795 tests in 39 files, 795 passing** — including
 `tests/repository.test.ts`, which runs against live PostGIS and is the suite that caught the missing
 schema described in §6.8. One case,
 `rainfall.test.ts` J2, was failing when this pass began; it predated the v0.9 work and has since been
@@ -1947,3 +1947,47 @@ the destination authority is named". When §6.4 was executed, F7 was written aga
 instead and the notification case was not written at all — which is how an unwired requirement kept
 a row in a table of passing tests. F8 is the designed F7. The id is not reused, per the same rule
 the requirements follow: numbers are permanent.
+
+### 6.10 §2.42 — the query that nearly took the database down (1.2.7, 1.2.8)
+
+Executed. `tests/rainfall.test.ts` (Q1–Q6) and `tests/repository.test.ts` (R1–R4, live PostGIS).
+Ten cases, all passing.
+
+This one was not found by reading code. Supabase sent a Fair Use notice: **13.31 GB of egress
+against a 5.5 GB allowance**, with the project to start returning 402 on 19 September 2026. The
+cause was a single line in the scoring cycle.
+
+`scoreAndAlert` called `rainfall.readingsSince(now − 72 h)` and handed the result to
+`RainfallAccumulator.accumulate`, which needs, per station, four sums and two timestamps. Measured
+against the live database: **66,778 rows, 3.038 MB, 680 ms — every five minutes, 288 times a day,
+0.85 GB a day.** Over the thirteen days since 4 September that is essentially the entire overrun.
+The same call sat on the resident saved-location path, so opening one saved location pulled 3 MB to
+answer "has it rained at my block".
+
+`RainfallStore.stationWindows(now)` now does the summation in SQL. Measured on the same data:
+**88 rows, 0.008 MB, 66 ms — a 359-fold reduction in bytes and a tenfold one in latency.**
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| Q1 | `accumulateWindows` vs `accumulate` | a three-window fixture | identical results |
+| Q2 | same | unequal values per station | identical — the 1.2.6 weighting survives |
+| Q3 | same | nothing in the 24-hour window | 0 mm with no coverage, not 0 mm measured — 4.1.12 |
+| Q4 | same | 26 hours of history | still reported as 26 — W6 through the new path |
+| Q5 | same | fresh / stale / aged out entirely | staleness agrees in all three — 1.2.10 |
+| Q6 | `stationWindows` | nine readings, three stations | three rows |
+| R1 | `RainfallRepository.stationWindows` | readings inside, outside and in the future | each window sums only its own, and returns numbers not strings |
+| R2 | same | a station absent from a window | `null`, never 0 — 4.1.12 |
+| R3 | aggregate vs row-by-row, live | the same stored rows | the same cluster rainfall |
+| R4 | same | the live table | one row per station |
+
+**R1 and R2 are the cases that need a real database.** Every trap here is SQL's own and every one of
+them yields a plausible number rather than an error: `sum()` over no rows is `NULL` and a careless
+mapping writes 0, which asserts "no rain here" where the truth is "no data" — the exact false claim
+§6.9's W6 was written for. `numeric` arrives from `pg` as a string, so `+` concatenates: `"1.5" +
+"2.25"` is `"1.52.25"`, and a 72-hour accumulation becomes nonsense that still renders. A `FILTER`
+bound an hour out sums the wrong window and looks like weather.
+
+**The general lesson, and it is the third of its kind this week.** §6.8 found evidence that reached
+no score, §6.9 found requirements that reached no caller, and this found a query whose cost nobody
+had measured because the suite runs against in-memory stores where reading 66,778 rows is free. A
+test that proves an answer correct says nothing about what the answer cost to obtain.

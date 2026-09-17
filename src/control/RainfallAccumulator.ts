@@ -30,6 +30,34 @@ export interface StationDistance {
   metres: number;
 }
 
+/**
+ * One station's windows, already summed — the same six numbers `accumulate` derives from tens of
+ * thousands of individual readings.
+ *
+ * **Why this type exists.** `accumulate` needs, per station, four sums and two timestamps. It was
+ * getting them by reading every reading in the 72-hour window out of the database and summing them
+ * in Node: 66,866 rows per cycle, 288 cycles a day, to produce 88 × 6 numbers. That is the whole of
+ * the Supabase egress overrun — roughly 3.2 MB a cycle, 900 MB a day, and it also meant a resident
+ * opening a saved location pulled 3.2 MB to find out whether it had rained at their block.
+ *
+ * A total is `null`, never `0`, when the station reported nothing in that window. The distinction is
+ * the same one `windowTotal` has always made and for the same reason: a station that reported no
+ * rain and a station that reported nothing at all are different facts, and 4.1.12 excludes the
+ * second rather than scoring it as dry.
+ */
+export interface StationWindow {
+  stationId: string;
+  /** 1.2.7 */
+  total24hMm: number | null;
+  /** 1.2.8 */
+  total72hMm: number | null;
+  /** The most recent five minutes, for the current-rate display. */
+  currentMm: number | null;
+  /** Oldest and newest reading held for this station inside the 72-hour window. */
+  oldestReadingAt: Date;
+  newestReadingAt: Date;
+}
+
 /** A window's total, and how much of the window there was any data for. */
 export interface WindowTotal {
   totalMm: number;
@@ -126,6 +154,70 @@ export class RainfallAccumulator {
     result.currentMm = this.windowTotal(relevant, nearest, now, 1 / 12) ?? 0; // the last 5 minutes
     result.isStale = this.isStale(relevant, now);
     return result;
+  }
+
+  /**
+   * 1.2.5–1.2.10 for one cluster, from per-station sums the database computed.
+   *
+   * Identical in result to `accumulate` — `rainfall.test.ts` asserts that directly — and different
+   * only in what it had to be handed to get there. `accumulate` remains because the two must be
+   * shown to agree, and because a caller holding readings in memory (the ingestion path, the
+   * fixtures) should not have to aggregate them first.
+   *
+   * @param windows every station's windows; stations other than the nearest three are ignored here
+   *   rather than filtered by the caller, so a caller cannot get the 1.2.5 selection wrong.
+   */
+  accumulateWindows(
+    centroid: GeoPoint,
+    stations: ParsedStation[],
+    windows: StationWindow[],
+    now: Date,
+  ): ClusterRainfall {
+    const nearest = this.nearestStations(centroid, stations);
+    const ids = new Set(nearest.map((n) => n.stationId));
+    const relevant = windows.filter((w) => ids.has(w.stationId));
+
+    const mean = (pick: (w: StationWindow) => number | null): number | null => {
+      const values = new Map<string, number>();
+      for (const window of relevant) {
+        const value = pick(window);
+        if (value !== null) {
+          values.set(window.stationId, value);
+        }
+      }
+      if (values.size === 0) {
+        return null;
+      }
+      const interpolated = this.inverseDistanceWeightedMean(values, nearest);
+      return interpolated === null ? null : Math.round(interpolated * 10) / 10;
+    };
+
+    const in24 = mean((w) => w.total24hMm);
+    const in72 = mean((w) => w.total72hMm);
+
+    const result = new ClusterRainfall();
+    result.accum24hMm = in24 ?? 0;
+    result.accum72hMm = in72 ?? 0;
+    // Coverage is the span of history held, capped at the window — the reasoning is on
+    // `windowTotalWithCoverage` and is unchanged. A window with no total at all has no coverage
+    // either, which is what keeps `sufficientFor` excluding it rather than reporting nought hours
+    // of a total that does not exist.
+    const oldest = relevant.length === 0 ? null : Math.min(...relevant.map((w) => w.oldestReadingAt.getTime()));
+    const span = oldest === null ? 0 : (now.getTime() - oldest) / 3_600_000;
+    result.observed24hHours = in24 === null ? 0 : Math.min(24, span);
+    result.observed72hHours = in72 === null ? 0 : Math.min(72, span);
+    result.currentMm = mean((w) => w.currentMm) ?? 0;
+    result.isStale = this.isStaleAt(relevant, now);
+    return result;
+  }
+
+  /** 1.2.10, against per-station windows rather than raw readings. */
+  isStaleAt(windows: StationWindow[], now: Date): boolean {
+    if (windows.length === 0) {
+      return true;
+    }
+    const newest = Math.max(...windows.map((w) => w.newestReadingAt.getTime()));
+    return now.getTime() - newest > this.stalenessMinutes * 60_000;
   }
 
   /**

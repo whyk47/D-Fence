@@ -313,10 +313,13 @@ async function main(): Promise<void> {
     // asked about a resident's home.
     forPoint: async (point, at) => {
       const stations = await rainfall.stations();
-      const readings = await rainfall.readingsSince(new Date(at.getTime() - 72 * 3_600_000));
-      return stations.length === 0 || readings.length === 0
+      // Summed in the database, not here. This runs on a resident's request, and the previous
+      // version read every reading in the 72-hour window — some 3.2 MB — to answer "has it rained
+      // at my block".
+      const windows = await rainfall.stationWindows(at);
+      return stations.length === 0 || windows.length === 0
         ? null
-        : accumulator.accumulate(point, stations, readings, at);
+        : accumulator.accumulateWindows(point, stations, windows, at);
     },
   }, auditStore);
 
@@ -425,14 +428,17 @@ async function main(): Promise<void> {
 
     const now = new Date();
     const stations = await rainfall.stations();
-    const readings = await rainfall.readingsSince(new Date(now.getTime() - 72 * 3_600_000));
+    // One row per station, summed by the database. Reading every row instead — 66,866 of them at
+    // 88 stations — was moving roughly 3.2 MB out of Supabase every five minutes, which is 900 MB
+    // a day and the entire cause of the egress overrun.
+    const windows = await rainfall.stationWindows(now);
     const reportCounts = await moderation.verifiedOpenCounts(active.map((c) => c.id));
     const inputs = new Map<string, DriverInputs>();
     for (const cluster of active) {
       const rain =
-        stations.length === 0 || readings.length === 0
+        stations.length === 0 || windows.length === 0
           ? null
-          : accumulator.accumulate(cluster.boundary.centroid(), stations, readings, now);
+          : accumulator.accumulateWindows(cluster.boundary.centroid(), stations, windows, now);
       inputs.set(cluster.id, {
         // 4.1.12, 4.1.20 — `undefined` excludes the driver, names it in `excludedDrivers` and
         // marks the score degraded; 4.1.19 then redistributes its weight. A total computed over
