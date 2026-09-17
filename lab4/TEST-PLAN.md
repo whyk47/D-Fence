@@ -16,7 +16,7 @@ cross-pest generalisation in `REQUIREMENTS.md` v0.9. v0.3 records what happened 
 `tests/pest-scoring.test.ts` (25 cases). §6.5 and §6.6 remain designed and not executed, because the
 two external gateways they test are build steps 7 and 8 and are not written.
 
-**The whole suite: `npx vitest run`, 799 tests in 39 files, 799 passing** — including
+**The whole suite: `npx vitest run`, 801 tests in 39 files, 801 passing** — including
 `tests/repository.test.ts`, which runs against live PostGIS and is the suite that caught the missing
 schema described in §6.8. One case,
 `rainfall.test.ts` J2, was failing when this pass began; it predated the v0.9 work and has since been
@@ -2067,3 +2067,50 @@ for ever and catch this exact class of defect never again.
 **Taken with §6.11, the rule this yields:** adding a value to an enum that reaches the database is a
 change to *every* table that constrains it, and finding one of them is not finding all of them.
 `grep` for the old value list, not for the table you happened to be thinking about.
+
+---
+
+## §6.13 — A score that could not say why it was Critical
+
+`PriorityScore` carries four claims the model makes about itself: urgency (4.1.7), the severity
+multiplier (4.2.8), the evidence tier (4.3.9), and the name of the rule that raised the subject to
+Critical (4.4.6). The `priority_score` table stored none of them. Every score read back from the
+database therefore came back with those fields unset, and `PestPriorityCalculator.describe` — the
+string 7.2.x renders beside the number — printed `evidence tier ?, severity ?` for anything not
+still in memory from the current cycle.
+
+For 4.4.6 the consequence was worse than a missing label. A Critical row reloaded after a restart
+showed the tier and no reason for it, which is the single thing 4.4.6 exists to prevent: the
+override raises the tier and never the score (4.4.5), so the rule name is the *only* record that the
+tier was earned rather than computed. It survived exactly as long as the process did.
+
+Migration 007 adds the four columns. Nothing is backfilled. Urgency for a historical mosquito row is
+recoverable in principle — score / 100, because σ(Mosquito) = 1.000 by construction — but storing it
+would turn a derivation into a stored fact, and the first pest whose multiplier is not 1.000 would
+make one column mean two different things. `override_rule_name` is the exception and is
+`NOT NULL DEFAULT ''`: Critical only became an assignable tier in 005 and the evaluator was not
+wired into the cycle until 2026-09-17, so no existing row was raised by a rule. `''` there is the
+true value, not a guess.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| PS4 | `saveAll` / `historyFor` | a Critical snake, urgency 0.12, tier B, rule `wildlife-indoors` | all four survive the round trip; `describe` contains no `?` |
+| PS5 | `historyFor` | a row whose four columns are NULL, as every pre-007 row is | urgency, severity and tier read back `undefined`; `describe` renders `evidence tier ?` |
+
+**PS5 is the case that constrains the mapping.** `Number(null)` is `0`, and for urgency and severity
+`0` is not "unknown" — it is the strongest available claim that a locality needs no attention. The
+repository leaves the field unassigned instead, and the "?" the dashboard shows is a true statement
+about a row written before the column existed.
+
+### The two live cases this section also repaired
+
+`RA3` and `RA4` were written in §6.10 calling `readingsSince` over the whole 72-hour window, to
+compare the aggregate against the row-by-row accumulation. That is the query §6.10 exists to
+eliminate: tens of thousands of rows and several MB per run, growing daily. Both began timing out at
+5 s as the table filled. They now compare against the fixtures the block itself inserted.
+
+**A test for an egress fix must not re-incur the egress.** The old shape would have gone on
+charging the project for the very bytes the change was made to stop paying for, once per test run,
+and it would have failed by timeout rather than by assertion — a failure that says nothing about
+whether the arithmetic is right.
+

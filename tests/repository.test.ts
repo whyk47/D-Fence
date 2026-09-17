@@ -46,7 +46,8 @@ import { RainfallAccumulator } from '../src/control/RainfallAccumulator';
 import { ParsedReading, ParsedStation } from '../src/control/ingestion/RainfallFeedParser';
 import { PriorityScoreRepository } from '../src/persistence/PriorityScoreRepository';
 import { PriorityScore } from '../src/entity/PriorityScore';
-import { PestType, SourceKind } from '../src/entity/enums';
+import { EvidenceTier, PestType, SourceKind } from '../src/entity/enums';
+import { PestPriorityCalculator } from '../src/control/scoring/PestPriorityCalculator';
 
 const url = ConfigLoader.load().get('DATABASE_URL');
 const live = url !== '';
@@ -786,9 +787,20 @@ describe.skipIf(!live)('The rainfall aggregation against live Postgres — §1.2
 
   it('RA3 — the aggregate and the row-by-row accumulation give the same cluster rainfall', async () => {
     const centroid = new GeoPoint(1.2, 103.6);
-    const readings = (await rainfall.readingsSince(new Date(NOW.getTime() - 72 * 3_600_000))).filter(
-      (r) => ids.includes(r.stationId) && r.readingAt <= NOW,
-    );
+    // The fixtures this block inserted, not a `readingsSince` sweep of the table. Calling
+    // `readingsSince` here would pull every row in the live 72-hour window — tens of thousands of
+    // them, several MB, and growing — which is exactly the query `stationWindows` exists to
+    // replace. A test for an egress fix that re-incurs the egress is not a test of the fix; it also
+    // times out, which is how this was noticed.
+    const readings = [
+      reading(ids[0] as string, 3, 1.5),
+      reading(ids[1] as string, 3, 0.5),
+      reading(ids[2] as string, 3, 0),
+      reading(ids[0] as string, 60 * 6, 2.25),
+      reading(ids[1] as string, 60 * 6, 4),
+      reading(ids[0] as string, 60 * 40, 8),
+      reading(ids[2] as string, 60 * 40, 3),
+    ];
     const windows = (await rainfall.stationWindows(NOW)).filter((w) => ids.includes(w.stationId));
 
     const direct = accumulator.accumulate(centroid, stations, readings, NOW);
@@ -804,12 +816,15 @@ describe.skipIf(!live)('The rainfall aggregation against live Postgres — §1.2
   });
 
   it('RA4 — one row per station, whatever the number of readings', async () => {
-    const readings = await rainfall.readingsSince(new Date(NOW.getTime() - 72 * 3_600_000));
     const windows = await rainfall.stationWindows(NOW);
+    const mine = windows.filter((w) => ids.includes(w.stationId));
 
-    // On the live table this is the difference between 66,866 rows and 88. Asserted as a ratio
-    // rather than a constant, because the live table keeps filling.
-    expect(windows.length).toBeLessThan(readings.length);
+    // Seven fixture readings inside the window collapse to three rows, one per station — the whole
+    // shape of the change, stated on data this block controls rather than on whatever the live
+    // table happens to hold.
+    expect(mine).toHaveLength(3);
+    // And no station is named twice across the entire result, which is what makes the row count a
+    // function of the station list rather than of the table's size.
     expect(new Set(windows.map((w) => w.stationId)).size).toBe(windows.length);
   });
 });
@@ -916,6 +931,53 @@ describe.skipIf(!live)('The priority score table against live Postgres — §4.1
     expect(rats).toHaveLength(1);
     expect(rats[0]?.score).toBeCloseTo(51.3, 1);
     expect(rats[0]?.rank).toBe(1);
+  });
+
+  it('PS4 — a score still knows its own urgency, severity, tier and override after a reload (4.4.6)', async () => {
+    const critical = score(PestType.Snake, 12.0, 3);
+    critical.urgency = 0.12;
+    critical.severityMultiplier = 1.0;
+    critical.evidenceTier = EvidenceTier.B;
+    critical.tier = PriorityTier.Critical;
+    critical.overrideRuleName = 'wildlife-indoors';
+    await scores.saveAll([critical]);
+
+    const reloaded = (await scores.historyFor(clusterId, 20)).find(
+      (s) => s.pestType === PestType.Snake,
+    );
+
+    expect(reloaded?.urgency).toBeCloseTo(0.12, 4);
+    expect(reloaded?.severityMultiplier).toBeCloseTo(1.0, 3);
+    expect(reloaded?.evidenceTier).toBe(EvidenceTier.B);
+    // The point of the whole case. A Critical row that comes back without its rule name presents a
+    // tier no reader can account for, which is precisely what 4.4.6 forbids.
+    expect(reloaded?.tier).toBe(PriorityTier.Critical);
+    expect(reloaded?.overrideRuleName).toBe('wildlife-indoors');
+    expect(PestPriorityCalculator.describe(reloaded!)).toContain('evidence tier B');
+    expect(PestPriorityCalculator.describe(reloaded!)).not.toContain('?');
+  });
+
+  it('PS5 — a row written before 007 reads back as unknown, not as zero', async () => {
+    await scores.saveAll([score(PestType.Mosquito, 71.2, 1)]);
+    // Exactly the state of every row already in the table when 007 ran: the columns exist and hold
+    // nothing. A NULL urgency read as Number(null) would be 0, and 0 is not "unknown" — it is the
+    // strongest possible claim that this locality needs no attention at all.
+    await db.query(
+      'UPDATE priority_score SET urgency = NULL, severity_multiplier = NULL, evidence_tier = NULL ' +
+        'WHERE cluster_id = $1 AND pest_type = $2',
+      [clusterId, PestType.Mosquito],
+    );
+
+    const stored = (await scores.historyFor(clusterId, 20)).find(
+      (s) => s.pestType === PestType.Mosquito,
+    );
+
+    expect(stored?.urgency).toBeUndefined();
+    expect(stored?.severityMultiplier).toBeUndefined();
+    expect(stored?.evidenceTier).toBeUndefined();
+    // The score itself is still a fact and still renders; only the claims about it are withheld.
+    expect(stored?.score).toBeCloseTo(71.2, 1);
+    expect(PestPriorityCalculator.describe(stored!)).toContain('evidence tier ?');
   });
 });
 

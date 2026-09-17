@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { Database, Row } from './Database';
 import { PriorityScore } from '../entity/PriorityScore';
 import { DriverContribution } from '../entity/DriverContribution';
-import { Driver, PestType, PriorityTier } from '../entity/enums';
+import { Driver, EvidenceTier, PestType, PriorityTier } from '../entity/enums';
 import { Uuid } from '../entity/valueTypes';
 import { PriorityScoreStore } from '../ports/Stores';
 
@@ -40,11 +40,17 @@ export class PriorityScoreRepository implements PriorityScoreStore {
           // insert raises "no unique or exclusion constraint matching the ON CONFLICT
           // specification" and the whole cycle's transaction rolls back. That is what took scoring
           // down between 2026-09-16 16:05Z and the deploy that carried this fix.
-          `INSERT INTO priority_score (id, cluster_id, pest_type, computed_at, score, tier, is_degraded, excluded_drivers, rank)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          // 007 added the last four columns. A score that cannot say its own evidence tier, its
+          // severity multiplier or the rule that made it Critical is a number with no standing,
+          // and that is exactly what every reload produced before they were written.
+          `INSERT INTO priority_score (id, cluster_id, pest_type, computed_at, score, tier, is_degraded,
+             excluded_drivers, rank, urgency, severity_multiplier, evidence_tier, override_rule_name)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            ON CONFLICT (cluster_id, pest_type, computed_at) DO UPDATE SET
              score = EXCLUDED.score, tier = EXCLUDED.tier, is_degraded = EXCLUDED.is_degraded,
-             excluded_drivers = EXCLUDED.excluded_drivers, rank = EXCLUDED.rank`,
+             excluded_drivers = EXCLUDED.excluded_drivers, rank = EXCLUDED.rank,
+             urgency = EXCLUDED.urgency, severity_multiplier = EXCLUDED.severity_multiplier,
+             evidence_tier = EXCLUDED.evidence_tier, override_rule_name = EXCLUDED.override_rule_name`,
           [
             id,
             score.clusterId,
@@ -58,6 +64,13 @@ export class PriorityScoreRepository implements PriorityScoreStore {
             score.isDegraded,
             score.excludedDrivers,
             score.rank,
+            // `?? null` rather than a fallback number: a score built by a caller that never ran the
+            // calculator has no urgency, and storing 0 for it would read back as "certainly not
+            // urgent" instead of "not known".
+            score.urgency ?? null,
+            score.severityMultiplier ?? null,
+            score.evidenceTier ?? null,
+            score.overrideRuleName ?? '',
           ],
         );
         score.id = id;
@@ -134,6 +147,17 @@ export class PriorityScoreRepository implements PriorityScoreStore {
       score.isDegraded = Boolean(row.is_degraded);
       score.excludedDrivers = ((row.excluded_drivers as string[]) ?? []) as Driver[];
       score.rank = Number(row.rank);
+      // Left unassigned when the column is NULL — a row written before 007 does not know these,
+      // and `describe` renders "?" for an absent one. Assigning Number(null) would quietly turn
+      // "unknown" into 0, which for urgency and severity are both meaningful, wrong numbers.
+      if (row.urgency !== null && row.urgency !== undefined) {
+        score.urgency = Number(row.urgency);
+      }
+      if (row.severity_multiplier !== null && row.severity_multiplier !== undefined) {
+        score.severityMultiplier = Number(row.severity_multiplier);
+      }
+      score.evidenceTier = (row.evidence_tier as EvidenceTier | null) ?? undefined;
+      score.overrideRuleName = (row.override_rule_name as string | null) ?? '';
       score.contributions = byScore.get(score.id) ?? [];
       return score;
     });

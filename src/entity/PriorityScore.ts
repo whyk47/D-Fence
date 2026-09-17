@@ -23,8 +23,15 @@ export class PriorityScore {
   urgency!: number;
   /** 4.2.8 — shown beside the score whenever one pest's row sits next to another's. */
   severityMultiplier!: number;
-  /** 4.3.9 — shown beside the score, because a tier C number is a weaker claim than a tier A one. */
-  evidenceTier: EvidenceTier = EvidenceTier.A;
+  /**
+   * 4.3.9 — shown beside the score, because a tier C number is a weaker claim than a tier A one.
+   *
+   * Optional, and `undefined` is a real state rather than a gap: a score loaded from a row written
+   * before migration 007 has no stored tier, and `describe` renders "?" for it. Defaulting such a
+   * row to A would present the strongest evidence claim the system can make about a score whose
+   * evidence is in fact unknown.
+   */
+  evidenceTier: EvidenceTier | undefined = EvidenceTier.A;
   /** 4.2.4 — 100 x severity x urgency, to one decimal place. */
   score!: number;
   tier!: PriorityTier;
