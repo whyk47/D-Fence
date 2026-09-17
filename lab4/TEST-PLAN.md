@@ -16,7 +16,7 @@ cross-pest generalisation in `REQUIREMENTS.md` v0.9. v0.3 records what happened 
 `tests/pest-scoring.test.ts` (25 cases). §6.5 and §6.6 remain designed and not executed, because the
 two external gateways they test are build steps 7 and 8 and are not written.
 
-**The whole suite: `npx vitest run`, 798 tests in 39 files, 798 passing** — including
+**The whole suite: `npx vitest run`, 799 tests in 39 files, 799 passing** — including
 `tests/repository.test.ts`, which runs against live PostGIS and is the suite that caught the missing
 schema described in §6.8. One case,
 `rainfall.test.ts` J2, was failing when this pass began; it predated the v0.9 work and has since been
@@ -2032,3 +2032,38 @@ names what it changed, and only one of those has a test that runs against Postgr
 **A standing check follows from this.** After applying any migration, run the live-database suite
 *and* confirm the deployed instance still writes: `max(computed_at)` on `priority_score` should
 never be more than one cycle old. A green in-memory suite is not evidence about a database.
+
+### 6.12 §2.44 — a source is named in three tables (1.1.20, 1.4.1)
+
+Executed. `tests/repository.test.ts` (SK1, live PostGIS). One case, passing. Migration
+`006_source_check_widening.sql` written and applied.
+
+Found in the deployed instance's own log, within minutes of §6.11's fix going out — which is the
+argument for reading the log after a deploy rather than trusting a green health check.
+
+Migration 005 widened `ingestion_run_source_check` to admit `Observations` and `OperatorRegistry`,
+and stopped there. `source_state` and `source_health` carry the same list of sources in their own
+CHECK constraints, written in 001 when there were four sources and no reason to imagine more.
+
+The resulting failure had the worst available shape. `IngestionRunRepository.recordRun` updates
+`source_state` *after* a successful run, so the observation job fetched from iNaturalist, applied
+1.5.4–1.5.7, stored its records and wrote its `ingestion_run` row — and then threw
+
+> `new row for relation "source_state" violates check constraint "source_state_source_check"`
+
+while recording that it had succeeded. The exception propagated out of `observationCycle` and
+aborted the remainder of the cycle. A feed that had worked perfectly took the cycle down at its last
+step, and the message named a constraint nobody had looked at since 001.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| SK1 | `source_state`, `source_health`, `ingestion_run` | every member of `SourceKind` | every table accepts every one |
+
+**SK1 deliberately does not test the two sources that were missing.** It iterates `SourceKind` and
+asserts all three tables accept every member, which is the only form of the case that still holds
+when someone adds a seventh source. A test naming `Observations` and `OperatorRegistry` would pass
+for ever and catch this exact class of defect never again.
+
+**Taken with §6.11, the rule this yields:** adding a value to an enum that reaches the database is a
+change to *every* table that constrains it, and finding one of them is not finding all of them.
+`grep` for the old value list, not for the table you happened to be thinking about.

@@ -46,7 +46,7 @@ import { RainfallAccumulator } from '../src/control/RainfallAccumulator';
 import { ParsedReading, ParsedStation } from '../src/control/ingestion/RainfallFeedParser';
 import { PriorityScoreRepository } from '../src/persistence/PriorityScoreRepository';
 import { PriorityScore } from '../src/entity/PriorityScore';
-import { PestType } from '../src/entity/enums';
+import { PestType, SourceKind } from '../src/entity/enums';
 
 const url = ConfigLoader.load().get('DATABASE_URL');
 const live = url !== '';
@@ -916,5 +916,68 @@ describe.skipIf(!live)('The priority score table against live Postgres — §4.1
     expect(rats).toHaveLength(1);
     expect(rats[0]?.score).toBeCloseTo(51.3, 1);
     expect(rats[0]?.rank).toBe(1);
+  });
+});
+
+/**
+ * §2.44 — every source the code can name, against every table that constrains it.
+ *
+ * Migration 005 widened `ingestion_run_source_check` to admit the two v0.9 sources and stopped
+ * there. `source_state` and `source_health` carry the same list in their own CHECK constraints,
+ * written in 001 when there were four sources and no reason to imagine more.
+ *
+ * The failure that produced was the worst shape available: the observation job downloaded from
+ * iNaturalist, admitted its records, stored them and wrote its `ingestion_run` row — and then threw
+ * while recording that it had *succeeded*, because `recordRun` updates `source_state` afterwards.
+ * The exception aborted the rest of the cycle. A feed that worked perfectly took the cycle down at
+ * the last step, and the message named a constraint nobody had thought about since 001.
+ *
+ * So this case does not test the two sources that were missing. It tests every member of the enum
+ * against every table that constrains it, which is the only version that still passes when someone
+ * adds a seventh source.
+ */
+describe.skipIf(!live)('Every SourceKind is accepted by every table that constrains it — §1.1.20, §1.4.1', () => {
+  let db: Database;
+
+  beforeAll(() => {
+    db = new Database(url);
+  });
+
+  afterAll(async () => {
+    await db.query(`DELETE FROM source_state WHERE source = ANY($1)`, [Object.values(SourceKind)]);
+    await db.query(`DELETE FROM source_health WHERE source = ANY($1)`, [Object.values(SourceKind)]);
+    await db.close?.();
+  });
+
+  it('SK1 — source_state and source_health admit every SourceKind the application can produce', async () => {
+    const sources = Object.values(SourceKind);
+    expect(sources.length).toBeGreaterThanOrEqual(6);
+
+    for (const source of sources) {
+      // Written exactly as the repositories write them. A CHECK that rejects one of these is a
+      // cycle that dies after its work is done, which is how this was found.
+      await expect(
+        db.query(
+          `INSERT INTO source_state (source, publisher_stamp) VALUES ($1, 'test')
+             ON CONFLICT (source) DO UPDATE SET publisher_stamp = EXCLUDED.publisher_stamp`,
+          [source],
+        ),
+      ).resolves.toBeDefined();
+      await expect(
+        db.query(
+          `INSERT INTO source_health (source, last_success_at) VALUES ($1, now())
+             ON CONFLICT (source) DO UPDATE SET last_success_at = EXCLUDED.last_success_at`,
+          [source],
+        ),
+      ).resolves.toBeDefined();
+      await expect(
+        db.query(
+          `INSERT INTO ingestion_run (id, source, started_at, ended_at, outcome, feature_count, trigger)
+             VALUES (gen_random_uuid(), $1, now(), now(), 'SUCCESS', 0, 'MANUAL')`,
+          [source],
+        ),
+      ).resolves.toBeDefined();
+      await db.query(`DELETE FROM ingestion_run WHERE source = $1 AND feature_count = 0 AND trigger = 'MANUAL' AND started_at > now() - interval '1 minute'`, [source]);
+    }
   });
 });
