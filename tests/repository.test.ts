@@ -44,6 +44,9 @@ import { Role, ReportStatus, ReportType, TaskType, WorkOrderStatus, PriorityTier
 import { RainfallRepository } from '../src/persistence/RainfallRepository';
 import { RainfallAccumulator } from '../src/control/RainfallAccumulator';
 import { ParsedReading, ParsedStation } from '../src/control/ingestion/RainfallFeedParser';
+import { PriorityScoreRepository } from '../src/persistence/PriorityScoreRepository';
+import { PriorityScore } from '../src/entity/PriorityScore';
+import { PestType } from '../src/entity/enums';
 
 const url = ConfigLoader.load().get('DATABASE_URL');
 const live = url !== '';
@@ -750,7 +753,7 @@ describe.skipIf(!live)('The rainfall aggregation against live Postgres — §1.2
     await db.close?.();
   });
 
-  it('R1 — the sums match the readings they were computed from, window by window', async () => {
+  it('RA1 — the sums match the readings they were computed from, window by window', async () => {
     const windows = await rainfall.stationWindows(NOW);
     const a = windows.find((w) => w.stationId === ids[0]);
 
@@ -764,7 +767,7 @@ describe.skipIf(!live)('The rainfall aggregation against live Postgres — §1.2
     expect(typeof a?.total72hMm).toBe('number');
   });
 
-  it('R2 — a station with nothing in a window reports null for it, never 0 (4.1.12)', async () => {
+  it('RA2 — a station with nothing in a window reports null for it, never 0 (4.1.12)', async () => {
     const windows = await rainfall.stationWindows(NOW);
     const c = windows.find((w) => w.stationId === ids[2]);
 
@@ -781,7 +784,7 @@ describe.skipIf(!live)('The rainfall aggregation against live Postgres — §1.2
     expect(future.filter((w) => ids.includes(w.stationId))).toHaveLength(0);
   });
 
-  it('R3 — the aggregate and the row-by-row accumulation give the same cluster rainfall', async () => {
+  it('RA3 — the aggregate and the row-by-row accumulation give the same cluster rainfall', async () => {
     const centroid = new GeoPoint(1.2, 103.6);
     const readings = (await rainfall.readingsSince(new Date(NOW.getTime() - 72 * 3_600_000))).filter(
       (r) => ids.includes(r.stationId) && r.readingAt <= NOW,
@@ -800,7 +803,7 @@ describe.skipIf(!live)('The rainfall aggregation against live Postgres — §1.2
     expect(summed.observed72hHours).toBeCloseTo(direct.observed72hHours, 3);
   });
 
-  it('R4 — one row per station, whatever the number of readings', async () => {
+  it('RA4 — one row per station, whatever the number of readings', async () => {
     const readings = await rainfall.readingsSince(new Date(NOW.getTime() - 72 * 3_600_000));
     const windows = await rainfall.stationWindows(NOW);
 
@@ -808,5 +811,110 @@ describe.skipIf(!live)('The rainfall aggregation against live Postgres — §1.2
     // rather than a constant, because the live table keeps filling.
     expect(windows.length).toBeLessThan(readings.length);
     expect(new Set(windows.map((w) => w.stationId)).size).toBe(windows.length);
+  });
+});
+
+/**
+ * §2.43 — the priority score table, against live Postgres.
+ *
+ * **This block exists because its absence took the live system down for ten hours.** Migration 005
+ * replaced the unique key on `priority_score` — `(cluster_id, computed_at)` became
+ * `(cluster_id, pest_type, computed_at)`, because a locality now has one score per pest and the old
+ * key would have let the second pest scored in a cycle silently fail to insert. The migration was
+ * written and applied. `PriorityScoreRepository`, which names that key in an `ON CONFLICT` clause,
+ * was not touched.
+ *
+ * From 2026-09-16 16:05Z every scoring cycle on the deployed instance raised "no unique or
+ * exclusion constraint matching the ON CONFLICT specification", rolled back its transaction, and
+ * wrote nothing. Ingestion carried on succeeding, the health endpoint stayed green, and the
+ * dashboard went on serving the last scores it had, which is why nothing looked wrong. The suite
+ * could not have caught it: `PriorityScoreRepository` had no live-database test at all, and the
+ * in-memory store has no constraints to violate.
+ */
+describe.skipIf(!live)('The priority score table against live Postgres — §4.1.11, §4.2.1', () => {
+  let db: Database;
+  let scores: PriorityScoreRepository;
+  const clusterId = randomUUID();
+  const computedAt = new Date('2026-09-17T03:00:00Z');
+
+  function score(pestType: PestType, value: number, rank: number): PriorityScore {
+    const s = new PriorityScore();
+    s.clusterId = clusterId;
+    s.localityId = clusterId;
+    s.pestType = pestType;
+    s.computedAt = computedAt;
+    s.score = value;
+    s.tier = PriorityTier.Medium;
+    s.isDegraded = false;
+    s.excludedDrivers = [];
+    s.rank = rank;
+    s.contributions = [];
+    return s;
+  }
+
+  beforeAll(async () => {
+    db = new Database(url);
+    scores = new PriorityScoreRepository(db);
+    const ring = [[103.6, 1.2], [103.61, 1.2], [103.61, 1.21], [103.6, 1.21], [103.6, 1.2]]
+      .map((p) => p.join(' '))
+      .join(',');
+    await db.query(
+      'INSERT INTO cluster (id, object_id, locality, boundary, case_size, change_class, trajectory, is_active) ' +
+        "VALUES ($1, $2, 'Score Test Locality', ST_GeogFromText($3), 5, 'UNCHANGED', 'Stable', true)",
+      [clusterId, 'score-test-' + clusterId.slice(0, 8), 'POLYGON((' + ring + '))'],
+    );
+  });
+
+  afterAll(async () => {
+    await db.query(
+      'DELETE FROM driver_contribution WHERE priority_score_id IN (SELECT id FROM priority_score WHERE cluster_id = $1)',
+      [clusterId],
+    );
+    await db.query('DELETE FROM priority_score WHERE cluster_id = $1', [clusterId]);
+    await db.query('DELETE FROM cluster WHERE id = $1', [clusterId]);
+    await db.close?.();
+  });
+
+  it('PS1 — a cycle of scores saves at all, which is the regression this block is named for', async () => {
+    // The whole of the outage, as one assertion. Against the real constraint this either writes or
+    // throws; there is no in-memory equivalent of "the ON CONFLICT target does not exist".
+    await expect(scores.saveAll([score(PestType.Mosquito, 71.2, 1)])).resolves.toBeUndefined();
+
+    const stored = await scores.historyFor(clusterId, 10);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.score).toBeCloseTo(71.2, 1);
+  });
+
+  it('PS2 — two pests in one locality in one cycle both survive (4.2.1)', async () => {
+    await scores.saveAll([
+      score(PestType.Mosquito, 71.2, 1),
+      score(PestType.Rat, 44.8, 2),
+      score(PestType.Snake, 12.0, 3),
+    ]);
+
+    const stored = await scores.historyFor(clusterId, 10);
+    const byPest = new Map(stored.map((s) => [s.pestType, s.score]));
+
+    // Before the fix the repository wrote no pest_type, so all three took the column default and
+    // collided on the conflict target: the last one written would have been the only survivor, and
+    // the queue would have shown one row where there are three subjects.
+    expect(stored).toHaveLength(3);
+    expect(byPest.get(PestType.Mosquito)).toBeCloseTo(71.2, 1);
+    expect(byPest.get(PestType.Rat)).toBeCloseTo(44.8, 1);
+    expect(byPest.get(PestType.Snake)).toBeCloseTo(12.0, 1);
+  });
+
+  it('PS3 — rescoring the same subject updates it rather than duplicating or failing', async () => {
+    await scores.saveAll([score(PestType.Rat, 44.8, 2)]);
+    const again = score(PestType.Rat, 51.3, 1);
+    await scores.saveAll([again]);
+
+    const rats = (await scores.historyFor(clusterId, 20)).filter((s) => s.pestType === PestType.Rat);
+
+    // One row, updated. 4.1.11 keeps history across *cycles*, and two rows for one cycle would be
+    // a ranking with the same subject in it twice.
+    expect(rats).toHaveLength(1);
+    expect(rats[0]?.score).toBeCloseTo(51.3, 1);
+    expect(rats[0]?.rank).toBe(1);
   });
 });

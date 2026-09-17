@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { Database, Row } from './Database';
 import { PriorityScore } from '../entity/PriorityScore';
 import { DriverContribution } from '../entity/DriverContribution';
-import { Driver, PriorityTier } from '../entity/enums';
+import { Driver, PestType, PriorityTier } from '../entity/enums';
 import { Uuid } from '../entity/valueTypes';
 import { PriorityScoreStore } from '../ports/Stores';
 
@@ -33,14 +33,25 @@ export class PriorityScoreRepository implements PriorityScoreStore {
       for (const score of scores) {
         const id = score.id || randomUUID();
         await tx.query(
-          `INSERT INTO priority_score (id, cluster_id, computed_at, score, tier, is_degraded, excluded_drivers, rank)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-           ON CONFLICT (cluster_id, computed_at) DO UPDATE SET
+          // The conflict target is the *subject* — locality, pest, cycle — and matches the unique
+          // index migration 005 created. It read `(cluster_id, computed_at)` until then, which was
+          // correct while a locality had exactly one score and became two separate faults the
+          // moment it did not: with 005 applied the old target names no constraint at all, so every
+          // insert raises "no unique or exclusion constraint matching the ON CONFLICT
+          // specification" and the whole cycle's transaction rolls back. That is what took scoring
+          // down between 2026-09-16 16:05Z and the deploy that carried this fix.
+          `INSERT INTO priority_score (id, cluster_id, pest_type, computed_at, score, tier, is_degraded, excluded_drivers, rank)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (cluster_id, pest_type, computed_at) DO UPDATE SET
              score = EXCLUDED.score, tier = EXCLUDED.tier, is_degraded = EXCLUDED.is_degraded,
              excluded_drivers = EXCLUDED.excluded_drivers, rank = EXCLUDED.rank`,
           [
             id,
             score.clusterId,
+            // 4.2.1 — without this every cross-pest score was written as the column's default,
+            // 'Mosquito'. Not merely mislabelled: the rat and the mosquito in one locality would
+            // then collide on the conflict target and the second would overwrite the first.
+            score.pestType ?? PestType.Mosquito,
             score.computedAt,
             score.score,
             score.tier,
@@ -113,6 +124,10 @@ export class PriorityScoreRepository implements PriorityScoreStore {
       const score = new PriorityScore();
       score.id = String(row.id);
       score.clusterId = String(row.cluster_id);
+      // Read back as well as written. Left off, `latest()` returned every row with an undefined
+      // pest type and 7.2.x could not tell a rat from a mosquito in the queue it renders.
+      score.pestType = (row.pest_type as PestType | null) ?? PestType.Mosquito;
+      score.localityId = String(row.cluster_id);
       score.computedAt = row.computed_at as Date;
       score.score = Number(row.score);
       score.tier = row.tier as PriorityTier;

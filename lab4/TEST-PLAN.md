@@ -16,7 +16,7 @@ cross-pest generalisation in `REQUIREMENTS.md` v0.9. v0.3 records what happened 
 `tests/pest-scoring.test.ts` (25 cases). §6.5 and §6.6 remain designed and not executed, because the
 two external gateways they test are build steps 7 and 8 and are not written.
 
-**The whole suite: `npx vitest run`, 795 tests in 39 files, 795 passing** — including
+**The whole suite: `npx vitest run`, 798 tests in 39 files, 798 passing** — including
 `tests/repository.test.ts`, which runs against live PostGIS and is the suite that caught the missing
 schema described in §6.8. One case,
 `rainfall.test.ts` J2, was failing when this pass began; it predated the v0.9 work and has since been
@@ -1950,7 +1950,7 @@ the requirements follow: numbers are permanent.
 
 ### 6.10 §2.42 — the query that nearly took the database down (1.2.7, 1.2.8)
 
-Executed. `tests/rainfall.test.ts` (Q1–Q6) and `tests/repository.test.ts` (R1–R4, live PostGIS).
+Executed. `tests/rainfall.test.ts` (Q1–Q6) and `tests/repository.test.ts` (RA1–RA4, live PostGIS).
 Ten cases, all passing.
 
 This one was not found by reading code. Supabase sent a Fair Use notice: **13.31 GB of egress
@@ -1975,12 +1975,12 @@ answer "has it rained at my block".
 | Q4 | same | 26 hours of history | still reported as 26 — W6 through the new path |
 | Q5 | same | fresh / stale / aged out entirely | staleness agrees in all three — 1.2.10 |
 | Q6 | `stationWindows` | nine readings, three stations | three rows |
-| R1 | `RainfallRepository.stationWindows` | readings inside, outside and in the future | each window sums only its own, and returns numbers not strings |
-| R2 | same | a station absent from a window | `null`, never 0 — 4.1.12 |
-| R3 | aggregate vs row-by-row, live | the same stored rows | the same cluster rainfall |
-| R4 | same | the live table | one row per station |
+| RA1 | `RainfallRepository.stationWindows` | readings inside, outside and in the future | each window sums only its own, and returns numbers not strings |
+| RA2 | same | a station absent from a window | `null`, never 0 — 4.1.12 |
+| RA3 | aggregate vs row-by-row, live | the same stored rows | the same cluster rainfall |
+| RA4 | same | the live table | one row per station |
 
-**R1 and R2 are the cases that need a real database.** Every trap here is SQL's own and every one of
+**RA1 and RA2 are the cases that need a real database.** Every trap here is SQL's own and every one of
 them yields a plausible number rather than an error: `sum()` over no rows is `NULL` and a careless
 mapping writes 0, which asserts "no rain here" where the truth is "no data" — the exact false claim
 §6.9's W6 was written for. `numeric` arrives from `pg` as a string, so `+` concatenates: `"1.5" +
@@ -1991,3 +1991,44 @@ bound an hour out sums the wrong window and looks like weather.
 no score, §6.9 found requirements that reached no caller, and this found a query whose cost nobody
 had measured because the suite runs against in-memory stores where reading 66,778 rows is free. A
 test that proves an answer correct says nothing about what the answer cost to obtain.
+
+### 6.11 §2.43 — the migration that took scoring down for ten hours (4.1.11, 4.2.1)
+
+Executed. `tests/repository.test.ts` (PS1–PS3, live PostGIS). Three cases, all passing.
+
+Found by deploying. Not by a test, not by review — by checking, after the deploy, whether the live
+system had actually scored anything, and finding that its newest score was **nine and a half hours
+old**.
+
+Migration 005 replaced the unique key on `priority_score`: `(cluster_id, computed_at)` became
+`(cluster_id, pest_type, computed_at)`, because a locality now has one score per pest and the old
+key would have let the second pest scored in a cycle silently fail to insert. That reasoning is
+right and it is written into 005. What the migration did not do is touch
+`PriorityScoreRepository`, which names that key in an `ON CONFLICT` clause.
+
+From **2026-09-16 16:05Z**, every scoring cycle on the deployed instance raised *"no unique or
+exclusion constraint matching the ON CONFLICT specification"*, rolled back the cycle's transaction
+and wrote nothing. Two things hid it. Ingestion kept succeeding and `/api/health` kept returning
+200, because neither depends on scoring. And the dashboard kept serving the last scores it had, so
+the failure looked exactly like a quiet afternoon.
+
+The repository was also writing no `pest_type` at all, so once the conflict target was repaired
+every cross-pest score would have been stored under the column's default of `Mosquito` — and then
+collided with the real mosquito on the conflict target, leaving one row where there were three
+subjects. Migration 005's whole purpose, defeated by the writer it was written for.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| PS1 | `PriorityScoreRepository.saveAll` | one mosquito score | it saves at all — the regression itself |
+| PS2 | same | three pests, one locality, one cycle | three rows, three pest types — 4.2.1 |
+| PS3 | same | the same subject scored twice | one row, updated, not duplicated — 4.1.11 |
+
+**Why the suite could not have caught this.** `PriorityScoreRepository` had no live-database test of
+any kind, and the in-memory store has no constraints to violate: `saveAll` against a `Map` cannot
+fail an `ON CONFLICT` that names nothing. This is the same lesson as §6.8 and §6.10 arriving from a
+third direction — a schema change is a change to two artefacts, the migration and every writer that
+names what it changed, and only one of those has a test that runs against Postgres.
+
+**A standing check follows from this.** After applying any migration, run the live-database suite
+*and* confirm the deployed instance still writes: `max(computed_at)` on `priority_score` should
+never be more than one cycle old. A green in-memory suite is not evidence about a database.
