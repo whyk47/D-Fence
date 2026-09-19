@@ -65,6 +65,7 @@ import { InMemoryTreatmentRecordStore, InMemoryWorkOrderStore, RecordingNotifier
 import { InMemoryClusterLocator, InMemoryReportStore } from './persistence/memory/InMemoryReportStores';
 import {
   AccountStore,
+  HighAedesAreaStore,
   ObservationStore,
   OperatorRegistryStore,
   ReferralStore,
@@ -119,6 +120,12 @@ import { RainfallIngestionJob } from './control/ingestion/RainfallIngestionJob';
 import { ForecastIngestionJob } from './control/ingestion/ForecastIngestionJob';
 import { ObservationIngestionJob } from './control/ingestion/ObservationIngestionJob';
 import { OperatorRegistryLoader } from './control/OperatorRegistryLoader';
+import { GravitrapGateway } from './boundary/gateways/GravitrapGateway';
+import { GravitrapIngestionJob } from './control/ingestion/GravitrapIngestionJob';
+import {
+  HighAedesAreaRepository,
+  InMemoryHighAedesAreaStore,
+} from './persistence/HighAedesAreaRepository';
 import { CrossPestScoringService } from './control/scoring/CrossPestScoringService';
 import { CriticalOverrideEvaluator } from './control/scoring/CriticalOverrideEvaluator';
 import { CriticalEscalationNotifier } from './control/CriticalEscalationNotifier';
@@ -369,6 +376,11 @@ async function main(): Promise<void> {
     database === null ? new InMemoryObservationStore() : new ObservationRepository(database);
   const registryLoader = new OperatorRegistryLoader(new VCORegistryGateway(http), oneMap, operatorRegistry);
 
+  // Step 9's feed. Stored and dated, and read by no score — see `gravitrapCycle` below.
+  const highAedesAreas: HighAedesAreaStore =
+    database === null ? new InMemoryHighAedesAreaStore() : new HighAedesAreaRepository(database);
+  const gravitrapJob = new GravitrapIngestionJob(new GravitrapGateway(http), runs, highAedesAreas);
+
   // 1.5.1 — one job per tier B pest, because 1.5.2 makes the supplier call taxon by taxon and
   // 1.5.14 records the pest type on the run. A pest whose profile carries no taxon id is skipped
   // rather than fetched without one: an unfiltered call returns every observation in Singapore.
@@ -414,12 +426,16 @@ async function main(): Promise<void> {
     // reason the forecast is, and after the cluster job because 1.5.9 binds each observation to a
     // locality — binding to yesterday's cluster list would put sightings in closed clusters.
     const observationRun = await observationCycle(trigger);
+    // Step 9's feed, on the same throttle and after the cluster job for the same reason: whether a
+    // locality meets a high-Aedes area is asked of today's cluster boundaries, not yesterday's.
+    const gravitrapRun = await gravitrapCycle(trigger);
     await scoreAndAlert(rainRun.outcome === 'FAILED');
     console.log(
       `cycle: clusters ${clusterRun.outcome} (${clusterRun.featureCount}), ` +
         `rainfall ${rainRun.outcome} (${rainRun.featureCount}), ` +
         `forecast ${forecastRun ?? 'SKIPPED'}, ` +
-        `observations ${observationRun ?? 'SKIPPED'}`,
+        `observations ${observationRun ?? 'SKIPPED'}, ` +
+        `gravitrap ${gravitrapRun ?? 'SKIPPED'}`,
     );
   }
 
@@ -569,6 +585,28 @@ async function main(): Promise<void> {
       rejected += run.rejectedCount ?? 0;
     }
     return `${observationJobs.length} pest(s), ${accepted} accepted, ${rejected} rejected`;
+  }
+
+  /**
+   * The Gravitrap feed — PEST-PRIORITY-MODEL.md §8 step 9. **Ingested, not scored.**
+   *
+   * It shares the observation cycle's cadence because it has the same shape of cost: a metadata
+   * poll that is free and a download that is not. 1.1.20 means the 420 KB payload is fetched only
+   * when NEA's stamp moves, which between 2025-10-23 and 2026-08-29 was once.
+   *
+   * Nothing downstream reads `high_aedes_area` into a score, deliberately. The three objections in
+   * §8 are objections to scoring it — a contradiction with 4.2.5, no requirement, and a
+   * redistribution of seven argued weights — and none of them is an objection to collecting it.
+   */
+  let lastGravitrapAt = 0;
+  async function gravitrapCycle(trigger: 'SCHEDULED' | 'MANUAL'): Promise<string | null> {
+    if (trigger === 'SCHEDULED' && Date.now() - lastGravitrapAt < observationInterval) {
+      return null;
+    }
+    lastGravitrapAt = Date.now();
+    const run = await gravitrapJob.run(trigger);
+    const at = await highAedesAreas.publishedAt();
+    return `${run.featureCount} high-Aedes area(s), published ${at?.toISOString().slice(0, 10) ?? 'unknown'}`;
   }
 
   /**

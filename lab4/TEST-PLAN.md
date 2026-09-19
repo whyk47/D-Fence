@@ -16,7 +16,7 @@ cross-pest generalisation in `REQUIREMENTS.md` v0.9. v0.3 records what happened 
 `tests/pest-scoring.test.ts` (25 cases). §6.5 and §6.6 remain designed and not executed, because the
 two external gateways they test are build steps 7 and 8 and are not written.
 
-**The whole suite: `npx vitest run`, 814 tests in 39 files, 814 passing** — including
+**The whole suite: `npx vitest run`, 824 tests in 40 files, 824 passing** — including
 `tests/repository.test.ts`, which runs against live PostGIS and is the suite that caught the missing
 schema described in §6.8. One case,
 `rainfall.test.ts` J2, was failing when this pass began; it predated the v0.9 work and has since been
@@ -2228,4 +2228,61 @@ raise, which is the correct answer to "refer this twice".
 **OB2 uses rats and macaques because OB1 already wrote snakes to that locality.** A case whose
 expected number depends on how many rows an earlier case happened to insert breaks the next time
 either one is edited, and it breaks in a way that looks like a defect in the code under test.
+
+---
+
+## §6.16 — Step 9, built to the line the decision sits on
+
+Step 9 of `PEST-PRIORITY-MODEL.md` §8 — NEA's Gravitrap feed as an eighth tier A driver — was
+refused with three reasons. All three are about *scoring* the feed: an eighth tier A driver
+contradicts 4.2.5 as written, has no requirement behind it, and would redistribute seven weights
+each argued for individually. None of the three is an objection to **collecting** it.
+
+So the feed is built and the driver is not. `GravitrapGateway` and `GravitrapIngestionJob` fetch,
+parse, store and date the polygons; `high_aedes_area` (migration 008) holds them; and
+`localityIdsInAreas()` answers which localities meet one, in PostGIS. Nothing reads any of it into
+a score.
+
+The first real run returned **135 areas, published 2026-08-29**, with 0 rejected features — and
+**four of the twelve active clusters intersect one**, including the largest at 73 cases. That
+overlap is the sharpest statement of the third reason: a locality can be in both a cluster and a
+high-Aedes area, and a model treating them as independent evidence would count one outbreak twice.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| G1 | `parse` | one Polygon and one MultiPolygon feature | both stored, normalised to one shape |
+| G2 | `parse` | features with no id, no geometry, and a 3-point ring | one stored, three counted as rejected, run SUCCESS |
+| G3 | `run` twice | an unchanged publisher stamp | fetched once; second run UNCHANGED |
+| G4 | `run` twice | a moved stamp | fetched twice |
+| G5 | `replaceAll` | an empty set | stored set unchanged |
+| G6 | `TIER_A_DRIVERS` | — | still seven, none of them the Gravitrap feed |
+| GA1 | `replaceAll` / `all` | a multipolygon | survives PostGIS in `[lng, lat]` order, with the publisher's date |
+| GA2 | `localityIdsInAreas` | an area over, then away from, a cluster | found, then not |
+| GA3 | `replaceAll` | a withdrawn area | gone |
+
+**G6 is the unusual one and the most important.** It asserts that the code does *not* do something:
+the tier A driver set is still seven, and none of them is this feed. It is the guard on an open
+decision — anyone wiring the feed into the model has to re-cut the 4.2.5 goldens and redistribute
+seven argued weights, and this case fails before they get there.
+
+**G5 exists because an empty parse is not an empty world.** A feed that returned nothing has
+failed, and the template records it as such; emptying the table on the strength of it would turn
+one bad download into a deletion, and the resulting screen would say "there are no high-Aedes areas
+in Singapore" — a claim, not an absence.
+
+**GA1 asserts coordinate order explicitly.** GeoJSON is `[longitude, latitude]` and `GeoPoint` is
+`(latitude, longitude)`; a repository that swapped them would store a perfectly valid polygon off
+the coast of Somalia, which raises nothing and intersects nothing.
+
+### What the suite caught on the way
+
+Adding `Gravitrap` to `SourceKind` failed **P10**, which walks the enum and demands an attribution,
+a URL and a licence for every member (10.4.4, 10.4.5). That is the §6.12 lesson holding: widening
+an enum is a change to every table and every map that enumerates it, and the value of P10 is that
+it found the omission without anyone remembering to look.
+
+P10, P13 and P14 also asserted the literal counts 6, 5 and 6. Those were correct and are now wrong,
+and the fix is not to write 7, 6 and 7 — a count that has to be edited every time the enum grows
+teaches whoever sees the failure to edit the number rather than to ask what it meant. They now read
+`Object.values(SourceKind).length`, which is the property they were always about.
 

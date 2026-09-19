@@ -29,6 +29,7 @@ import { AlertSubscription } from '../entity/AlertSubscription';
 import { TreatmentRecord } from '../entity/TreatmentRecord';
 import { VectorControlOperator } from '../entity/VectorControlOperator';
 import { ObservationRecord } from '../entity/ObservationRecord';
+import { HighAedesArea } from '../entity/HighAedesArea';
 import { ParsedBatch } from './types';
 import { ParsedReading, ParsedStation } from '../control/ingestion/RainfallFeedParser';
 import { StationWindow } from '../control/RainfallAccumulator';
@@ -446,6 +447,28 @@ export interface ObservationStore {
   /** 4.1.24 — the density driver's input: how many observations of this pest, in this locality. */
   countByLocality(pestType: PestType, localityId: string, since: Date): Promise<number>;
   all(): Promise<ObservationRecord[]>;
+}
+
+/**
+ * NEA's high-Aedes areas — PEST-PRIORITY-MODEL.md §8 step 9. Stored and shown, not scored.
+ *
+ * `replaceAll` and not `save`: the feed is a published snapshot of a geography, so an area NEA has
+ * dropped must disappear rather than linger as evidence nobody is republishing. The same argument
+ * as 1.6.6 makes for the operator registry.
+ */
+export interface HighAedesAreaStore {
+  /** @returns the number of areas stored. */
+  replaceAll(areas: HighAedesArea[], publishedAt: Date | null): Promise<number>;
+  all(): Promise<HighAedesArea[]>;
+  /** The publisher's stamp on the stored set, never the load date. */
+  publishedAt(): Promise<Date | null>;
+  /**
+   * The localities that intersect any stored area.
+   *
+   * Asked of PostGIS rather than computed from `Polygon.contains`, which throws by design: two
+   * implementations of one spatial predicate is exactly the risk `valueTypes.Polygon` documents.
+   */
+  localityIdsInAreas(): Promise<string[]>;
 }
 
 export interface ReferralStore {

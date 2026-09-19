@@ -359,9 +359,30 @@ Ordered so each step is independently demonstrable. Estimate assumes the existin
 | 6 | Critical override evaluator + AVS routing with crew dispatch suppressed | `control/WorkOrderController.ts` | M | **yes** — `CriticalOverrideEvaluator`, `ReferralController`, 8.1.14's refusal, both screens. **Wired 2026-09-17:** `CriticalEscalationNotifier` (4.4.9) and the resident referral notice (8.6.6). The override itself was reached by no production caller until then — `CrossPestScoringService` now evaluates it in the cycle |
 | 7 | `VCORegistryGateway` — one-off CSV load, OneMap keyless geocode of 290 postal codes, cached to disk | `boundary/gateways/` | S | **yes** — plus `OperatorRegistryLoader`, the cache keyed by postal code, and 1.6.8's nearest-operator distance |
 | 8 | `INaturalistGateway` + `ObservationIngestionJob` on the `ClusterIngestionJob` pattern, dropping `obscured=true` | `boundary/gateways/`, `control/ingestion/` | M | **yes** — one job per tier B pest; admissibility applied at the boundary, counted per rule |
-| 9 | NEA Gravitrap feed `d_5d060d8b7838a15e8906fb22c50dbf51` as an eighth Tier A driver | `control/ingestion/` | S | **no — deliberately. See below** |
+| 9 | NEA Gravitrap feed `d_5d060d8b7838a15e8906fb22c50dbf51` as an eighth Tier A driver | `control/ingestion/` | S | **feed built 2026-09-19; the driver still refused. See below** |
 
-**Why step 9 is not built, and what it would take.**
+**Status 2026-09-19: the feed is built and running; the driver is not, and the decision below is
+unchanged.** `GravitrapGateway`, `GravitrapIngestionJob` and `high_aedes_area` (migration 008)
+fetch, parse, store and date the 135 polygons, on the observation cycle's cadence and under 1.1.20
+so the 420 KB payload is downloaded only when NEA's stamp moves. `localityIdsInAreas()` answers
+which localities meet an area, in PostGIS. **Nothing reads any of it into a score**, and test G6
+fails if anyone changes that without touching the requirement first.
+
+The three reasons below are all objections to *scoring* the feed. None of them is an objection to
+collecting it, and a team deciding whether to add a driver is better served by a feed it can look
+at than by a paragraph describing one. What the first run showed, which no amount of arguing would
+have: 135 areas, published 2026-08-29, and **four of the twelve active dengue clusters intersect
+one** — including the largest, Ho Ching Rd at 73 cases. That overlap is also the sharpest form of
+reason 3 below. A locality can be in both a cluster and a high-Aedes area, and a model that treated
+the two as independent evidence would count one outbreak twice.
+
+Two things about the feed's fields, found by fetching it: every feature's `NAME` is the identical
+slogan "High Aedes Mosquitoes Population Area. Let's fight Dengue together...", and the identifier
+a person would recognise ("CO77 - Belimbing Ave / Butterfly Ave / ...") is in `DESCRIPTION`. The
+dataset's own prose still says "April to June 2019" while `lastUpdatedAt` reads 2026-08-29; the
+gateway believes the field that moves.
+
+**Why step 9's driver is still not built, and what it would take.**
 
 It is the only step on this list that is not a generalisation. Steps 1 to 8 widen the model to more
 pests without changing what a dengue score means; step 9 adds an eighth driver to tier A, which
@@ -379,7 +400,9 @@ changes every dengue score there is. Three things follow, and none of them is a 
    eighth driver is not an addition — it is a redistribution across all eight, and the current seven
    were argued for individually in §5.2.
 
-The gateway itself is a day's work. The decision in front of it belongs to the team.
+The gateway took an afternoon and is done. The decision in front of the driver still belongs to the
+team, and now it can be made against real numbers: how much of what the Gravitrap feed says is
+already said by `CaseSize`, in the four localities where both speak.
 
 **Steps 1–6 deliver the entire generalised model with no new external dependency**, because Tier C
 runs on entities that already exist. Steps 7–9 add evidence, not capability. If time runs short,

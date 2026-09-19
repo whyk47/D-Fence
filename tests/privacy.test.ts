@@ -210,10 +210,13 @@ describe('10.4.2 — what the system holds about a person', () => {
 
 describe('10.4.4, 10.4.5 — attribution', () => {
   it('P10 — every external source carries an attribution, a URL and a licence', () => {
-    // Six in v0.9: the four v0.8 sources plus iNaturalist observations (1.5) and the NEA vector
-    // control operator registry (1.6). The loop below is the part that matters — it walks the
-    // SourceKind enum, so a source added without an attribution fails here rather than shipping.
-    expect(ATTRIBUTIONS).toHaveLength(6);
+    // One per source, asserted against the enum rather than against a number. It was written as
+    // `toHaveLength(6)` and caught the Gravitrap feed on 2026-09-19 — correctly, since the feed
+    // had no attribution yet — but it would have gone on failing for the *count* long after the
+    // attribution was added, which teaches whoever sees it next to edit the number.
+    expect(ATTRIBUTIONS).toHaveLength(Object.values(SourceKind).length);
+    // The loop is the part that matters: it walks the enum, so a source added without an
+    // attribution fails here rather than shipping.
     for (const source of Object.values(SourceKind)) {
       const attribution = Attribution.forSource(source);
       expect(attribution?.text.length).toBeGreaterThan(20);
@@ -244,14 +247,17 @@ describe('10.4.4, 10.4.5 — attribution', () => {
     // registered account and an expiring token. Calling that "no third-party authentication"
     // because the publisher is a government agency would be reading the requirement to suit us.
     expect(credentialed.map((a) => a.source)).toEqual([SourceKind.Geocoding]);
-    // The other five genuinely need nothing, which is why they could be built before any account
-    // existed anywhere. iNaturalist and the operator registry are both keyless, and so — verified
-    // 2026-09-16 — is OneMap's search endpoint, though the tiles still need the token above.
-    expect(ATTRIBUTIONS.filter((a) => !a.requiresCredential)).toHaveLength(5);
+    // Every other source genuinely needs nothing, which is why they could be built before any
+    // account existed anywhere. iNaturalist, the operator registry and the high-Aedes feed are all
+    // keyless, and so — verified 2026-09-16 — is OneMap's search endpoint, though the tiles still
+    // need the token above.
+    expect(ATTRIBUTIONS.filter((a) => !a.requiresCredential)).toHaveLength(
+      Object.values(SourceKind).length - 1,
+    );
   });
 
-  it('P14 — the Data Sources screen carries all six, since it names all six', () => {
-    expect(Attribution.forScreen('DataSources')).toHaveLength(6);
+  it('P14 — the Data Sources screen carries every source, since it names every source', () => {
+    expect(Attribution.forScreen('DataSources')).toHaveLength(Object.values(SourceKind).length);
   });
 });
 

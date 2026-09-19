@@ -37,6 +37,11 @@ const DEFAULT_INTERVAL_SECONDS: Record<SourceKind, number> = {
   // never reports it stale, which would be a false alarm about a file that does not change.
   [SourceKind.Observations]: 24 * 3_600,
   [SourceKind.OperatorRegistry]: 7 * 24 * 3_600,
+  // The high-Aedes file moved once between 2025-10-23 and 2026-08-29. A daily poll of its metadata
+  // costs nothing and downloads nothing, but judging it stale on a daily interval would light a
+  // warning about a publisher behaving exactly as it always has. Two weeks is the same argument as
+  // the operator registry's, at the cadence this feed actually changes.
+  [SourceKind.Gravitrap]: 14 * 24 * 3_600,
 };
 
 /** What 1.4.2 displays and 1.4.4 keys off, per source. */

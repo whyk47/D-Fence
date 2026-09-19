@@ -90,6 +90,17 @@ export const ATTRIBUTIONS: readonly SourceAttribution[] = [
     requiresCredential: false,
     shownOn: ['PriorityTable', 'PestReference', 'DataSources'],
   },
+  {
+    source: SourceKind.Gravitrap,
+    // Named for what NEA measured — where its Gravitraps caught more adult mosquitoes — and not
+    // for what a reader might take it to mean. It is not a case count and not a cluster: a trap
+    // catches mosquitoes, a cluster is people who fell ill, and the two answer different questions.
+    text: 'Areas with high Aedes population © National Environment Agency, from data.gov.sg',
+    url: 'https://data.gov.sg/datasets/d_5d060d8b7838a15e8906fb22c50dbf51/view',
+    licence: 'Singapore Open Data Licence v1.0',
+    requiresCredential: false,
+    shownOn: ['DataSources'],
+  },
 ] as const;
 
 export class Attribution {

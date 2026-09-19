@@ -57,6 +57,8 @@ import {
 import { ObservationRecord } from '../src/entity/ObservationRecord';
 import { VectorControlOperator } from '../src/entity/VectorControlOperator';
 import { Referral } from '../src/entity/Referral';
+import { HighAedesAreaRepository } from '../src/persistence/HighAedesAreaRepository';
+import { HighAedesArea } from '../src/entity/HighAedesArea';
 
 const url = ConfigLoader.load().get('DATABASE_URL');
 const live = url !== '';
@@ -1358,5 +1360,105 @@ describe.skipIf(!live)('The three v0.9 stores against live Postgres — §1.5, �
     // is why `save` conflicts on `id` and not on `report_id`: conflicting on the report would make
     // "refer this twice" quietly replace the reason, the authority and the referring manager.
     await expect(referrals.save(second)).rejects.toThrow();
+  });
+});
+
+/**
+ * §2.47 — the high-Aedes areas against live Postgres.
+ *
+ * The parse is unit-tested; what cannot be is the geometry actually reaching PostGIS. The insert
+ * goes through `ST_GeomFromGeoJSON` rather than a hand-built WKT string, because a polygon of
+ * several hundred vertices concatenated into `POLYGON((...))` can be malformed in ways that produce
+ * a *valid but wrong* shape — and a wrong shape does not raise, it just intersects the wrong
+ * localities.
+ */
+describe.skipIf(!live)('The high-Aedes areas against live Postgres — §8 step 9', () => {
+  let db: Database;
+  let areas: HighAedesAreaRepository;
+  const clusterId = randomUUID();
+  const objectId = 'zztest-' + clusterId.slice(0, 8);
+
+  /** Rings as GeoJSON gives them: [longitude, latitude], closed. */
+  const ring = (lng: number, lat: number, size: number): Array<Array<[number, number]>> => [
+    [
+      [lng, lat],
+      [lng + size, lat],
+      [lng + size, lat + size],
+      [lng, lat + size],
+      [lng, lat],
+    ],
+  ];
+
+  beforeAll(async () => {
+    db = new Database(url);
+    areas = new HighAedesAreaRepository(db);
+    // A cluster inside the area the first case stores, out in the Straits where nothing real sits.
+    const boundary = [[103.501, 1.101], [103.502, 1.101], [103.502, 1.102], [103.501, 1.102], [103.501, 1.101]]
+      .map((p) => p.join(' '))
+      .join(',');
+    await db.query(
+      'INSERT INTO cluster (id, object_id, locality, boundary, case_size, change_class, trajectory, is_active) ' +
+        "VALUES ($1, $2, 'Aedes Area Test', ST_GeogFromText($3), 4, 'UNCHANGED', 'Stable', true)",
+      [clusterId, objectId, 'POLYGON((' + boundary + '))'],
+    );
+  });
+
+  afterAll(async () => {
+    await db.query('DELETE FROM high_aedes_area WHERE object_id LIKE $1', ['zztest-%']);
+    await db.query('DELETE FROM cluster WHERE id = $1', [clusterId]);
+    await db.close?.();
+  });
+
+  it('GA1 — a multipolygon survives the round trip through PostGIS', async () => {
+    const written = await areas.replaceAll(
+      [new HighAedesArea(objectId, 'Test area', 'a test', [ring(103.5, 1.1, 0.01)])],
+      new Date('2026-08-29T02:06:44Z'),
+    );
+    const stored = (await areas.all()).filter((a) => a.objectId === objectId);
+
+    expect(written).toBe(1);
+    expect(stored).toHaveLength(1);
+    // Five points, closed, in [longitude, latitude] order — the order it went in as. A repository
+    // that swapped them would store a valid polygon somewhere off the coast of Somalia.
+    expect(stored[0]?.polygons[0]?.[0]).toHaveLength(5);
+    expect(stored[0]?.polygons[0]?.[0]?.[0]?.[0]).toBeCloseTo(103.5, 4);
+    expect(stored[0]?.polygons[0]?.[0]?.[0]?.[1]).toBeCloseTo(1.1, 4);
+    // 1.6.7's discipline: the publisher's date, not the load date.
+    expect((await areas.publishedAt())?.toISOString().slice(0, 10)).toBe('2026-08-29');
+  });
+
+  it('GA2 — a locality that meets an area is found, and one that does not is not', async () => {
+    await areas.replaceAll(
+      [new HighAedesArea(objectId, 'Test area', 'a test', [ring(103.5, 1.1, 0.01)])],
+      null,
+    );
+    expect(await areas.localityIdsInAreas()).toContain(clusterId);
+
+    // Moved a tenth of a degree away — about 11 km, and nowhere near the test cluster.
+    await areas.replaceAll(
+      [new HighAedesArea(objectId, 'Test area', 'a test', [ring(103.6, 1.2, 0.01)])],
+      null,
+    );
+    // ST_Intersects and not ST_Contains: a cluster that overlaps an area by a street is in it for
+    // every purpose anyone would use this for, and containment would answer "no" for every cluster
+    // bigger than the area it sits in.
+    expect(await areas.localityIdsInAreas()).not.toContain(clusterId);
+  });
+
+  it('GA3 — the set is replaced wholesale, so a withdrawn area disappears', async () => {
+    await areas.replaceAll(
+      [
+        new HighAedesArea(objectId, 'Kept', '', [ring(103.5, 1.1, 0.01)]),
+        new HighAedesArea(objectId + '-2', 'Withdrawn', '', [ring(103.52, 1.12, 0.01)]),
+      ],
+      null,
+    );
+    await areas.replaceAll([new HighAedesArea(objectId, 'Kept', '', [ring(103.5, 1.1, 0.01)])], null);
+
+    const mine = (await areas.all()).filter((a) => a.objectId.startsWith('zztest-'));
+
+    // The feed is a published snapshot of a geography. An area NEA has dropped must go, rather than
+    // linger as evidence nobody is republishing.
+    expect(mine.map((a) => a.objectId)).toEqual([objectId]);
   });
 });

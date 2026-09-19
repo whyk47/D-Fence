@@ -203,6 +203,11 @@ export enum SourceKind {
   Observations = 'Observations',
   /** 1.6 — the NEA registered vector control operator registry. Static reference data (1.6.7). */
   OperatorRegistry = 'OperatorRegistry',
+  /**
+   * NEA's "Areas with High Aedes Population" — the Gravitrap feed of PEST-PRIORITY-MODEL.md §8
+   * step 9. Ingested and shown; deliberately not scored. See migration 008.
+   */
+  Gravitrap = 'Gravitrap',
 }
 
 /** Outcome of an outbound notification (6.1.11). Design-level, not in the data dictionary. */
