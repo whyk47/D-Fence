@@ -89,11 +89,26 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
-        run: npm run test
-
+      # Build BEFORE test, and the order is load-bearing rather than a preference.
+      #
+      # `performance-client.test.tsx` P10 measures the bundle a real client actually transfers,
+      # against 10.1.1's three-second budget, by reading `client/dist/`. It deliberately throws
+      # rather than skipping when that directory is absent — a performance case that silently
+      # passes on nothing is worse than no case at all. `client/dist/` is build output and is
+      # gitignored, so on a fresh checkout it exists only after this step.
+      #
+      # With Test first, that assertion failed on every run this workflow has ever had: both
+      # 2026-09-05 and 2026-09-19 died here, which is why nothing had ever reached the Deploy
+      # step and why the App Service was still serving a hand-built package. It passed on the
+      # development laptop for the least useful of reasons — a stale `client/dist/` left behind
+      # by an earlier `npm run serve`.
       - name: Build
         run: npm run build
+
+      # Still before the deploy, so a failing test still stops the release. That was always the
+      # point of running them here; only their position relative to the build has moved.
+      - name: Test
+        run: npm run test
 
       # SCM_DO_BUILD_DURING_DEPLOYMENT=false on the App Service means Azure installs nothing, so
       # what is shipped is exactly what runs — node_modules included.
