@@ -1193,6 +1193,17 @@ describe.skipIf(!live)('The three v0.9 stores against live Postgres — §1.5, �
     );
   }
 
+  /**
+   * **`saveRegistry` replaces the whole table, including the live one.**
+   *
+   * VC1 and VC2 emptied the deployed instance's 290 operators the first time they ran, and nothing
+   * reported it: 1.6.1 loads the registry once at start-up, so the table simply stayed empty until
+   * the next restart while `ResponseCapacityDeficit` went on answering from nothing. A live test
+   * that calls a wholesale-replace method has to put back what it displaced.
+   */
+  let registrySnapshot: VectorControlOperator[] = [];
+  let registryPublishedAt: Date | null = null;
+
   beforeAll(async () => {
     db = new Database(url);
     observations = new ObservationRepository(db);
@@ -1200,6 +1211,9 @@ describe.skipIf(!live)('The three v0.9 stores against live Postgres — §1.5, �
     referrals = new ReferralRepository(db);
     accounts = new AccountRepository(db);
     reports = new ReportRepository(db);
+
+    registrySnapshot = await registry.registry();
+    registryPublishedAt = await registry.publishedAt();
 
     const ring = [[103.604, 1.204], [103.607, 1.204], [103.607, 1.207], [103.604, 1.207], [103.604, 1.204]]
       .map((p) => p.join(' '))
@@ -1240,6 +1254,9 @@ describe.skipIf(!live)('The three v0.9 stores against live Postgres — §1.5, �
   });
 
   afterAll(async () => {
+    // Exactly what was there, or nothing if there was nothing: `saveRegistry` refuses an empty
+    // list, so an empty snapshot restores an empty table rather than emptying a full one.
+    await registry.saveRegistry(registrySnapshot, registryPublishedAt);
     await db.query('DELETE FROM referral WHERE report_id = $1', [reportId]);
     await db.query('DELETE FROM observation_record WHERE locality_id = $1', [clusterId]);
     await db.query('DELETE FROM vector_control_operator WHERE postal_code LIKE $1', [prefix + '%']);
@@ -1389,9 +1406,20 @@ describe.skipIf(!live)('The high-Aedes areas against live Postgres — §8 step 
     ],
   ];
 
+  /**
+   * The same hazard as VC1's, and it bit the same day. `replaceAll` empties the table, so GA1-GA3
+   * deleted the 135 areas the deployed instance had just ingested — which was invisible until
+   * someone counted the rows, because an empty table reads as "no high-Aedes areas in Singapore"
+   * rather than as an error.
+   */
+  let snapshot: HighAedesArea[] = [];
+  let snapshotPublishedAt: Date | null = null;
+
   beforeAll(async () => {
     db = new Database(url);
     areas = new HighAedesAreaRepository(db);
+    snapshot = await areas.all();
+    snapshotPublishedAt = await areas.publishedAt();
     // A cluster inside the area the first case stores, out in the Straits where nothing real sits.
     const boundary = [[103.501, 1.101], [103.502, 1.101], [103.502, 1.102], [103.501, 1.102], [103.501, 1.101]]
       .map((p) => p.join(' '))
@@ -1405,6 +1433,9 @@ describe.skipIf(!live)('The high-Aedes areas against live Postgres — §8 step 
 
   afterAll(async () => {
     await db.query('DELETE FROM high_aedes_area WHERE object_id LIKE $1', ['zztest-%']);
+    // Put back the real feed's areas. `replaceAll` ignores an empty list, so this is a no-op when
+    // the table was empty to begin with.
+    await areas.replaceAll(snapshot, snapshotPublishedAt);
     await db.query('DELETE FROM cluster WHERE id = $1', [clusterId]);
     await db.close?.();
   });

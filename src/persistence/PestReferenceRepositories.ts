@@ -139,8 +139,17 @@ export class OperatorRegistryRepository implements OperatorRegistryStore {
    *
    * `geocode_cache` is deliberately not touched. 1.6.5 exists so a reload costs nothing the second
    * time, and a cache emptied with the rows it described would make every load re-resolve all 290.
+   *
+   * An empty list is refused outright rather than written — see the guard below.
    */
   async saveRegistry(operators: VectorControlOperator[], publishedAt: Date | null): Promise<void> {
+    if (operators.length === 0) {
+      // A load that produced no operators has failed, and 1.6.6 says the previous registry
+      // survives a failed load. Replacing with nothing would turn one bad download into a
+      // deletion, and the symptom would not be an error: `ResponseCapacityDeficit` would quietly
+      // start answering "nobody is anywhere near", which is a driver value, not a gap.
+      return;
+    }
     await this.db.transaction(async (tx) => {
       await tx.query('DELETE FROM vector_control_operator');
       for (const o of operators) {

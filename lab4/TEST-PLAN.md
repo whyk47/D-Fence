@@ -2286,3 +2286,26 @@ and the fix is not to write 7, 6 and 7 — a count that has to be edited every t
 teaches whoever sees the failure to edit the number rather than to ask what it meant. They now read
 `Object.values(SourceKind).length`, which is the property they were always about.
 
+### The tests themselves deleted production data
+
+VC1, VC2 and GA1–GA3 exercise `saveRegistry` and `replaceAll`, and both methods replace their whole
+table by design — which on a live database means the live rows. The first run emptied
+`vector_control_operator` (290 operators) and `high_aedes_area` (the 135 areas the deployed
+instance had ingested eleven minutes earlier).
+
+**Neither emptying raised anything.** 1.6.1 loads the registry once at start-up, so the table simply
+stayed empty until the next restart while `ResponseCapacityDeficit` answered from nothing; and an
+empty area table reads as "there are no high-Aedes areas in Singapore", which is a claim rather than
+an error. It was found by counting rows after the deploy, not by a failing test — the same way §6.11
+was found, and for the same reason: a green suite says nothing about what the suite did to the
+database it ran against.
+
+Both blocks now snapshot their table in `beforeAll` and restore it in `afterAll`. The repository
+also now refuses an empty replacement outright — `saveRegistry([])` returns rather than deleting,
+matching what `replaceAll` already did — because the same hazard exists in production: a failed
+load that parsed to zero operators would otherwise turn one bad download into a deletion, and the
+symptom would be a driver value rather than a failure.
+
+**A live test that calls a wholesale-replace method must put back what it displaced.** That is the
+rule this cost two tables to learn.
+
