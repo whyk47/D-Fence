@@ -24,6 +24,11 @@
  */
 import { ConfigLoader } from '../config/ConfigLoader';
 import { Database } from '../persistence/Database';
+import {
+  KEEP_EVERY_CYCLE_DAYS,
+  KEEP_READINGS_DAYS,
+  KEEP_RUNS_DAYS,
+} from '../persistence/RetentionPolicy';
 
 /**
  * Supabase's free tier: 500 MB of database disk. Passed as an argument when the project moves to a
@@ -67,6 +72,8 @@ async function main(): Promise<void> {
 
   console.log('  table                 size      rows      B/row   rows/day    MB/day');
   const totals = new Map<number, number>();
+  /** Per-table daily bytes at the current rate, for the steady-state estimate below. */
+  const perTable = new Map<string, number>();
   for (const windowDays of WINDOWS) {
     totals.set(windowDays, 0);
   }
@@ -92,6 +99,7 @@ async function main(): Promise<void> {
       rates.set(windowDays, await rowsPerDay(q, g, windowDays));
     }
     const current = rates.get(WINDOWS[WINDOWS.length - 1] as number) ?? 0;
+    perTable.set(g.table, current * perRow);
     for (const windowDays of WINDOWS) {
       const rate = rates.get(windowDays) ?? 0;
       totals.set(windowDays, (totals.get(windowDays) ?? 0) + rate * perRow);
@@ -118,6 +126,43 @@ async function main(): Promise<void> {
         `→ ${days.toFixed(0).padStart(3)} days left, full on ${when.toISOString().slice(0, 10)}`,
     );
   }
+
+  /**
+   * The same arithmetic with the retention policy applied — which is the number to plan against,
+   * because the projections above assume nothing is ever deleted and 4.1.22 to 4.1.24 now say
+   * otherwise.
+   *
+   * In steady state the window holds a fixed amount: 14 days of every cycle, 30 days of readings
+   * and runs, plus one archived cycle for each older day. Growth then is not the daily write rate
+   * but only that archive — roughly a three-hundredth of it.
+   *
+   * **This only holds if someone runs `prune-history --apply`.** It is a command and not a
+   * scheduled job, deliberately (see that tool's head), so the bound is a decision repeated rather
+   * than a property of the system. A database that is never pruned grows at the rate above no
+   * matter what the requirements say.
+   */
+  const scoreBytes = (perTable.get('priority_score') ?? 0) + (perTable.get('driver_contribution') ?? 0);
+  const steadyState =
+    KEEP_EVERY_CYCLE_DAYS * scoreBytes +
+    KEEP_READINGS_DAYS * (perTable.get('rainfall_reading') ?? 0) +
+    KEEP_RUNS_DAYS * (perTable.get('ingestion_run') ?? 0);
+  const cyclesPerDay = await q(
+    `SELECT count(DISTINCT computed_at)::numeric n FROM priority_score
+      WHERE computed_at > now() - interval '1 day'`,
+  );
+  const perCycle = Number(cyclesPerDay[0]?.n ?? 0) > 0 ? scoreBytes / Number(cyclesPerDay[0]?.n) : 0;
+  console.log('');
+  console.log('  with the retention policy applied and re-applied (4.1.22-4.1.24):');
+  console.log(
+    `  ${'steady state'.padEnd(12)} ~${(steadyState / 1_048_576).toFixed(0)} MB held, growing ` +
+      `${((perCycle + (perTable.get('audit_record') ?? 0)) / 1_048_576).toFixed(3)} MB/day ` +
+      `(one archived cycle per day)`,
+  );
+  console.log(
+    `  ${''.padEnd(12)} which is ${((steadyState / cap) * 100).toFixed(0)}% of the cap, and stays there.`,
+  );
+  console.log('  That bound holds only while someone runs prune-history --apply. It is a command,');
+  console.log('  not a scheduled job — so the bound is a decision repeated, not a property.');
 
   // Linear in pests as well as in cycles, and this is the part a projection hides: the rates above
   // are the rates for the pests that currently reach a score, not for the ones configured.

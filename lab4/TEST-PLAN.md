@@ -2309,3 +2309,28 @@ symptom would be a driver value rather than a failure.
 **A live test that calls a wholesale-replace method must put back what it displaced.** That is the
 rule this cost two tables to learn.
 
+### The policy applied, and the number it did not move
+
+Run on 2026-09-19: **16,492 score rows across 556 cycles deleted**, with their driver contributions
+following by cascade — 0 orphans afterwards, which is RT3 asserted against the real deletion rather
+than against fixtures. What survives outside the window is one cycle for 4 September and one for
+5 September, which is 4.1.23 exactly.
+
+**And the database did not get smaller.** A plain `VACUUM` returns the space to each table's free
+list rather than to the filesystem, so `pg_database_size` read 146.8 MB before and after. The
+tool's first version printed `146.8 MB → 146.8 MB (-0.0 MB reclaimed)` — a true pair of numbers
+arranged to look like a failure, which is the same defect class as §6.13's "evidence tier ?": a
+report that states something it cannot support. It now says what happened instead, and says that
+`VACUUM FULL` is the thing that shrinks the file and that it locks each table while it runs.
+
+Applying it today also bought almost nothing, and that is worth stating rather than hiding: the
+database is fifteen days old, so nearly every cycle is still inside the 14-day window. The policy's
+value starts in a fortnight, when each day leaving the window collapses from 288 cycles to one.
+
+`capacity-check.ts` now reports both futures, because one of them was misleading on its own:
+unpruned, 9.5 MB/day and full on 26 October; pruned and re-pruned, **~169 MB held and 0.065 MB/day
+— 34% of the cap, and it stays there.** The second number carries the condition that makes it true:
+`prune-history` is a command, not a scheduled job, so the bound is a decision repeated rather than
+a property of the system. A database nobody prunes grows at the first rate whatever the
+requirements say.
+

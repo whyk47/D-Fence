@@ -148,15 +148,31 @@ async function main(): Promise<void> {
   );
   console.log(`  ingestion_run: ${r2.length} rows deleted`);
 
-  // Postgres does not return deleted space to the filesystem on its own, and a report that read
-  // pg_database_size straight after a DELETE would say the tool had achieved nothing.
-  console.log('\n  VACUUMing so the space is actually reusable...');
+  console.log('\n  VACUUMing, so the freed space is reusable...');
   for (const t of ['priority_score', 'driver_contribution', 'rainfall_reading', 'ingestion_run']) {
     await q(`VACUUM (ANALYZE) ${t}`);
   }
 
+  /**
+   * **A plain VACUUM does not shrink the database, and this report must not imply that it does.**
+   *
+   * It returns the deleted rows' space to each table's own free list, where the next inserts use
+   * it. `pg_database_size` therefore reads the same before and after — the first version of this
+   * tool printed `146.8 MB → 146.8 MB (-0.0 MB reclaimed)`, which is a true pair of numbers
+   * arranged to look like a failure.
+   *
+   * What happened is worth saying plainly instead: the rows are gone, and the space they held will
+   * absorb about that many future writes before the database grows again. `VACUUM FULL` would
+   * return it to the filesystem and takes an ACCESS EXCLUSIVE lock on each table while it runs —
+   * on `driver_contribution` that is the scoring cycle blocked behind a 72 MB rewrite, so it is
+   * deliberately not done here and belongs in a window someone chose.
+   */
   const after = Number((await q('SELECT pg_database_size(current_database()) b'))[0]?.b ?? 0);
-  console.log(`\n  database: ${mb(before)} → ${mb(after)} (${mb(before - after)} reclaimed)\n`);
+  console.log(`\n  ${removed + r1.length + r2.length} row(s) deleted, plus their cascades.`);
+  console.log(`  database on disk: ${mb(before)} → ${mb(after)} — unchanged, and expected to be.`);
+  console.log('  The space is free *inside* the tables, so the next writes reuse it instead of');
+  console.log('  growing the database. VACUUM FULL would return it to the filesystem and locks');
+  console.log('  each table while it runs; do that by hand, in a window you chose.\n');
   await db.close?.();
 }
 
