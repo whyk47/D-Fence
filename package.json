@@ -25,7 +25,8 @@
     "load:check": "tsx src/tools/load-check.ts",
     "peek": "tsx src/tools/audit-peek.ts",
     "demo:clean": "tsx src/tools/demo-clean.ts",
-    "demo:drive": "tsx src/tools/demo-drive.ts"
+    "demo:drive": "tsx src/tools/demo-drive.ts",
+    "shots": "tsx src/tools/screen-shots.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

@@ -396,3 +396,358 @@ prompt: 11.2.1 Landing, 11.2.2 Register, 11.2.3 Sign In, 11.2.4 Password Reset, 
 
 Cluster Detail (11.2.13) is the one worth real effort — it carries the before-and-after treatment
 score that the Lab 5 demo turns on. Write it from use case 6.8 rather than adapting another screen.
+
+---
+
+# Block E — corrections, 2026-09-19
+
+Blocks A–D describe the product as designed. This block describes the **eleven places where the
+built screens and the mockups disagreed**, found on 2026-09-19 by photographing all twenty-eight
+screens at the viewport each role actually uses (`npm run shots`) and looking at them.
+
+The code has been corrected. **These prompts bring the Figma file to the same place**, so that the
+mockups and the deployment stop being two different products. Paste Block A first if you are
+starting a new session, then Block E0 (the components), then whichever screens you are updating.
+
+Two of the eleven were not styling problems at all and are worth stating plainly, because the
+mockups showed them working and the product never did:
+
+- **No photograph in the system could be seen by anybody.** Not a rendering bug — there was no
+  route that served one, no key on any payload, no `<img>` on any screen, and a
+  Content-Security-Policy whose `img-src` would have refused the image had one ever been asked
+  for. B5's "photo at the top, full width, 200px tall" and B8's evidence panel described a product
+  that did not exist.
+- **Identifiers were reaching users.** A resident's own report was headed `StandingWater`, the
+  staff table read `CleaningCrew`, the dispatch list suggested `RefuseClearance`, the score
+  breakdown listed `DaysSinceLastTreatment`, and a saved location's status read `CLEAR`.
+
+---
+
+## E0 — the four components, paste this before any screen in this block
+
+```
+Add four components to the D-Fence library. Every screen prompt after this one uses them, so
+build them once and use instances.
+
+1. "Fact row" — a labelled fact, used on every detail screen.
+   Two columns: a label in 13px #5C6470 medium in a fixed 200px column, and a value in 14px
+   #12151A. A 1px #E3E5E1 rule under the row, full width. A "wide" variant puts the label above
+   the value and lets the value run the full width, for a description or a note.
+   At 390px wide, both variants stack: label above value, value at 16px.
+
+2. "Pill" — a status or tier, as a word in a chip.
+   Height 22px, 10px horizontal padding, fully rounded, 12px semibold, 1px border. Eight variants,
+   text colour then fill:
+     Critical  #FFFFFF on #7A1F18
+     High      #A4342B on #FBEFEE
+     Medium    #8A561F on #FCF4EA
+     Low       #3A6247 on #EFF5F0
+     Good      #3A6247 on #EFF5F0
+     Warning   #8A561F on #FCF4EA
+     Bad       #A4342B on #FBEFEE
+     Neutral   #5C6470 on #FFFFFF
+   The word is always present. A pill with a colour and no word is not a variant of this
+   component, it is a different component and we do not have one.
+
+3. "Photo tile" — a photograph in a 4:3 frame, 6px radius, 1px #E3E5E1 border, image cropped to
+   fill. A grid of these auto-fills at a minimum of 160px per tile with a 12px gutter.
+   Two extra states: "loading" is a 45-degree grey hatch; "unavailable" is a bordered box holding
+   13px #5C6470 text, centred, reading "that photograph is no longer stored".
+
+4. "Series" — a small chart. A 2px accent-teal line over an 8%-opacity accent-teal fill down to a
+   1px #5C6470 baseline, with a 1px dashed #E3E5E1 line at the peak. Under it, one 12px #5C6470
+   row: "peak 912 cases on 04 Sep 2026" left, "latest 105 cases" right, both numbers in IBM Plex
+   Mono. A flat series is drawn across the middle of the frame, not along the bottom.
+```
+
+---
+
+## E1 — Report Review (screen 11.2.15). The most wrong screen in the product.
+
+```
+Redraw the Report Review screen, desktop 1440x1024, sidebar as in B6.
+
+It currently shows six unlabelled paragraphs stacked in body text. Replace them.
+
+Title row: "Standing water" as the 28px page title, with a Warning pill reading "Submitted"
+beside it, vertically centred, at 12px — the pill must not scale with the heading.
+
+Then four Fact rows:
+  Where          Jln Kayu / Jln Tari Dulang, Payong, Piring, Serimpi, Zapin / Lor Tanggam
+  Submitted      04 Sep 2026 06:42 SGT
+  Corroborations 2 neighbours confirmed this
+  What the resident wrote   (wide variant) "Water collecting in three plant pot trays at the void
+                            deck, been there since the weekend."
+
+Then a section headed "Photographs" — an H2, 20px — holding a grid of three Photo tiles showing
+real photographs of a void deck, a drain and a plant pot tray. This section is the reason the
+screen exists and it must sit ABOVE the decision controls.
+
+Then the rejection reason textarea, its helper text, and last a button row: "Verify" as a filled
+accent-teal primary, "Reject" as an outline button with #A4342B text and an #E0BDB9 border. These
+two must not look alike; they currently do.
+
+Make a second frame, "Report Review — no photographs", identical except that the grid is replaced
+by a dashed-border box holding 13px #5C6470 text: "This report carries no photographs. 5.1.5 makes
+them optional, so this is not an error — verify it on the description and the location."
+```
+
+## E2 — Cluster Detail (screen 11.2.13). The screen that justifies a rank.
+
+```
+Redraw the Cluster Detail screen, desktop 1440x1024, sidebar as in B6.
+
+Title: the full NEA locality string, which really is this long and will wrap to three lines —
+"Ho Ching Rd (Blk 117, 119, 120) / Kang Ching Rd (Blk 335) / Tah Ching Rd (Blk 321, 322, 323, 324,
+326, 329, 330, 332) / Yuan Ching Rd (Lakeside Twr)". Design for it rather than for a short one.
+
+Under the title, two stat tiles side by side, each in a white card with a 1px #E3E5E1 border:
+"CASES / 73" and "PRIORITY SCORE / 40.3", numbers at 36px in IBM Plex Mono.
+Beneath the tiles, two pills on one line: a Medium pill "Medium priority" and a Neutral pill
+"Stable".
+
+Then "How this score was reached", an H2, over a six-column table:
+  Driver | Measured | Normalised | Weight | Contribution | Share of the score
+Rows, exactly these, and note that the driver names are in English with units on the measurement:
+  Case size                  73 cases   0.75  0.30  0.23   [bar, full width]
+  Days since last treatment  90 days    1.00  0.15  0.15   [bar, 65%]
+  Premises mix               0.526      0.53  0.05  0.03   [bar, 13%]
+  Case growth                0 cases    0.00  0.20  0.00   [bar, 1%]
+  Rainfall, last 24 h        0.0 mm     0.00  0.08  0.00   [bar, 1%]
+  Rainfall, last 72 h        0.0 mm     0.00  0.12  0.00   [bar, 1%]
+  Open verified reports      0 reports  0.00  0.10  0.00   [bar, 1%]
+The four numeric columns are right-aligned IBM Plex Mono. The bar is an 8px fully-rounded
+accent-teal bar in a 140px column, scaled against the largest contribution in this table, not
+against 1.0.
+
+Then "Case history", an H2, over a Series component with three points all at 73 cases — so it is
+drawn as a flat line across the middle of the frame — and a collapsed disclosure beneath it
+labelled "The daily figures".
+
+Then "Work": "0 open verified reports", an empty-state card reading "No open work orders for this
+cluster.", and a link "Raise a work order".
+```
+
+## E3 — Moderation Queue (screen 11.2.14). Currently a numbered list 23 items long.
+
+```
+Redraw the Moderation Queue, desktop 1440x1024, sidebar as in B6.
+
+Title "Moderation", then a freshness line "Updated 14:42:57 — refreshes every 20 seconds" with a
+"Refresh now" outline button, then a type filter dropdown reading "All types".
+
+The queue is a stack of cards, NOT a numbered list. Each card: white surface, 1px #E3E5E1 border,
+6px radius, 12px/16px padding, 8px between cards, and the card content spans the full width of the
+main area — the current build squeezes it into the left 40% and leaves the rest empty.
+
+Each card has:
+  - a head row: the report type as an accent-teal link at 14px semibold — "Standing water", not
+    "StandingWater" — then a wait pill, then, when it applies, a Neutral pill "outside every
+    cluster". The wait pill is Neutral under 3 days ("waiting 6 h"), Warning from 3 days
+    ("waiting 4 d"), and Bad from 14 days ("waiting 15 d").
+  - the description on its own line, 14px #12151A.
+  - a meta row, 13px #5C6470, items separated by 16px: the locality, then "2 photographs", then
+    "1 corroboration" when there is one.
+
+Draw eight cards. Make one of them a 15-day Bad pill, because that is the row this screen exists
+to make impossible to miss and the current design makes it look like all the others.
+```
+
+## E4 — Work Order Detail (screen 11.2.18). A manager verifies work they cannot see.
+
+```
+Redraw the Work Order Detail screen, desktop 1440x1024, sidebar as in B6.
+
+Title "Fogging" with a Good pill "Verified" beside it.
+
+Four Fact rows:
+  Scheduled     04 Sep 2026
+  Priority      (a Medium pill, in the value column)
+  Cluster       "View the cluster" as an accent-teal link
+  Instructions  (wide) "Fog the perimeter drains and the bin centre."
+
+Then a bordered panel headed "What the crew recorded", which does not exist in the current build
+at all:
+  Three Fact rows — "Task performed / Fogging", "Completed / 04 Sep 2026 09:00 SGT",
+  "Notes (wide) / Drains fogged, bin centre cleared, two trays emptied."
+  Then a grid of two Photo tiles showing real before-and-after photographs of a drain.
+This panel sits ABOVE the Actions section. A decision control placed above its evidence invites
+the decision to be taken without it.
+
+Then "Assignment": the line "Assigned to crew.tan@towncouncil.gov.sg" — an email address, never
+an identifier; the current build prints a UUID here — a crew dropdown, and an outline "Reassign"
+button.
+
+Then "Actions": the reason textarea, then three buttons in a row — "Verify completion" filled
+accent teal, "Reject completion" and "Cancel work order" both as outline buttons with #A4342B
+text and #E0BDB9 borders.
+
+Then "History", a vertical audit trail with four entries and their timestamps.
+```
+
+## E5 — My Reports and Report Detail, resident (screens 11.2.9, 11.2.10)
+
+```
+Redraw two frames at 390x844. B5 already describes these well; the build diverged from it and
+these are the corrections.
+
+Frame "My Reports": the list is cards, not bullet points — the built screen renders literal list
+markers. Each card: a head row with the type as an accent-teal semibold link ("Standing water")
+and a status pill; then a 13px #5C6470 meta row holding the locality and the timestamp
+"05 Sep 2026 18:26 SGT", and "2 neighbours confirmed this" when it applies.
+The word "Submitted" must appear at most once per card. It currently appears twice — as the status
+and again as a label on the date — which reads as a stutter.
+Four cards, statuses Closed, Actioned, Verified, Submitted.
+
+Frame "Report Detail": title "Standing water" with a Warning pill "Submitted". Three Fact rows —
+Where, Submitted, and a wide "What you wrote". Then a grid of Photo tiles showing the resident's
+own photograph, full width, two per row. Then "No other residents have confirmed this yet." and a
+filled accent-teal button "I have seen this too".
+Make a second variant where the photographs are replaced by a dashed box reading "Photographs are
+shown once the report has been reviewed." — that is the rule for a report somebody else filed.
+```
+
+## E6 — Resident Map (screen 11.2.5). It opens showing no dengue.
+
+```
+Redraw the Resident Map, mobile 390x844.
+
+The critical correction is the framing. The built screen fits the map to the resident's saved
+location alone at street zoom, so it opens on the Ang Mo Kio street grid with not one cluster
+polygon in view — a screen called "Dengue map" answering "where do I live". Frame the map so that
+the saved-location pin AND the nearest cluster polygon are both visible, with the polygon clearly
+a polygon: filled at 25% in its tier colour with a 2px border of the same colour.
+
+The map is 380px tall and full-bleed to the screen edges. The layer toggles above it are a single
+row that scrolls horizontally rather than wrapping — "Fit to clusters" is currently cut off at the
+right edge.
+
+Below the map:
+  - Cluster cards, each with the locality as a heading, a tier pill, and "73 cases".
+  - "Your saved locations": one card per place, the name in semibold and a pill beside it. The
+    pill text is "Inside a cluster" (Bad), "Within 150 m of a cluster" (Warning) or "No cluster
+    nearby" (Good). The built screen renders the third of these as the word CLEAR.
+  - "Recent reports": cards, each with the type in words and a status pill. The built screen shows
+    ten bullet points all reading "StandingWater — Verified", which is the same two words ten
+    times.
+```
+
+## E7 — Analytics (screen 11.2.26). Five charts, three of which are tables.
+
+```
+Redraw the Analytics screen, desktop 1440x1024, sidebar as in B6.
+
+Every chart sits in its own white card: 1px #E3E5E1 border, 6px radius, 20px padding, 24px apart.
+The current build runs them into one another and clips every line at both edges.
+
+1. "Active cases per day" — a Series component, 140px tall, with a visible baseline and the peak
+   gridline. Under it the note "Days on which no ingestion cycle succeeded are omitted rather than
+   shown as zero — a missed cycle is not a day on which dengue stopped." Then the figures as a
+   table in a 240px-tall scroll panel with a sticky header. The table stays visible: it is what a
+   screen reader reads, so it may not be hidden behind a disclosure.
+
+2. "Clusters by priority tier" — three rows, each a tier Pill, a count in IBM Plex Mono, and a
+   6px rounded share bar in the tier colour: High 0 / 0%, Medium 1 / 8%, Low 12 / 92%. It is
+   currently three rows of plain black text with no colour at all.
+
+3. "Open work orders per crew member" — email addresses, never identifiers. The built screen shows
+   "93738330-b7ca-417e-8531-6232e8d90d01" in the crew member column.
+
+4. "Time from raised to verified" — the median at 28px in IBM Plex Mono with "from raised to
+   verified, typically" beside it, then the spread at 13px: "Fastest 4.2 hours, slowest 61.0
+   hours, over 62 verified work orders."
+
+5. "Reports received per day" — as 1, with its own note about zeroes being real.
+
+Above each chart, when the data is too short, a sufficiency line in #12151A at the same weight as
+the body — never grey-on-grey, never colour alone: "Not yet enough data to read as a trend.
+Only 3 days of snapshots exist. What is shown below is everything there is."
+```
+
+## E8 — Dispatch Proposal (screen 11.2.16)
+
+```
+Redraw the Dispatch Proposal, desktop 1440x1024, sidebar as in B6.
+
+Cards, not a numbered list. Each card:
+  - head row: the locality as an H2 at 20px, then a tier pill "Medium priority".
+  - meta row, 13px #5C6470: "score 40.3" in IBM Plex Mono, then "Suggested: Refuse clearance" —
+    in words, not "RefuseClearance".
+  - an action row with 20px between two accent-teal links: "Raise a work order" and "Why is this
+    ranked here?". In the built screen these two have no space between them and render as one
+    run-on sentence, "Raise a work order for Bt Batok St 23Why is this ranked here?".
+
+The first link no longer repeats the locality — the card heading is already the locality.
+```
+
+## E9 — Staff Accounts (screen 11.2.22)
+
+```
+Redraw the Staff Accounts screen, desktop 1440x1024, sidebar as in B6.
+
+The "Add a staff account" form moves to the TOP of the page, in a bordered panel, above the table.
+It is currently below seventy-five rows.
+
+Add a filter row above the table: a search field "Find an account" and a role dropdown.
+
+Table columns: Email, Role, Status, Action.
+  - Role reads "Cleaning Crew" and "Operations Manager", not "CleaningCrew".
+  - Status is a Pill: Good "Active", Neutral "Deactivated".
+  - Action is a button reading just "Deactivate" — 96px wide. The built screen repeats the whole
+    email address inside the button, which makes the action column the widest on the screen.
+```
+
+## E10 — Pest Reference (screen 11.2.27). A resident is shown the scoring model.
+
+```
+Redraw the Pest Reference screen at 390x844 and at 1440x1024.
+
+The last column currently reads "severity 1.00 · evidence tier A" — internal model figures shown
+to a member of the public who has just seen a snake. Replace the column heading with "How quickly"
+and the values with one of four phrases: "Treated as urgent", "Treated as high priority",
+"Treated as routine", "Logged and monitored".
+
+On mobile the twenty-five rows become twenty-five cards and the page runs to nine thousand pixels.
+Add a sticky search field at the top and group the cards under two sticky subheadings:
+"Call the authority first" for the wildlife AVS and NParks handle, and "Report it to us" for the
+rest. The phone number stays a tel: link, 16px, accent teal.
+```
+
+## E11 — My Jobs, crew (screen 11.2.19)
+
+```
+Redraw My Jobs at 390x844.
+
+The four filters — Today, Upcoming, Completed, All — are a 2x2 grid of equal-width buttons, each
+48px tall, rather than a row that wraps and leaves "All" alone on a second line.
+The selected filter is filled accent teal with white text. In the built screen the selection is
+announced to a screen reader and shown to nobody: all four look identical.
+
+Job cards below: the locality as a semibold link, a tier pill, the task type in words, the
+scheduled time, and a large 56px-tall primary action button per card.
+```
+
+---
+
+## Block E checklist — what to reject in the returned frames
+
+Figma AI will quietly reintroduce most of these. Check each frame for:
+
+1. **An identifier anywhere a person can see it.** `StandingWater`, `CleaningCrew`, `CLEAR`,
+   `RefuseClearance`, `CaseSize`, a UUID. If the string has no space in it and is not a proper
+   noun, it is wrong.
+2. **A tier or status shown as colour alone**, or as plain text with no colour. It is always both.
+3. **A number with no unit.** "73" is not "73 cases"; "0.526" needs either a unit or a column
+   heading that supplies one.
+4. **A collection rendered with list markers.** Every collection in this product is a card stack
+   or a table.
+5. **A photograph rendered as a file name**, or a photo area that is only ever shown full.
+   Every photo area needs an empty state and an unavailable state.
+6. **Two links touching**, with no gutter between them.
+7. **A destructive button styled like the safe one beside it.**
+8. **A chart with no baseline**, or a chart whose accompanying table is hidden behind a
+   disclosure.
+9. **A detail screen whose facts have no labels.** If the reader has to work out what a line is
+   by reading its value, use Fact rows.
+10. **An empty right-hand half on a 1440px frame.** Several built screens squeeze their content
+    into the left 40%.
