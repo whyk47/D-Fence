@@ -6,7 +6,17 @@
  *   POST /api/reports                    submit a breeding-site report (5.1.1)
  *   GET  /api/reports/mine               the caller's own reports (2.3.2)
  *   GET  /api/reports/:id                the anonymised view of one report (5.2.9, 5.3.5)
+ *   GET  /api/reports/:id/history        what has happened to it, for its reporter (11.2.10, 5.2.1)
  *   POST /api/reports/:id/corroborate    confirm an existing report instead (5.1.12, 5.1.13)
+ *
+ * **Why the history is a second request rather than a field on the detail.** 11.2.10 asks the
+ * Report Detail screen for "its photographs and its status history", but the two are not readable
+ * by the same people. `publicView` is the anonymised view any resident may fetch; the history
+ * names when a moderator decided, and 5.2.9 keeps that from everyone but the reporter — a manager
+ * reads the richer audit trail instead (2.4.1), which is why `report:readIdentified` is a Resident
+ * permission and not a shared one. `ReportController.statusHistory` already applies exactly that
+ * rule, so this route calls it rather than re-deriving a narrower version of it beside the wider
+ * one — which is how one disclosure rule becomes two implementations that later disagree.
  *
  * **No business rule lives in this file.** The duplicate radius, the photo limits and the visibility
  * rule are all decided in the control and entity layers; this class translates and maps errors.
@@ -44,7 +54,7 @@ export class ReportRoutes extends RouteHandler {
 
   routes(): string[] {
     // `mine` is declared before `:id` so Express matches the literal path first.
-    return ['/api/reports/mine', '/api/reports/:id'];
+    return ['/api/reports/mine', '/api/reports/:id/history', '/api/reports/:id'];
   }
 
   override writeRoutes(): string[] {
@@ -66,6 +76,19 @@ export class ReportRoutes extends RouteHandler {
         case '/api/reports/:id':
           res.json(await this.reports.publicView(req.params.id ?? '', principal));
           return;
+        case '/api/reports/:id/history': {
+          // ISO strings, not `Date` objects: JSON has no date type, so serialising the entity's
+          // own `Date` would hand the screen whatever the boundary's serialiser chose that day.
+          const history = await this.reports.statusHistory(req.params.id ?? '', principal);
+          res.json({
+            history: history.map((entry) => ({
+              from: entry.from,
+              to: entry.to,
+              at: entry.at.toISOString(),
+            })),
+          });
+          return;
+        }
         case '/api/reports/:id/corroborate': {
           const report = await this.reports.confirmExisting(req.params.id ?? '', principal);
           res.json({ reportId: report.id, corroborationCount: report.corroborationCount });

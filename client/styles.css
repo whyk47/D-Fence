@@ -1682,3 +1682,80 @@ h1 [data-component='pill'] {
   /* The heading is 28px; the pill must not be scaled with it or it becomes a second title. */
   font-size: 12px;
 }
+
+
+/* ──────────────────────────────────────────────────────────────────────────────────────────────
+   A status history, on the resident's Report Detail (11.2.10) and the manager's Work Order
+   Detail (2.4.1). Both were <ol> with no styling at all, so they rendered as a numbered list —
+   and a numbered list is wrong for a history twice over: the numbers are meaningless, and the
+   marker sits where the timeline's spine belongs.
+
+   The spine is a border on the <ol> with a dot per <li>, rather than a pseudo-element per row
+   positioned by hand, so a row that wraps to two lines keeps its dot beside its first line.
+   ────────────────────────────────────────────────────────────────────────────────────────── */
+[data-part='history-list'] {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0 0 0 22px;
+  border-left: 2px solid var(--line);
+  display: grid;
+  gap: 14px;
+}
+
+[data-part='history-list'] li {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+[data-part='history-list'] li::before {
+  content: '';
+  position: absolute;
+  left: -29px;
+  top: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--line);
+}
+
+/* The most recent entry is the answer to "where is this now", so it is the one that is filled. */
+[data-part='history-list'] li:last-child::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* A refusal or a rejection means the opposite of the rest of the list. Marked in colour AND, at
+   both call sites, in words — the colour is the second signal, never the only one. */
+[data-part='history-list'] li[data-status='Rejected']::before,
+[data-part='history-list'] li[data-refused='true']::before {
+  background: #A4342B;
+  border-color: #A4342B;
+}
+
+[data-part='history-list'] [data-part='what'] {
+  color: var(--ink);
+}
+
+[data-part='history-list'] [data-part='when'] {
+  color: var(--ink-quiet);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-part='history-list'] [data-part='who'] {
+  color: var(--ink-quiet);
+  font-size: 0.8125rem;
+}
+
+[data-part='history'] h2 {
+  margin-top: 28px;
+}
+
+[data-part='history-empty'] {
+  color: var(--ink-quiet);
+  margin-top: 8px;
+}

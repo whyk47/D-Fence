@@ -476,6 +476,15 @@ describe('My Reports and Report Detail — §11.2.9, §11.2.10, §5.1.13, §5.2.
         count += 1;
         return { ok: true, status: 200, json: async () => ({ corroborationCount: count }) } as Response;
       }
+      // 11.2.10's history is a second GET. This stub used to answer every GET with the report
+      // body, which handed the history loader a payload with no `history` in it.
+      if (url.endsWith('/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ history: [{ from: null, to: 'Submitted', at: '2026-09-04T00:00:00.000Z' }] }),
+        } as Response;
+      }
       return {
         ok: true,
         status: 200,

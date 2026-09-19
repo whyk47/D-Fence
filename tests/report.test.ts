@@ -591,3 +591,75 @@ describe('The dashboard sees reports — §7.5.3', () => {
     expect(overview.openVerifiedReports).toBe(1);
   });
 });
+
+/**
+ * W — the status history reaches the person waiting on it. §11.2.10, §5.2.1, §5.2.9.
+ *
+ * `report_status_change` has been written on every transition since the first migration, and
+ * `statusHistory` existed on the store, on both adapters and on the controller — with its
+ * authorisation rule and a docstring naming the screen it was for. Nothing called any of it. The
+ * Report Detail screen showed a status and no history, and 11.2.10 asks for both.
+ *
+ * The rule these cases pin down is the one that made it a separate route rather than a field: the
+ * history names when a moderator decided, and 5.2.9 does not give that to a passing resident.
+ */
+describe('The status history a resident can read — §11.2.10, §5.2.9', () => {
+  let f: Fixture;
+  beforeEach(async () => {
+    f = await fixture();
+  });
+
+  it('W1 — the reporter reads the whole history of their own report (11.2.10)', async () => {
+    const report = await submit(f);
+    await f.moderation.verify(report.id, MANAGER);
+
+    const history = await f.controller.statusHistory(report.id, RESIDENT);
+
+    expect(history.map((entry) => entry.to)).toEqual([ReportStatus.Submitted, ReportStatus.Verified]);
+    // The first entry has no `from`: 8.3.21 restores to a previous status, and "there was none"
+    // must be distinguishable from "it was Submitted".
+    expect(history[0]?.from).toBeNull();
+    expect(history[1]?.from).toBe(ReportStatus.Submitted);
+  });
+
+  it('W2 — another resident is refused it, even for a verified report (5.2.9)', async () => {
+    const report = await submit(f);
+    await f.moderation.verify(report.id, MANAGER);
+
+    // 5.3.5 releases the *photographs* of a triaged report to other residents. The history is a
+    // different disclosure: it carries when a town council officer made a decision, and no
+    // requirement gives that to a neighbour.
+    await expect(f.controller.statusHistory(report.id, NEIGHBOUR)).rejects.toBeInstanceOf(NotAuthorised);
+    await expect(f.controller.publicView(report.id, NEIGHBOUR)).resolves.toBeDefined();
+  });
+
+  it('W3 — even the Operations Manager reads this through the audit trail, not through here', async () => {
+    const report = await submit(f);
+    await f.moderation.reject(report.id, 'The photograph shows a dry tray.', MANAGER);
+
+    /*
+      Written expecting a manager to be allowed, and they are not: `statusHistory` asks for
+      `report:readIdentified`, which 2.3.x gives to the Resident alone. That is the design rather
+      than a gap, and it is recorded here so the next reader does not "fix" it. A manager's view of
+      what happened to a report is the audit trail (2.4.1, `audit:read`), which is strictly richer
+      — it carries the actor and the refusals as well as the transitions, and it is what the Work
+      Order Detail screen already reads. Widening the policy here would put the same disclosure
+      behind two permissions, and the narrower one would stop being the answer to "who may see
+      this".
+    */
+    await expect(f.controller.statusHistory(report.id, MANAGER)).rejects.toBeInstanceOf(NotAuthorised);
+  });
+
+  it('W4 — every entry is ordered and carries its own instant, so the screen never has to sort', async () => {
+    const report = await submit(f);
+    await f.moderation.verify(report.id, MANAGER);
+
+    const history = await f.controller.statusHistory(report.id, RESIDENT);
+
+    const times = history.map((entry) => entry.at.getTime());
+    expect([...times].sort((a, b) => a - b)).toEqual(times);
+    for (const entry of history) {
+      expect(entry.at).toBeInstanceOf(Date);
+    }
+  });
+});
