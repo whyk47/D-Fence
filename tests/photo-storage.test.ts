@@ -36,6 +36,11 @@ import { WorkOrderTransitionTable } from '../src/control/WorkOrderTransitionTabl
 import { TransitionRefused, WorkOrderLifecycleController } from '../src/control/WorkOrderLifecycleController';
 import { DispatchController } from '../src/control/DispatchController';
 import { ReportController, ReportRejected } from '../src/control/ReportController';
+import { ModerationController } from '../src/control/ModerationController';
+import { ImageRoutes } from '../src/boundary/http/ImageRoutes';
+// Aliased: this file also uses the global DOM `Response` in `recordingFetch`, and importing
+// the boundary's own `Response` under that name silently retyped it.
+import { Response as HandlerResponse } from '../src/boundary/http/RouteHandler';
 import { ReportLifecycleController } from '../src/control/ReportLifecycleController';
 import { ReportTransitionTable } from '../src/control/ReportTransitionTable';
 import { InMemoryClusterLocator, InMemoryReportStore } from '../src/persistence/memory/InMemoryReportStores';
@@ -416,5 +421,198 @@ describe('A report carries photographs, not strings — §5.1.5, §10.3.6', () =
 
   it('R3 — a report with no photographs at all is still accepted (5.1.5 makes them optional)', async () => {
     await expect(submit([], new InMemoryObjectStorage())).resolves.toBeDefined();
+  });
+});
+
+/**
+ * V — a photograph can be *looked at*. §5.3.4, §5.3.5, §8.3.6, §10.3.5, §11.2.10, §11.2.15.
+ *
+ * The G, U, E and R series above all test the write path, and every one of them passed while no
+ * photograph in the system could be seen by anybody. That is the defect this series exists for,
+ * and it is the same shape as the one the file's own header describes: `signedUrl()` was written,
+ * implemented in both adapters, and called by nothing. There was no route, no field on any
+ * payload, and no `<img>` on any screen — and, underneath all three, a Content-Security-Policy
+ * whose `img-src` would have refused the image had one ever been requested.
+ *
+ * Four things had to be true at once for a manager to see a photograph. Three of them are assertable
+ * here; the fourth (the CSP) is asserted in `http-boundary.test.ts`, where the header lives.
+ */
+describe('A photograph can be looked at — §5.3.4, §5.3.5, §10.3.5', () => {
+  /** Enough of the graph to answer "may this caller see this key on this report?". */
+  async function withReport(options: { moderated: boolean }): Promise<{
+    routes: ImageRoutes;
+    reportId: string;
+    key: string;
+    storage: InMemoryObjectStorage;
+  }> {
+    const storage = new InMemoryObjectStorage();
+    const stored = await storage.upload(REPORT_PHOTOS, PNG, 'image/png');
+    const reports = new InMemoryReportStore();
+    const lifecycle = new ReportLifecycleController(new ReportTransitionTable(), reports, null);
+    const controller = new ReportController(
+      ac(),
+      reports,
+      new InMemoryClusterLocator(new InMemoryClusterStore()),
+      lifecycle,
+      null,
+      storage,
+    );
+    const report = (await controller.submitReport(
+      {
+        point: new GeoPoint(1.3521, 103.8198),
+        type: ReportType.StandingWater,
+        pestType: PestType.Mosquito,
+        description: 'Standing water in a discarded pail behind the block.',
+        photos: [{ filename: 'site.png', contentType: 'image/png', sizeBytes: 4, storageKey: stored.key }],
+      },
+      RESIDENT,
+    )) as { id: string };
+    const moderation = new ModerationController(ac(), reports, lifecycle);
+    if (options.moderated) {
+      await moderation.verify(report.id, MANAGER);
+    }
+    const routes = new ImageRoutes(ac(), storage, controller, moderation);
+    routes.useResolver({ resolve: async () => null });
+    return { routes, reportId: report.id, key: stored.key, storage };
+  }
+
+  /** A `Response` that records rather than writes, which is all these cases need to read. */
+  function recorder(): { res: HandlerResponse; code: number | null; body: unknown } {
+    const captured: { res: HandlerResponse; code: number | null; body: unknown } = {
+      code: null,
+      body: null,
+      res: {
+        status(code: number) {
+          captured.code = code;
+          return captured.res;
+        },
+        json(body: unknown) {
+          captured.body = body;
+        },
+        text() {
+          /* never used by this handler */
+        },
+      },
+    };
+    return captured;
+  }
+
+  async function ask(
+    routes: ImageRoutes,
+    params: Record<string, string>,
+    principal: Principal,
+  ): Promise<{ code: number | null; body: unknown }> {
+    const out = recorder();
+    // The handler reads its principal through `resolvePrincipal`; the development header path is
+    // what the suite's other boundary tests use, so the same one is used here.
+    routes.useResolver({ resolve: async () => principal });
+    await routes.handle(
+      { headers: { authorization: 'Bearer test' }, params, body: null },
+      out.res,
+    );
+    return { code: out.code, body: out.body };
+  }
+
+  it('V1 — a moderator gets a link for a photograph on a report still awaiting review (5.3.4)', async () => {
+    const { routes, reportId, key } = await withReport({ moderated: false });
+
+    const answer = await ask(
+      routes,
+      { route: '/api/images/report/:reportId/:key', reportId, key },
+      MANAGER,
+    );
+
+    /*
+      The case that catches the mistake actually made. The first `ImageRoutes` asked
+      `ReportController.publicView` for every caller, which is 5.3.5 — the rule for *other*
+      residents — so the moderator was refused the photographs of the very report they had been
+      asked to judge, on the grounds that it had not been judged yet. Both code paths were
+      correct; the wrong one was chosen. Only a photograph of the screen showed it.
+    */
+    expect(answer.code).toBeNull();
+    expect((answer.body as { url?: string }).url ?? '').toContain(key);
+  });
+
+  it('V2 — another resident is refused that same photograph until it is triaged (5.3.5)', async () => {
+    const { routes, reportId, key } = await withReport({ moderated: false });
+    const neighbour = new Principal('res-2', Role.Resident, 'sess-n');
+
+    const before = await ask(
+      routes,
+      { route: '/api/images/report/:reportId/:key', reportId, key },
+      neighbour,
+    );
+    expect(before.code).toBe(404);
+
+    const { routes: after, reportId: id2, key: key2 } = await withReport({ moderated: true });
+    const later = await ask(after, { route: '/api/images/report/:reportId/:key', reportId: id2, key: key2 }, neighbour);
+    // 5.3.5 releases it once the report has been triaged — not a moment before.
+    expect(later.code).toBeNull();
+  });
+
+  it('V3 — the reporter sees their own photograph at any time (5.3.5, 11.2.10)', async () => {
+    const { routes, reportId, key } = await withReport({ moderated: false });
+
+    const answer = await ask(routes, { route: '/api/images/report/:reportId/:key', reportId, key }, RESIDENT);
+
+    expect(answer.code).toBeNull();
+  });
+
+  it('V4 — a key that is not on this report is refused, however it is spelled', async () => {
+    const { routes, reportId, storage } = await withReport({ moderated: false });
+    const elsewhere = await storage.upload(REPORT_PHOTOS, PNG, 'image/png');
+
+    // A real, existing object in the right bucket — and not part of this report. Enumerating keys
+    // must not become a way to read other people's photographs (10.3.5).
+    const other = await ask(
+      routes,
+      { route: '/api/images/report/:reportId/:key', reportId, key: elsewhere.key },
+      MANAGER,
+    );
+    expect(other.code).toBe(404);
+
+    // And the shape check, before any lookup: this string is concatenated into a storage path.
+    const traversal = await ask(
+      routes,
+      { route: '/api/images/report/:reportId/:key', reportId, key: '../completion-evidence/x.png' },
+      MANAGER,
+    );
+    expect(traversal.code).toBe(400);
+  });
+
+  it('V5 — completion evidence is a manager-only read (2.3.4, 8.3.6)', async () => {
+    const storage = new InMemoryObjectStorage();
+    const stored = await storage.upload(COMPLETION_EVIDENCE, PNG, 'image/png');
+    const reports = new InMemoryReportStore();
+    const lifecycle = new ReportLifecycleController(new ReportTransitionTable(), reports, null);
+    const controller = new ReportController(
+      ac(),
+      reports,
+      new InMemoryClusterLocator(new InMemoryClusterStore()),
+      lifecycle,
+      null,
+      storage,
+    );
+    const routes = new ImageRoutes(ac(), storage, controller, new ModerationController(ac(), reports, lifecycle));
+
+    const manager = await ask(routes, { route: '/api/images/completion-evidence/:key', key: stored.key }, MANAGER);
+    expect((manager.body as { url?: string }).url ?? '').toContain(stored.key);
+
+    // 2.3.5 gives a crew member their own jobs. "The evidence I uploaded" is a screen nobody has
+    // specified, so the read is refused rather than quietly allowed because it seems harmless.
+    const crew = await ask(routes, { route: '/api/images/completion-evidence/:key', key: stored.key }, CREW);
+    expect(crew.code).toBe(403);
+  });
+
+  it('V6 — a row whose bytes are gone says so, rather than rendering a broken image', async () => {
+    const { routes, reportId, key, storage } = await withReport({ moderated: false });
+    await storage.remove(REPORT_PHOTOS, key);
+
+    const answer = await ask(routes, { route: '/api/images/report/:reportId/:key', reportId, key }, MANAGER);
+
+    // A real state: the in-memory store does not survive a restart, and 10.4.3 erases objects on
+    // request while the row that cited them remains. The screen can say which of the two happened.
+    expect(answer.code).toBe(404);
+    expect((answer.body as { error?: string }).error ?? '').toContain('no longer stored');
   });
 });

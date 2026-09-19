@@ -17,6 +17,8 @@ import { ConfirmDialog, StateView } from '../../components/States';
 import { Field, field, FormField } from '../../components/Field';
 import { evaluate, formIsValid, required } from '../../components/FieldValidation';
 import { link } from '../../components/Link';
+import { Facts, PhotoGrid, Pill, statusTone } from '../../components/Presentation';
+import { label } from '../../lib/labels';
 import { ScreenProps } from '../ScreenProps';
 
 interface ReviewPayload {
@@ -29,7 +31,13 @@ interface ReviewPayload {
     corroborationCount: number;
     submittedAt: string;
   };
-  photos: Array<{ id: string; filename: string }>;
+  /**
+   * `storageKey` is what names the object in the private bucket, and it is what `PhotoGrid` needs
+   * to ask `GET /api/images/report-photo/:key` for a link. It was always in the response — the
+   * server serialises the whole `ReportPhoto` — and this interface simply did not declare it, which
+   * is why the screen could only ever render the file name.
+   */
+  photos: Array<{ id: string; filename: string; storageKey: string; contentType?: string }>;
 }
 
 export function ReportReviewScreen(props: ScreenProps): JSX.Element {
@@ -73,21 +81,43 @@ export function ReportReviewScreen(props: ScreenProps): JSX.Element {
       <StateView state={state} onRetry={retry}>
         {report === undefined ? null : (
           <article>
-            <h1>{report.type}</h1>
-            <p data-part="status">{report.status}</p>
-            <p data-part="locality">{report.localityBinding}</p>
-            <p data-part="description">{report.description}</p>
-            <p data-part="submitted">
-              Submitted {new Date(report.submittedAt).toISOString().slice(0, 16).replace('T', ' ')}
-            </p>
-            <p data-part="corroborations">{report.corroborationCount} corroboration(s)</p>
+            <h1>
+              {label(report.type)}{' '}
+              <Pill tone={statusTone(report.status)} title={`Report status (5.2.3)`}>
+                {label(report.status)}
+              </Pill>
+            </h1>
+
+            {/*
+              Six facts that used to be six unlabelled paragraphs. The reader could tell which was
+              the description and which the locality only by reading them; `Facts` names each one.
+            */}
+            <Facts
+              items={[
+                { label: 'Where', value: report.localityBinding, part: 'locality' },
+                {
+                  label: 'Submitted',
+                  value: new Date(report.submittedAt).toISOString().slice(0, 16).replace('T', ' ') + ' SGT',
+                  part: 'submitted',
+                },
+                {
+                  label: 'Corroborations',
+                  // 5.1.13 — how many neighbours said they saw it too. Zero is a real answer and
+                  // is shown as one, rather than omitted as if it had not been counted.
+                  value: `${report.corroborationCount} neighbour${report.corroborationCount === 1 ? '' : 's'} confirmed this`,
+                  part: 'corroborations',
+                },
+                { label: 'What the resident wrote', value: report.description, part: 'description', wide: true },
+              ]}
+            />
 
             {/* 2.3.4, 5.3.4 — a manager sees the photographs; this is the screen they exist for. */}
-            <ul data-part="photos">
-              {(value?.photos ?? []).map((photo) => (
-                <li key={photo.id}>{photo.filename}</li>
-              ))}
-            </ul>
+            <h2>Photographs</h2>
+            <PhotoGrid
+              path={`report/${id}`}
+              photos={value?.photos ?? []}
+              emptyMessage="This report carries no photographs. 5.1.5 makes them optional, so this is not an error — verify it on the description and the location."
+            />
 
             <Field
               id="reason"
@@ -101,11 +131,12 @@ export function ReportReviewScreen(props: ScreenProps): JSX.Element {
             />
 
             <div data-part="actions">
-              <button type="button" onClick={() => setConfirming('verify')} disabled={busy}>
+              <button type="button" data-variant="primary" onClick={() => setConfirming('verify')} disabled={busy}>
                 Verify
               </button>
               <button
                 type="button"
+                data-variant="danger"
                 onClick={() => {
                   setReason((f) => ({ ...f, touched: true }));
                   // 5.2.4 — a rejection with no reason is refused here, not sent and bounced.

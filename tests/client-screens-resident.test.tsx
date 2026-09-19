@@ -504,7 +504,7 @@ describe('My Reports and Report Detail — §11.2.9, §11.2.10, §5.1.13, §5.2.
     });
     render(<MyReportsScreen {...props({}, fetcher)} />);
 
-    const linkEl = await screen.findByRole('link', { name: /BlockedDrain/ });
+    const linkEl = await screen.findByRole('link', { name: /Blocked drain/ });
     expect(linkEl.getAttribute('href')).toBe('/reports/r-1');
   });
 });

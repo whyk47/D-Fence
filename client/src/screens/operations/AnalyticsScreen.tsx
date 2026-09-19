@@ -24,6 +24,7 @@
  */
 import { useLoad } from '../../lib/useLoad';
 import { StateView } from '../../components/States';
+import { Pill, tierTone } from '../../components/Presentation';
 import { ScreenProps } from '../ScreenProps';
 
 /** Mirrors `AnalyticsController.Chart<T>`. */
@@ -71,6 +72,17 @@ export function AnalyticsScreen(props: ScreenProps): JSX.Element {
   });
   const charts = value?.charts ?? null;
 
+  /*
+    A second, small request purely so the workload chart can name people. It is deliberately not
+    folded into `StateView`: a roster that fails to load should cost the reader one column of one
+    chart, not the other four charts on the screen.
+  */
+  const roster = useLoad<{ crew: Array<{ crewId: string; email: string }> }>(
+    props.api,
+    '/api/ops/work-orders/crew-workload',
+  );
+  const crewNames = new Map((roster.value?.crew ?? []).map((member) => [member.crewId, member.email]));
+
   return (
     <section data-screen="Analytics" data-requirement="11.2.26">
       <h1>Analytics</h1>
@@ -105,7 +117,7 @@ export function AnalyticsScreen(props: ScreenProps): JSX.Element {
               requirement="7.3.3"
               chart={charts.crewWorkload}
             >
-              <Workload loads={charts.crewWorkload.points} />
+              <Workload loads={charts.crewWorkload.points} names={crewNames} />
             </ChartFrame>
 
             <ChartFrame
@@ -198,9 +210,27 @@ function Series(props: { points: DailyPoint[]; valueLabel: string; note: string 
         data-part="sparkline"
         preserveAspectRatio="none"
       >
-        <path d={path} fill="none" stroke="currentColor" strokeWidth="2" />
+        {/*
+          The line used to be drawn alone, edge to edge, with nothing behind it — so it read as a
+          divider rule that happened to bend. Three additions, none of which changes a number: the
+          zero baseline, so the line has something to be above; the area beneath it, so it reads as
+          a quantity rather than as a boundary; and the peak's gridline, so the height of the line
+          means something without consulting the table.
+        */}
+        <line x1="0" y1={height} x2={width} y2={height} data-part="axis" vectorEffect="non-scaling-stroke" />
+        <line x1="0" y1="1" x2={width} y2="1" data-part="peak" vectorEffect="non-scaling-stroke" />
+        <path d={`${path} L${width},${height} L0,${height} Z`} data-part="area" />
+        <path d={path} fill="none" stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" />
       </svg>
       <p data-part="note">{props.note}</p>
+      {/*
+        Deliberately NOT a <details>. The table is this chart's accessible content, and content
+        inside a closed <details> is hidden from assistive technology as well as from the eye —
+        which would trade one reader's convenience for another reader's access. A scroll panel
+        keeps every row in the accessibility tree and stops thirty of them from being the tallest
+        thing on the screen.
+      */}
+      <div data-part="table-scroll">
       <table>
         <caption>
           {props.valueLabel} by day — peak {max} on {peakDay(points)}
@@ -220,6 +250,7 @@ function Series(props: { points: DailyPoint[]; valueLabel: string; note: string 
           ))}
         </tbody>
       </table>
+      </div>
     </>
   );
 }
@@ -247,10 +278,30 @@ function Tiers(props: { distribution: Record<string, number> }): JSX.Element {
           const count = props.distribution[tier] ?? 0;
           return (
             <tr key={tier} data-tier={tier}>
-              {/* 11.7.5 — the tier is named, not merely coloured. */}
-              <th scope="row">{tier}</th>
-              <td>{count}</td>
-              <td>{total === 0 ? '—' : `${Math.round((count / total) * 100)}%`}</td>
+              {/* 11.7.5 — the tier is named, not merely coloured; now it is both. */}
+              <th scope="row">
+                <Pill tone={tierTone(tier)} tier={tier}>
+                  {tier}
+                </Pill>
+              </th>
+              <td className="num">{count}</td>
+              <td>
+                {total === 0 ? (
+                  '—'
+                ) : (
+                  <>
+                    <span className="num">{Math.round((count / total) * 100)}%</span>
+                    {/*
+                      §7.3.2 calls this a chart and it was three rows of text. The bar is the
+                      chart: a share is a length, and "8%" next to "92%" is two numbers a reader
+                      has to compare, where two bars is a picture they have already read.
+                    */}
+                    <span data-part="share-bar" data-tier={tier}>
+                      <span style={{ width: `${(count / total) * 100}%` }} />
+                    </span>
+                  </>
+                )}
+              </td>
             </tr>
           );
         })}
@@ -259,8 +310,18 @@ function Tiers(props: { distribution: Record<string, number> }): JSX.Element {
   );
 }
 
-/** 7.3.3 — open work per crew member, with the unassigned bucket named rather than hidden. */
-function Workload(props: { loads: CrewLoad[] }): JSX.Element {
+/**
+ * 7.3.3 — open work per crew member, with the unassigned bucket named rather than hidden.
+ *
+ * The "crew member" column read `93738330-b7ca-417e-8531-6232e8d90d01`. §7.3.3's chart is about
+ * balancing work across people, and a primary key is not a person. `AnalyticsController` returns
+ * ids because that is what the work orders carry; the roster that turns one into an address is
+ * `/api/ops/work-orders/crew-workload`, which this screen now loads alongside. Resolved here
+ * rather than in the controller because the analytics endpoint is deliberately a computation over
+ * snapshots, and joining an account table into it would put §2.2's identities inside §7.3's
+ * arithmetic.
+ */
+function Workload(props: { loads: CrewLoad[]; names: Map<string, string> }): JSX.Element {
   if (props.loads.length === 0) {
     return <p data-state="empty">No work orders are open.</p>;
   }
@@ -279,7 +340,11 @@ function Workload(props: { loads: CrewLoad[] }): JSX.Element {
             <tr key={load.crewId ?? 'unassigned'} data-unassigned={load.crewId === null}>
               {/* 8.2.1 — the row that most needs reading. It is not a crew member's backlog; it is
                   work nobody has been given. */}
-              <th scope="row">{load.crewId === null ? 'Not yet assigned' : load.crewId}</th>
+              <th scope="row">
+                {load.crewId === null
+                  ? 'Not yet assigned'
+                  : (props.names.get(load.crewId) ?? `a deactivated account (${load.crewId.slice(0, 8)})`)}
+              </th>
               <td>{load.openWorkOrders}</td>
             </tr>
           ))}

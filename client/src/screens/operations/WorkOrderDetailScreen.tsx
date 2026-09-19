@@ -27,6 +27,8 @@ import { ConfirmDialog, StateView } from '../../components/States';
 import { Field, field, FormField } from '../../components/Field';
 import { evaluate, formIsValid, required } from '../../components/FieldValidation';
 import { link } from '../../components/Link';
+import { Facts, PhotoGrid, Pill, statusTone, tierTone } from '../../components/Presentation';
+import { label } from '../../lib/labels';
 import { ScreenProps } from '../ScreenProps';
 
 interface DetailPayload {
@@ -57,13 +59,31 @@ interface HistoryPayload {
   }>;
 }
 
+/**
+ * 8.3.6, 8.3.10 — what the crew attached when they said the job was done.
+ *
+ * `photoKeys` and not URLs: each is exchanged for a five-minute link by `ImageRoutes` at the moment
+ * it is rendered, which is what 10.3.5 asks for. Until 2026-09-19 this was not in the payload at
+ * all, and the manager was asked to press "Verify completion" having seen none of it.
+ */
+interface EvidencePayload {
+  notes: string;
+  completedAt: string;
+  taskPerformed: string;
+  rejectionReason: string | null;
+  photoKeys: string[];
+}
+
 interface CrewPayload {
   crew: Array<{ crewId: string; email: string; isActive: boolean; openWorkOrders: number }>;
 }
 
 export function WorkOrderDetailScreen(props: ScreenProps): JSX.Element {
   const id = props.params['id'] ?? '';
-  const detail = useLoad<DetailPayload>(props.api, `/api/ops/work-orders/${id}`);
+  const detail = useLoad<DetailPayload & { evidence: EvidencePayload | null }>(
+    props.api,
+    `/api/ops/work-orders/${id}`,
+  );
   const crew = useLoad<CrewPayload>(props.api, '/api/ops/work-orders/crew-workload');
   const history = useLoad<HistoryPayload>(props.api, `/api/ops/work-orders/${id}/history`);
 
@@ -109,14 +129,40 @@ export function WorkOrderDetailScreen(props: ScreenProps): JSX.Element {
       <StateView state={detail.state} onRetry={detail.retry}>
         {order === undefined ? null : (
           <article>
-            <h1>{order.taskType}</h1>
-            <p data-part="status">{order.status}</p>
-            <p data-part="scheduled">Scheduled {order.scheduledDate}</p>
-            <p data-part="priority">{order.priority}</p>
-            <p data-part="instructions">{order.instructions}</p>
-            <a href={`/ops/clusters/${order.clusterId}`} onClick={link(props, `/ops/clusters/${order.clusterId}`)}>
-              View the cluster
-            </a>
+            <h1>
+              {label(order.taskType)}{' '}
+              <Pill tone={statusTone(order.status)}>{label(order.status)}</Pill>
+            </h1>
+
+            {/*
+              Five unlabelled paragraphs — "Verified", "Scheduled 2026-09-04", "Medium", the
+              instructions, "Verified 2026-09-04 09:00" — stacked in body type, with nothing
+              saying which was the priority and which the status. Both are now pills; the rest is
+              a labelled record.
+            */}
+            <Facts
+              items={[
+                { label: 'Scheduled', value: order.scheduledDate, part: 'scheduled' },
+                {
+                  label: 'Priority',
+                  value: (
+                    <Pill tone={tierTone(order.priority)} tier={order.priority}>
+                      {order.priority}
+                    </Pill>
+                  ),
+                  part: 'priority',
+                },
+                {
+                  label: 'Cluster',
+                  value: (
+                    <a href={`/ops/clusters/${order.clusterId}`} onClick={link(props, `/ops/clusters/${order.clusterId}`)}>
+                      View the cluster
+                    </a>
+                  ),
+                },
+                { label: 'Instructions', value: order.instructions, part: 'instructions', wide: true },
+              ]}
+            />
 
             {/* 8.3.8 — an issue raised by the crew is the reason this order stopped moving. */}
             {order.issueFlag ? (
@@ -135,7 +181,22 @@ export function WorkOrderDetailScreen(props: ScreenProps): JSX.Element {
 
             <section data-part="assign">
               <h2>Assignment</h2>
-              <p>{order.assigneeId === null ? 'Not assigned.' : `Assigned to ${order.assigneeId}.`}</p>
+              {/*
+                This line read "Assigned to 282c0058-ce23-4556-a2f3-033aa2938f49." — a primary key
+                shown to a manager who needs a person. The roster below is already loaded for the
+                Assign control and carries the address, so the id is resolved here rather than
+                through a new endpoint. It falls back to the id when the assignee is no longer on
+                the assignable list, which is a real state: 2.2.5 deactivates accounts, and the job
+                they were holding keeps its history.
+              */}
+              <p>
+                {order.assigneeId === null
+                  ? 'Not assigned.'
+                  : `Assigned to ${
+                      (crew.value?.crew ?? []).find((member) => member.crewId === order.assigneeId)?.email ??
+                      `a deactivated account (${order.assigneeId.slice(0, 8)})`
+                    }.`}
+              </p>
               <StateView state={crew.state} onRetry={crew.retry}>
                 <label htmlFor="crew">Assign to</label>
                 <select id="crew" value={chosenCrew} onChange={(event) => setChosenCrew(event.target.value)}>
@@ -158,6 +219,32 @@ export function WorkOrderDetailScreen(props: ScreenProps): JSX.Element {
               </StateView>
             </section>
 
+            {/*
+              8.3.6, 8.3.7 — placed above the Actions block deliberately: the photographs are what
+              "Verify completion" is a judgement about, and a decision control placed above its
+              evidence invites the decision to be taken without it.
+            */}
+            {detail.value?.evidence === null || detail.value?.evidence === undefined ? null : (
+              <section data-part="evidence">
+                <h2>What the crew recorded</h2>
+                <Facts
+                  items={[
+                    { label: 'Task performed', value: label(detail.value.evidence.taskPerformed) },
+                    {
+                      label: 'Completed',
+                      value: new Date(detail.value.evidence.completedAt).toISOString().slice(0, 16).replace('T', ' ') + ' SGT',
+                    },
+                    { label: 'Notes', value: detail.value.evidence.notes, wide: true },
+                  ]}
+                />
+                <PhotoGrid
+                  path="completion-evidence"
+                  photos={detail.value.evidence.photoKeys.map((key) => ({ id: key, storageKey: key }))}
+                  emptyMessage="No photographs are stored against this completion. 8.3.7 refuses a completion without one, so this means the images are no longer in storage — not that the crew submitted none."
+                />
+              </section>
+            )}
+
             <section data-part="actions">
               <h2>Actions</h2>
               <Field
@@ -170,11 +257,12 @@ export function WorkOrderDetailScreen(props: ScreenProps): JSX.Element {
                 hint="Required to cancel or to reject a completion; ignored when verifying."
                 onChange={(v) => setReason({ value: v, touched: reason.touched })}
               />
-              <button type="button" disabled={busy} onClick={() => setConfirming('verify')}>
+              <button type="button" data-variant="primary" disabled={busy} onClick={() => setConfirming('verify')}>
                 Verify completion
               </button>
               <button
                 type="button"
+                data-variant="danger"
                 disabled={busy}
                 onClick={() => {
                   setReason((f) => ({ ...f, touched: true }));
@@ -187,6 +275,7 @@ export function WorkOrderDetailScreen(props: ScreenProps): JSX.Element {
               </button>
               <button
                 type="button"
+                data-variant="danger"
                 disabled={busy}
                 onClick={() => {
                   setReason((f) => ({ ...f, touched: true }));

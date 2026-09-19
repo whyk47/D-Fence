@@ -1193,3 +1193,492 @@ ul[data-part='list'] > li > [data-part='cases'] {
   color: var(--ink-quiet);
   font-size: 0.9rem;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════
+   Presentation primitives — Facts, Pill, PhotoGrid, Sparkline.
+   Added 2026-09-19 after a screen-by-screen review of photographs of all 28 screens found the
+   same defect on most of them: facts rendered as an unlabelled column of paragraphs, tiers as
+   plain words, photographs as file names, and charts as a bare polyline above a 30-row table.
+   ═══════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* --- Facts: a labelled fact list, in place of a stack of <p data-part="…"> ----------------- */
+
+[data-component='facts'] {
+  display: grid;
+  /* Two columns on a laptop, one on a phone. The label column is fixed rather than auto so that
+     several Facts blocks down one screen line up with each other — a ragged label column reads
+     as several unrelated things rather than as one record. */
+  grid-template-columns: 200px 1fr;
+  gap: 0;
+  margin: 16px 0 24px;
+  border-top: 1px solid var(--line);
+}
+
+[data-component='facts'] > div {
+  display: contents;
+}
+
+[data-component='facts'] dt {
+  padding: 10px 16px 10px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-quiet);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+[data-component='facts'] dd {
+  margin: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+  color: var(--ink);
+}
+
+/* A description or a note runs to a paragraph; it gets the whole row rather than a 1fr column. */
+[data-component='facts'] > div[data-wide='true'] dt {
+  border-bottom: none;
+  padding-bottom: 2px;
+}
+
+[data-component='facts'] > div[data-wide='true'] dd {
+  grid-column: 1 / -1;
+  padding-top: 0;
+}
+
+@media (max-width: 640px) {
+  [data-component='facts'] {
+    grid-template-columns: 1fr;
+  }
+
+  [data-component='facts'] dt {
+    padding: 10px 0 0;
+    border-bottom: none;
+  }
+
+  [data-component='facts'] dd {
+    padding-top: 2px;
+    font-size: 16px;
+  }
+}
+
+/* --- Pill: a tier or status as a word in a chip, never colour alone ------------------------ */
+
+[data-component='pill'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  /* The word is always present in the markup; the colour is the second channel, which is what
+     makes this legible to a reader who cannot distinguish the two greens. */
+  color: var(--ink-quiet);
+  background: var(--surface);
+}
+
+[data-component='pill'][data-tone='critical'] {
+  color: #ffffff;
+  background: #7A1F18;
+  border-color: #7A1F18;
+}
+
+[data-component='pill'][data-tone='high'] {
+  color: #A4342B;
+  background: #FBEFEE;
+}
+
+[data-component='pill'][data-tone='medium'] {
+  color: #8A561F;
+  background: #FCF4EA;
+}
+
+[data-component='pill'][data-tone='low'],
+[data-component='pill'][data-tone='good'] {
+  color: #3A6247;
+  background: #EFF5F0;
+}
+
+[data-component='pill'][data-tone='warn'] {
+  color: #8A561F;
+  background: #FCF4EA;
+}
+
+[data-component='pill'][data-tone='bad'] {
+  color: #A4342B;
+  background: #FBEFEE;
+}
+
+/* --- PhotoGrid: photographs, as photographs ----------------------------------------------- */
+
+[data-component='photo-grid'] {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+[data-component='photo-grid'] > li {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+  aspect-ratio: 4 / 3;
+}
+
+[data-component='photo-grid'] img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* `cover` rather than `contain`: the tile is a thumbnail whose job is to be recognisable at a
+     glance, and the link on it opens the whole image. Letterboxed thumbnails of phone photographs
+     are mostly grey. */
+  object-fit: cover;
+}
+
+[data-component='photo-grid'] > li[data-state='loading'] {
+  background: repeating-linear-gradient(135deg, #F2F2EE, #F2F2EE 8px, #EAEAE5 8px, #EAEAE5 16px);
+}
+
+[data-component='photo-grid'] > li[data-state='failed'] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  aspect-ratio: auto;
+  min-height: 96px;
+  color: var(--ink-quiet);
+  font-size: 13px;
+  text-align: center;
+}
+
+p[data-part='photos'][data-state='empty'] {
+  margin: 8px 0 0;
+  padding: 16px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  color: var(--ink-quiet);
+  font-size: 13px;
+}
+
+/* --- Sparkline: a series with a baseline, a fill and its extremes named -------------------- */
+
+[data-component='sparkline'] svg {
+  display: block;
+  width: 100%;
+  height: 80px;
+  overflow: visible;
+}
+
+[data-component='sparkline'] [data-part='line'] {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+[data-component='sparkline'] [data-part='area'] {
+  fill: var(--accent);
+  opacity: 0.08;
+  stroke: none;
+}
+
+[data-component='sparkline'] [data-part='axis'] {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+[data-component='sparkline'] [data-part='scale'] {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 6px 0 0;
+  color: var(--ink-quiet);
+  font-size: 12px;
+}
+
+[data-component='sparkline'] [data-part='scale'] strong {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  color: var(--ink);
+}
+
+/* --- Card lists: the fix for "rendered as a list" ------------------------------------------ */
+
+/*
+  Every screen that showed a collection used a bare <ul> or <ol>, so My Reports rendered as bullet
+  points and the moderation queue as a numbered list with four paragraphs per item. `data-cards`
+  turns any such list into a stack of cards without the screen changing its markup shape.
+*/
+ul[data-cards],
+ol[data-cards] {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+ul[data-cards] > li,
+ol[data-cards] > li {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  display: grid;
+  gap: 4px;
+}
+
+ul[data-cards] > li:hover,
+ol[data-cards] > li:hover {
+  border-color: #CFD3CC;
+}
+
+/* The card's title line: the link, and whatever pills sit beside it, on one row. */
+ul[data-cards] > li [data-part='card-head'],
+ol[data-cards] > li [data-part='card-head'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+ul[data-cards] > li [data-part='card-head'] a,
+ol[data-cards] > li [data-part='card-head'] a {
+  font-weight: 600;
+}
+
+ul[data-cards] > li [data-part='card-meta'],
+ol[data-cards] > li [data-part='card-meta'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: var(--ink-quiet);
+  font-size: 13px;
+}
+
+ul[data-cards] > li p,
+ol[data-cards] > li p {
+  margin: 0;
+}
+
+/* --- Filter chips with a visible selected state -------------------------------------------- */
+
+[data-part='filters'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+[data-part='filters'] button[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+/* --- Two adjacent links must not run together ---------------------------------------------- */
+
+/*
+  The dispatch list rendered "Raise a work order for Bt Batok St 23Why is this ranked here?" — two
+  <a> elements with no whitespace between them in the JSX. Spacing them here fixes every such pair
+  rather than hunting each one, and the row layout is what they wanted anyway.
+*/
+[data-part='card-actions'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 4px;
+}
+
+/* --- A destructive action must not look like the safe one beside it ------------------------ */
+
+/*
+  Specificity, deliberately matched to the rule it has to beat. `button[type='button']:not(...)`
+  earlier in this file is (0,2,1) and paints every secondary button the same quiet grey, so a
+  plain `button[data-variant='danger']` at (0,1,1) lost and Reject rendered identically to Verify.
+*/
+button[type='button'][data-variant='danger'] {
+  color: #A4342B;
+  border-color: #E0BDB9;
+  background: var(--surface);
+}
+
+button[type='button'][data-variant='danger']:hover {
+  background: #FBEFEE;
+  border-color: #A4342B;
+}
+
+button[type='button'][data-variant='primary'],
+button[type='submit'][data-variant='primary'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+button[type='button'][data-variant='primary']:hover,
+button[type='submit'][data-variant='primary']:hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+/* --- The driver contribution bar on Cluster Detail ----------------------------------------- */
+
+td[data-cell='bar'] {
+  width: 140px;
+  padding-right: 0;
+}
+
+td[data-cell='bar'] [data-part='bar'] {
+  display: block;
+  height: 8px;
+  min-width: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+/* --- The share bar in the tier distribution chart ------------------------------------------ */
+
+[data-part='share-bar'] {
+  display: block;
+  height: 6px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+[data-part='share-bar'] > span {
+  display: block;
+  height: 100%;
+  background: var(--ink-quiet);
+}
+
+[data-part='share-bar'][data-tier='High'] > span {
+  background: var(--tier-high);
+}
+[data-part='share-bar'][data-tier='Medium'] > span {
+  background: var(--tier-medium);
+}
+[data-part='share-bar'][data-tier='Low'] > span {
+  background: var(--tier-low);
+}
+
+/* --- Analytics chart frames ----------------------------------------------------------------- */
+
+/*
+  Each chart was flush against the container edge, so the line was clipped at both ends and the
+  five charts ran into one another as one column of text. A frame gives each its own card, which
+  is what "the dashboard shall display five visualisations" reads as on a screen.
+*/
+[data-chart] {
+  margin: 24px 0;
+  padding: 16px 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+[data-chart] > h2 {
+  margin-top: 0;
+}
+
+[data-chart] svg[data-part='sparkline'] {
+  display: block;
+  width: 100%;
+  height: 140px;
+  color: var(--accent);
+  overflow: visible;
+}
+
+[data-chart] svg[data-part='sparkline'] [data-part='axis'] {
+  stroke: var(--ink-quiet);
+  stroke-width: 1;
+}
+
+/* The peak line is a reference, not data: dashed and faint, so it is never mistaken for a series. */
+[data-chart] svg[data-part='sparkline'] [data-part='peak'] {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+[data-chart] svg[data-part='sparkline'] [data-part='area'] {
+  fill: var(--accent);
+  opacity: 0.08;
+  stroke: none;
+}
+
+[data-chart] [data-part='note'] {
+  margin: 8px 0 12px;
+  color: var(--ink-quiet);
+  font-size: 13px;
+}
+
+/*
+  The accessible table stays in the DOM and in the accessibility tree; it simply stops being the
+  tallest thing on the page. 240px is about eight rows, which is enough to read the shape of the
+  data without scrolling and enough to make it obvious that scrolling reveals more.
+*/
+[data-part='table-scroll'] {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+[data-part='table-scroll'] table {
+  margin: 0;
+}
+
+[data-part='table-scroll'] thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--ground);
+}
+
+[data-chart] table caption {
+  padding: 8px 0;
+  color: var(--ink-quiet);
+  font-size: 13px;
+  text-align: left;
+}
+
+[data-chart] [data-part='median'] {
+  font-size: 20px;
+}
+
+[data-chart] [data-part='median'] strong {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 28px;
+}
+
+/* --- The evidence block on Work Order Detail ------------------------------------------------ */
+
+[data-part='evidence'] {
+  margin: 24px 0;
+  padding: 16px 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+[data-part='evidence'] > h2 {
+  margin-top: 0;
+}
+
+/* --- A heading that carries a pill beside it ------------------------------------------------ */
+
+h1 [data-component='pill'] {
+  vertical-align: middle;
+  margin-left: 8px;
+  /* The heading is 28px; the pill must not be scaled with it or it becomes a second title. */
+  font-size: 12px;
+}

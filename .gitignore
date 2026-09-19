@@ -14,3 +14,9 @@ demo-shots/
 tools/plantuml.jar
 # A Cygwin crash dump. Never anything but noise.
 bash.exe.stackdump
+
+# Screen photographs from src/tools/screen-shots.ts. Regenerated on demand; they are
+# evidence for a review, not source, and they are several megabytes of PNG per run.
+screen-shots/
+screen-shots-after/
+demo-shots/

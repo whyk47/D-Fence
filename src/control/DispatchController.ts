@@ -11,6 +11,7 @@ import { PestClass, PestType, PriorityTier, Role, TaskType, WorkOrderStatus } fr
 import { PestProfile } from '../entity/PestProfile';
 import { ConfigSet } from '../config/ConfigSet';
 import { IsoDate, Uuid, singaporeDate } from '../entity/valueTypes';
+import { CompletionEvidence } from '../entity/CompletionEvidence';
 import { WorkOrder } from '../entity/WorkOrder';
 import { Cluster } from '../entity/Cluster';
 import { AuditStore, ClusterStore, Notifier, PriorityScoreStore, ReportLinkage, ReportStore, WorkOrderStore } from '../ports/Stores';
@@ -380,6 +381,23 @@ export class DispatchController {
   async managerDetail(id: Uuid, by: Principal): Promise<WorkOrder | null> {
     await this.ac.authorise(by, 'workOrder:readAll', { kind: 'workOrder', id });
     return this.workOrders.findById(id);
+  }
+
+  /**
+   * 8.3.6, 8.3.10 — the photographs and notes the crew attached to the completion.
+   *
+   * Separate from `managerDetail` rather than folded into it, because 8.3.7's evidence belongs to
+   * the *completion attempt*, not to the work order: a rejected completion followed by a second
+   * one leaves two sets, and only the latest is what the manager is being asked to verify. The
+   * store already answers exactly that question.
+   *
+   * It existed on the port and in both implementations and **nothing ever called it**, which is
+   * why the Work Order Detail screen asked a manager to verify a completion without showing them
+   * a single thing the crew had photographed.
+   */
+  async completionEvidence(id: Uuid, by: Principal): Promise<CompletionEvidence | null> {
+    await this.ac.authorise(by, 'workOrder:readAll', { kind: 'workOrder', id });
+    return this.workOrders.latestEvidence(id);
   }
 
   /** 8.3.14 — for the dashboard's attention panel (7.5.2). */

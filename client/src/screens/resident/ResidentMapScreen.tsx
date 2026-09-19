@@ -15,6 +15,8 @@
 import { useLoad } from '../../lib/useLoad';
 import { StateView } from '../../components/States';
 import { link } from '../../components/Link';
+import { Pill, statusTone } from '../../components/Presentation';
+import { label } from '../../lib/labels';
 import { SingaporeMap, MapCluster, MapMarker } from '../../components/SingaporeMap';
 import { ScreenProps } from '../ScreenProps';
 
@@ -92,10 +94,28 @@ export function ResidentMapScreen(props: ScreenProps): JSX.Element {
         {(value?.savedLocations ?? []).length === 0 ? null : (
           <section data-part="saved">
             <h2>Your saved locations</h2>
-            <ul>
+            <ul data-cards>
               {(value?.savedLocations ?? []).map((location) => (
                 <li key={location.savedLocationId} data-status={location.exposureStatus}>
-                  {location.label} — {location.exposureStatus}
+                  <div data-part="card-head">
+                    <strong>{location.label}</strong>
+                    {/*
+                      This read "Home — CLEAR". `CLEAR` is a TypeScript member name, and it was the
+                      answer a resident got to the only question this screen exists to answer. The
+                      label now says what it means, and the colour says how worried to be.
+                    */}
+                    <Pill
+                      tone={
+                        location.exposureStatus === 'IN_CLUSTER'
+                          ? 'bad'
+                          : location.exposureStatus === 'WITHIN_150M'
+                            ? 'warn'
+                            : 'good'
+                      }
+                    >
+                      {label(location.exposureStatus)}
+                    </Pill>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -118,10 +138,13 @@ export function ResidentMapScreen(props: ScreenProps): JSX.Element {
             </p>
             {/* 5.2.9 — a resident sees the markers anonymised; the server decided that, not this
                 screen, which is why nothing here strips a field. */}
-            <ul>
+            <ul data-cards>
               {(value?.reports ?? []).slice(0, 10).map((report) => (
                 <li key={report.reportId}>
-                  {report.type} — {report.status}
+                  <div data-part="card-head">
+                    <span>{label(report.type)}</span>
+                    <Pill tone={statusTone(report.status)}>{label(report.status)}</Pill>
+                  </div>
                 </li>
               ))}
             </ul>

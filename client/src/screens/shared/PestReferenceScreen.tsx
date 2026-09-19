@@ -75,7 +75,7 @@ export function PestReferenceScreen(props: ScreenProps): JSX.Element {
               <th scope="col">Pest</th>
               <th scope="col">Who handles it</th>
               <th scope="col">Call</th>
-              <th scope="col">How we rank it</th>
+              <th scope="col">How quickly</th>
             </tr>
           </thead>
           <tbody>
@@ -91,9 +91,24 @@ export function PestReferenceScreen(props: ScreenProps): JSX.Element {
                 <td>
                   <a href={`tel:${pest.contactNumber.replace(/\s/g, '')}`}>{pest.contactNumber}</a>
                 </td>
-                {/* 4.2.8, 4.3.9 — severity and evidence tier, in one cell and in words. */}
-                <td data-part="ranking">
-                  severity {pest.severityMultiplier.toFixed(2)} · evidence tier {pest.evidenceTier}
+                {/*
+                  This read "severity 1.00 · evidence tier B" to a member of the public who has
+                  just seen a snake. 4.2.8 and 4.3.9 both require those figures **alongside a
+                  priority score**, and this screen presents no score — so neither applied here,
+                  and what they produced was a modelling term (4.3.1's evidence tier) in front of
+                  a reader for whom it means nothing.
+
+                  The multiplier is still the number behind the words and is kept on the row's
+                  title, so nothing is lost to anyone who needs it; the cell says what it means.
+                */}
+                <td data-part="ranking" title={`severity ${pest.severityMultiplier.toFixed(2)}, evidence tier ${pest.evidenceTier}`}>
+                  {pest.severityMultiplier >= 0.9
+                    ? 'Treated as urgent'
+                    : pest.severityMultiplier >= 0.7
+                      ? 'Treated as high priority'
+                      : pest.severityMultiplier >= 0.45
+                        ? 'Treated as routine'
+                        : 'Logged and monitored'}
                 </td>
               </tr>
             ))}

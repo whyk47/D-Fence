@@ -161,7 +161,9 @@ describe('Moderation and review — §11.2.14, §11.2.15, §5.2.4, §5.3.1', () 
     render(<ModerationQueueScreen {...props({}, fetcher)} />);
 
     // A queue of forty is fine; one whose oldest has waited nine days is not.
-    await waitFor(() => expect(screen.getByText('Waiting 9 day(s)')).toBeTruthy());
+    // 5.3.1's wait is now a pill rather than a sentence in body text, so a queue nobody has
+    // worked for nine days is visible rather than merely stated. The unit is still there.
+    await waitFor(() => expect(screen.getByText('waiting 9 d')).toBeTruthy());
   });
 
   it('Q2 — the type filter is a query parameter, so the server filters (5.3.5)', async () => {
@@ -220,7 +222,7 @@ describe('Dispatch, clusters and work orders — §11.2.16, §11.2.13, §11.2.17
 
     await waitFor(() => expect(screen.getByText('Dispatch for 2026-09-04')).toBeTruthy());
     // Every row is a link to the form, never a create. There is no "accept all".
-    expect(screen.getByRole('link', { name: /Raise a work order for Jln Kayu/ })).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Raise a work order/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /accept all/i })).toBeNull();
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
   });

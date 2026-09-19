@@ -10,6 +10,8 @@
 import { useLoad } from '../../lib/useLoad';
 import { StateView } from '../../components/States';
 import { link } from '../../components/Link';
+import { Pill, statusTone } from '../../components/Presentation';
+import { label } from '../../lib/labels';
 import { ScreenProps } from '../ScreenProps';
 
 interface ReportSummary {
@@ -41,25 +43,36 @@ export function MyReportsScreen(props: ScreenProps): JSX.Element {
       </a>
 
       <StateView state={state} onRetry={retry}>
-        <ul data-part="reports">
+        <ul data-part="reports" data-cards>
           {(value?.reports ?? []).map((report) => (
             <li key={report.id} data-status={report.status}>
-              <a href={`/reports/${report.id}`} onClick={link(props, `/reports/${report.id}`)}>
-                {report.type}
-                {report.localityBinding === null || report.localityBinding === undefined
-                  ? ''
-                  : ` — ${report.localityBinding}`}
-              </a>
-              {/* 11.7.5 — the status is a word in its own right, not a coloured dot. */}
-              <p data-part="status">{report.status}</p>
-              <p data-part="submitted">
-                Submitted {new Date(report.submittedAt).toISOString().slice(0, 16).replace('T', ' ')}
-              </p>
-              {report.corroborationCount > 0 ? (
-                <p data-part="corroborations">
-                  {report.corroborationCount} other resident(s) have confirmed this.
-                </p>
-              ) : null}
+              <div data-part="card-head">
+                <a href={`/reports/${report.id}`} onClick={link(props, `/reports/${report.id}`)}>
+                  {label(report.type)}
+                </a>
+                {/* 11.7.5 — the status is a word in its own right, and now a colour as well. */}
+                <Pill tone={statusTone(report.status)}>
+                  <span data-part="status">{label(report.status)}</span>
+                </Pill>
+              </div>
+              <div data-part="card-meta">
+                {report.localityBinding === null || report.localityBinding === undefined ? null : (
+                  <span>{report.localityBinding}</span>
+                )}
+                {/*
+                  The word "Submitted" appeared twice in every row — once as the status and once
+                  as the label on the date — which read as a stutter and told the resident nothing
+                  the pill above does not.
+                */}
+                <span data-part="submitted">
+                  {new Date(report.submittedAt).toISOString().slice(0, 16).replace('T', ' ')} SGT
+                </span>
+                {report.corroborationCount > 0 ? (
+                  <span data-part="corroborations">
+                    {report.corroborationCount} neighbour{report.corroborationCount === 1 ? '' : 's'} confirmed this
+                  </span>
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>

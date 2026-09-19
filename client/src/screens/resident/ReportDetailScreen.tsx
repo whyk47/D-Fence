@@ -15,6 +15,8 @@ import { ApiError } from '../../lib/ApiClient';
 import { useLoad } from '../../lib/useLoad';
 import { StateView } from '../../components/States';
 import { link } from '../../components/Link';
+import { Facts, PhotoGrid, Pill, statusTone } from '../../components/Presentation';
+import { label } from '../../lib/labels';
 import { ScreenProps } from '../ScreenProps';
 
 interface ReportView {
@@ -68,22 +70,33 @@ export function ReportDetailScreen(props: ScreenProps): JSX.Element {
       <StateView state={state} onRetry={retry}>
         {report === undefined ? null : (
           <article>
-            <h1>{report.type}</h1>
-            <p data-part="status">{report.status}</p>
-            <p data-part="locality">{report.localityBinding}</p>
-            <p data-part="description">{report.description}</p>
-            <p data-part="submitted">
-              Submitted {new Date(report.submittedAt).toISOString().slice(0, 16).replace('T', ' ')}
-            </p>
+            <h1>
+              {label(report.type)}{' '}
+              <Pill tone={statusTone(report.status)}>
+                <span data-part="status">{label(report.status)}</span>
+              </Pill>
+            </h1>
+
+            <Facts
+              items={[
+                { label: 'Where', value: report.localityBinding, part: 'locality' },
+                {
+                  label: 'Submitted',
+                  value: new Date(report.submittedAt).toISOString().slice(0, 16).replace('T', ' ') + ' SGT',
+                  part: 'submitted',
+                },
+                { label: 'What you wrote', value: report.description, part: 'description', wide: true },
+              ]}
+            />
 
             {/* 5.2.x — photographs are withheld until a report has been triaged, so a rejected or
                 unreviewed submission cannot be used to publish an image of somebody's property. */}
-            {report.photosVisible ? (
-              <ul data-part="photos">
-                {(value?.photos ?? []).map((photo) => (
-                  <li key={photo.id}>{photo.filename}</li>
-                ))}
-              </ul>
+            {report.photosVisible || (value?.photos ?? []).length > 0 ? (
+              <PhotoGrid
+                path={`report/${id}`}
+                photos={value?.photos ?? []}
+                emptyMessage="You did not attach a photograph to this report."
+              />
             ) : (
               <p data-part="photos-withheld">Photographs are shown once the report has been reviewed.</p>
             )}
@@ -93,7 +106,7 @@ export function ReportDetailScreen(props: ScreenProps): JSX.Element {
                 ? 'No other residents have confirmed this yet.'
                 : `${report.corroborationCount} other resident(s) have confirmed this.`}
             </p>
-            <button type="button" onClick={() => void corroborate()} disabled={busy}>
+            <button type="button" data-variant="primary" onClick={() => void corroborate()} disabled={busy}>
               I have seen this too
             </button>
             {notice === null ? null : (

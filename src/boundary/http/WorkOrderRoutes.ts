@@ -155,7 +155,26 @@ export class WorkOrderRoutes extends RouteHandler {
           // the detail carries the order and the client reads history from the audit endpoint. The
           // entity deliberately keeps no second copy: two records of who moved it would eventually
           // disagree, and the audited one is the one that may not be edited.
-          res.json({ workOrder: WorkOrderRoutes.card(order) });
+          // 8.3.6 — and the evidence, so the screen that verifies a completion can show what is
+          // being verified. Fetched here rather than on a second endpoint because a manager who
+          // opens this screen always wants it: there is no state in which they would rather see
+          // the buttons without the photographs.
+          const evidence = await this.dispatch.completionEvidence(id, principal);
+          res.json({
+            workOrder: WorkOrderRoutes.card(order),
+            evidence:
+              evidence === null
+                ? null
+                : {
+                    notes: evidence.notes,
+                    completedAt: evidence.completedAt,
+                    taskPerformed: evidence.taskPerformed,
+                    rejectionReason: evidence.rejectionReason,
+                    // Keys, not URLs. A link is minted per photograph by `ImageRoutes`, expires,
+                    // and is never embedded in a payload that might be logged or cached (10.3.5).
+                    photoKeys: evidence.photoKeys,
+                  },
+          });
           return;
         }
 

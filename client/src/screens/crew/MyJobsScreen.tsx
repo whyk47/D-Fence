@@ -53,7 +53,7 @@ export function MyJobsScreen(props: ScreenProps): JSX.Element {
 
       {/* 11.6.x — large, separate controls rather than a dropdown: this screen is used one-handed,
           outdoors, on a phone. */}
-      <div role="group" aria-label="Filter">
+      <div role="group" aria-label="Filter" data-part="filters">
         {FILTERS.map((option) => (
           <button
             key={option}

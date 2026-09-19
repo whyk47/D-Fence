@@ -146,7 +146,11 @@ describe('The map on a screen — §11.2.5, §11.2.12', () => {
     // 9.1.5 — the saved location is rendered from `label`/`exposureStatus`, the field names the
     // server actually sends. It used to read `name`/`status`, which no payload has ever carried,
     // so every saved location rendered as " — " on this screen.
-    expect(screen.getByText('Home — CLEAR')).toBeTruthy();
+    expect(screen.getByText('Home')).toBeTruthy();
+    // Was `Home — CLEAR`. `CLEAR` is the `ExposureStatus` member name, and it was the answer a
+    // resident got to the only question this screen exists to answer. Asserted in its new words so
+    // the case still fails if the identifier leaks back.
+    expect(screen.getByText('No cluster nearby')).toBeTruthy();
   });
 
   it('N8 — a long report list is capped, and says that it was (11.6.x)', async () => {

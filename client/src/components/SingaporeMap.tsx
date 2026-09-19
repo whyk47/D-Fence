@@ -255,6 +255,8 @@ export function SingaporeMap(props: SingaporeMapProps): JSX.Element {
       }
       layer.clearLayers();
       const bounds = L.latLngBounds([]);
+      /** Each cluster's own extent, kept so the nearest one to a saved location can be found. */
+      const shapeBounds: Array<ReturnType<typeof L.latLngBounds>> = [];
       for (const cluster of props.clusters) {
         if (cluster.ring.length < 3) {
           continue;
@@ -281,21 +283,40 @@ export function SingaporeMap(props: SingaporeMapProps): JSX.Element {
         }
         shape.addTo(layer);
         bounds.extend(shape.getBounds());
+        shapeBounds.push(shape.getBounds());
       }
       const focus = props.focus ?? [];
       if (focus.length > 0) {
         const near = L.latLngBounds(focus.map(([lat, lng]) => L.latLng(lat, lng)));
         // One saved location is a point, and a point has no extent — `fitBounds` on it would zoom
         // to the maximum and show a rooftop. Roughly 700 m of margin in each direction gives a
-        // frame with streets and the nearest cluster boundary in it.
+        // frame with streets in it.
         const margin = 0.0065;
-        instance.fitBounds(
-          L.latLngBounds(
-            [near.getSouth() - margin, near.getWest() - margin],
-            [near.getNorth() + margin, near.getEast() + margin],
-          ),
-          { padding: [16, 16], maxZoom: 16 },
+        const frame = L.latLngBounds(
+          [near.getSouth() - margin, near.getWest() - margin],
+          [near.getNorth() + margin, near.getEast() + margin],
         );
+        /*
+          And then the nearest cluster, if there is one.
+          ---------------------------------------------
+          A photograph of this screen on a phone showed the Ang Mo Kio street grid and not one
+          dengue cluster: the frame was fitted to the resident's saved location alone, and the
+          nearest cluster was several hundred metres outside it. A screen called "Dengue map" that
+          opens showing no dengue is answering the wrong question — "where do I live" rather than
+          3.2.x's "is there dengue near me".
+
+          So the frame is widened to take in whichever cluster is closest to the saved location.
+          Only one, and only the closest: taking in all of them is the island, which is the view
+          the resident would have got with no saved location at all.
+        */
+        const centre = near.getCenter();
+        const closest = shapeBounds
+          .slice()
+          .sort((a, b) => centre.distanceTo(a.getCenter()) - centre.distanceTo(b.getCenter()))[0];
+        if (closest !== undefined) {
+          frame.extend(closest);
+        }
+        instance.fitBounds(frame, { padding: [16, 16], maxZoom: 15 });
       } else if (bounds.isValid()) {
         // Open on the data rather than on the middle of the island: sixteen clusters in the north
         // and an empty south would otherwise put every shape in the top third of the frame.

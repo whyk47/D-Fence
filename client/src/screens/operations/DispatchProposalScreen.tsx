@@ -15,6 +15,8 @@ import { useState } from 'react';
 import { useLoad } from '../../lib/useLoad';
 import { StateView } from '../../components/States';
 import { link } from '../../components/Link';
+import { Pill, tierTone } from '../../components/Presentation';
+import { label } from '../../lib/labels';
 import { ScreenProps } from '../ScreenProps';
 
 interface DispatchPayload {
@@ -51,13 +53,28 @@ export function DispatchProposalScreen(props: ScreenProps): JSX.Element {
       <input id="date" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
 
       <StateView state={state} onRetry={retry}>
-        <ol data-part="proposals">
+        <ol data-part="proposals" data-cards>
           {(value?.proposals ?? []).map((proposal) => (
             <li key={proposal.clusterId} data-tier={proposal.tier}>
-              <h2>{proposal.locality}</h2>
-              <p data-part="tier">{proposal.tier}</p>
-              <p data-part="score">Score {proposal.score.toFixed(1)}</p>
-              <p data-part="task">Suggested: {proposal.suggestedTaskType}</p>
+              <div data-part="card-head">
+                <h2>{proposal.locality}</h2>
+                <Pill tone={tierTone(proposal.tier)} tier={proposal.tier}>
+                  {proposal.tier} priority
+                </Pill>
+              </div>
+              <div data-part="card-meta">
+                {/* Mono, because it is a number being compared down a column of other numbers. */}
+                <span data-part="score" className="num">
+                  score {proposal.score.toFixed(1)}
+                </span>
+                <span data-part="task">Suggested: {label(proposal.suggestedTaskType)}</span>
+              </div>
+              {/*
+                The two links were adjacent elements with no whitespace between them in the JSX,
+                so the browser ran them together into one underlined sentence. They are a row of
+                actions, which is what they always were.
+              */}
+              <div data-part="card-actions">
               <a
                 href={`/ops/work-orders/new?clusterId=${proposal.clusterId}&taskType=${proposal.suggestedTaskType}&date=${proposal.scheduledDate}`}
                 onClick={link(
@@ -65,11 +82,12 @@ export function DispatchProposalScreen(props: ScreenProps): JSX.Element {
                   `/ops/work-orders/new?clusterId=${proposal.clusterId}&taskType=${proposal.suggestedTaskType}&date=${proposal.scheduledDate}`,
                 )}
               >
-                Raise a work order for {proposal.locality}
+                Raise a work order
               </a>
               <a href={`/ops/clusters/${proposal.clusterId}`} onClick={link(props, `/ops/clusters/${proposal.clusterId}`)}>
                 Why is this ranked here?
               </a>
+              </div>
             </li>
           ))}
         </ol>

@@ -53,6 +53,27 @@ class ProbeRoutes extends RouteHandler {
   }
 }
 
+/**
+ * The CSP header a given `ExpressApp` sets, read over a real socket.
+ *
+ * Over a socket rather than by inspecting the instance, because the header is set by middleware
+ * and middleware that is never run is not a policy.
+ */
+async function cspOf(app: ExpressApp): Promise<string> {
+  app.mount(new ProbeRoutes(new AccessControlService(new AccessPolicy(), new InMemoryAuditStore())));
+  const express = (app as unknown as { app: { listen: (p: number, cb: () => void) => Server } }).app;
+  const listening = await new Promise<Server>((resolve) => {
+    const s = express.listen(0, () => resolve(s));
+  });
+  try {
+    const port = (listening.address() as AddressInfo).port;
+    const response = await fetch(`http://127.0.0.1:${port}/api/probe/ok`);
+    return response.headers.get('content-security-policy') ?? '';
+  } finally {
+    await new Promise<void>((resolve) => listening.close(() => resolve()));
+  }
+}
+
 let base = '';
 let server: Server;
 
@@ -165,6 +186,33 @@ describe('The HTTP boundary as seen from outside — §10.3.x, §10.5.3', () => 
     expect(csp).not.toContain('unsafe-eval');
     // 8.3.9 previews a chosen photograph from a data URL before it is uploaded.
     expect(csp).toContain("img-src 'self' data:");
+  });
+
+  it('H8b — the photograph origin is named in img-src when there is one, and only then', async () => {
+    /*
+      The last link in the chain that made every photograph in the system invisible.
+
+      `ImageRoutes` mints a signed link, `PhotoGrid` puts it in an `<img src>`, and the browser
+      refuses to load it — silently, with nothing in any server log — because `img-src` named only
+      this origin and OneMap. A photograph route and a screen that renders it are both necessary
+      and neither is sufficient; this is the third thing, and it is the one no test covered.
+
+      Asserted in both directions, because the wrong fix here is `img-src *`: a policy that lets an
+      injected script exfiltrate to any host it likes is not a policy.
+    */
+    const configured = new ExpressApp(null, false, 'https://example-storage.test');
+    const bare = new ExpressApp(null, false);
+
+    const [withOrigin, withoutOrigin] = await Promise.all([
+      cspOf(configured),
+      cspOf(bare),
+    ]);
+
+    expect(withOrigin).toContain('https://example-storage.test');
+    expect(withoutOrigin).not.toContain('example-storage');
+    // And no deployment relaxes it to a wildcard to make one screen work.
+    expect(withOrigin).not.toContain('img-src *');
+    expect(withOrigin).not.toContain('* data:');
   });
 
   it('H9 — the headers that were already right are still right', async () => {

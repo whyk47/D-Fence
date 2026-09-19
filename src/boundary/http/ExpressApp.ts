@@ -26,6 +26,21 @@ export class ExpressApp {
   constructor(
     private readonly resolver: PrincipalResolver | null = null,
     private readonly requireHttps = false,
+    /**
+     * The object-storage origin photographs are served from, or '' when there is none.
+     *
+     * **This is the last link in the chain that made every photograph in the system invisible.**
+     * `ImageRoutes` mints a signed link, `PhotoGrid` puts it in an `<img src>`, and the browser
+     * silently refuses to load it, because `img-src` named only this origin and OneMap. The
+     * request never leaves the tab and nothing is logged anywhere the developer looks: the tile
+     * is simply blank. A photograph route and a screen that renders it are both necessary and
+     * neither is sufficient.
+     *
+     * Passed in rather than read from the environment here, so the policy stays a pure function of
+     * its arguments and a test can assert the header for a given deployment. Empty in development
+     * without Supabase, where the in-memory store's URLs are same-origin anyway.
+     */
+    private readonly photoOrigin = '',
   ) {
     // Express advertises itself in a header on every response. It tells an attacker which stack
     // and therefore which CVE list to start from, and it does nothing for anyone else.
@@ -87,10 +102,12 @@ export class ExpressApp {
           "default-src 'self'",
           "script-src 'self'",
           "style-src 'self'",
-          // 9.1.x - the OneMap basemap, named rather than a wildcard. This is the ONE external
-          // origin the client touches, and it is a Singapore Land Authority endpoint we already
-          // depend on for geocoding, so the trust decision is one we had already made.
-          "img-src 'self' data: https://www.onemap.gov.sg",
+          // 9.1.x - the OneMap basemap, named rather than a wildcard; and 5.3.4/8.3.6's
+          // photographs, which live in private Supabase Storage buckets and are fetched over a
+          // signed link that expires. Both are named origins for the same reason: `img-src *`
+          // would buy an injected script an exfiltration channel, and neither of these is a host
+          // we had not already decided to trust — the photographs are ours, in our own bucket.
+          `img-src 'self' data: https://www.onemap.gov.sg${this.photoOrigin === '' ? '' : ` ${this.photoOrigin}`}`,
           "connect-src 'self'",
           "font-src 'self'",
           // 11.8.7 — the service worker is same-origin, and `worker-src` does not fall back to

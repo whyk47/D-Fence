@@ -24,6 +24,8 @@ import { ConfirmDialog, StateView, Toast } from '../../components/States';
 import { Field, field, FormField } from '../../components/Field';
 import { emailRule, evaluate, formIsValid, passwordRules, required } from '../../components/FieldValidation';
 import { Role } from '../../../../src/entity/enums';
+import { Pill } from '../../components/Presentation';
+import { label } from '../../lib/labels';
 import { ScreenProps } from '../ScreenProps';
 
 interface StaffPayload {
@@ -119,13 +121,30 @@ export function StaffAccountsScreen(props: ScreenProps): JSX.Element {
             {(value?.staff ?? []).map((member) => (
               <tr key={member.id} data-active={member.isActive}>
                 <td>{member.email}</td>
-                <td>{member.role}</td>
+                <td>{label(member.role)}</td>
                 {/* 11.7.5, 2.2.6 — a deactivated account stays listed and says so in words. */}
-                <td>{member.isActive ? 'Active' : 'Deactivated'}</td>
+                <td>
+                  <Pill tone={member.isActive ? 'good' : 'neutral'}>
+                    {member.isActive ? 'Active' : 'Deactivated'}
+                  </Pill>
+                </td>
                 <td>
                   {member.isActive ? (
-                    <button type="button" disabled={busy} onClick={() => setPending({ id: member.id, email: member.email })}>
-                      Deactivate {member.email}
+                    <button
+                      type="button"
+                      data-variant="danger"
+                      disabled={busy}
+                      onClick={() => setPending({ id: member.id, email: member.email })}
+                      /*
+                        The address moves from the button's text to its accessible name. It was put
+                        in the text so that a screen reader announcing the button out of context
+                        would say whose account it deactivates — which was right, and is preserved
+                        here — but it also made the widest column on the screen a repetition of the
+                        first one, seventy-five times.
+                      */
+                      aria-label={`Deactivate ${member.email}`}
+                    >
+                      Deactivate
                     </button>
                   ) : (
                     <button

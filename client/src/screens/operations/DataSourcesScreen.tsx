@@ -21,6 +21,8 @@ import { useState } from 'react';
 import { useLoad } from '../../lib/useLoad';
 import { StateView } from '../../components/States';
 import { ApiError } from '../../lib/ApiClient';
+import { Pill } from '../../components/Presentation';
+import { label } from '../../lib/labels';
 import { ScreenProps } from '../ScreenProps';
 
 /** What POST /api/ops/sources/refresh answers with (1.1.18). */
@@ -113,16 +115,23 @@ export function DataSourcesScreen(props: ScreenProps): JSX.Element {
           <tbody>
             {(value?.sources ?? []).map((source) => (
               <tr key={source.source} data-warning={source.isWarning} data-stale={source.isStale}>
-                <td>{source.source}</td>
+                <td>{label(source.source)}</td>
                 <td>
                   {/* 1.4.1 — never is not "long ago". */}
                   {source.lastSuccessAt === null
                     ? 'Never'
                     : new Date(source.lastSuccessAt).toISOString().slice(0, 16).replace('T', ' ')}
                 </td>
-                {/* 11.7.5 — the state in words. A row coloured red and nothing else would be
-                    invisible to a screen reader and ambiguous to everyone else. */}
-                <td>{describe(source)}</td>
+                {/* 11.7.5 — the state in words, and now in a chip as well. A row coloured red and
+                    nothing else would be invisible to a screen reader and ambiguous to everyone
+                    else; a sentence in the same grey as every other sentence was legible and easy
+                    to miss, which on a health screen is the same failure in the other direction. */}
+                <td>
+                  <Pill tone={source.isStale ? 'bad' : source.isWarning ? 'warn' : 'good'}>
+                    {source.isStale ? 'Stale' : source.isWarning ? 'Late' : 'Healthy'}
+                  </Pill>{' '}
+                  {describe(source)}
+                </td>
               </tr>
             ))}
           </tbody>

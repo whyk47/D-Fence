@@ -52,6 +52,7 @@ import { CredentialRepository } from './persistence/CredentialRepository';
 import { UploadRoutes } from './boundary/http/UploadRoutes';
 import { PhotoUploadController } from './control/PhotoUploadController';
 import { SupabaseStorageGateway } from './boundary/gateways/SupabaseStorageGateway';
+import { ImageRoutes } from './boundary/http/ImageRoutes';
 import { InMemoryObjectStorage } from './persistence/memory/InMemoryObjectStorage';
 import {
   InMemoryAuditStore,
@@ -816,7 +817,19 @@ async function main(): Promise<void> {
   // 10.3.2 — off on localhost, which has no certificate, and on wherever DFENCE_REQUIRE_HTTPS
   // is set. The flag is explicit rather than inferred from NODE_ENV: a security control that
   // switches itself on by guessing the environment is one that can guess wrong.
-  const app = new ExpressApp(authentication, process.env.DFENCE_REQUIRE_HTTPS === 'true');
+  /*
+    The origin — scheme and host — of wherever photographs are stored, for the CSP. Parsed rather
+    than concatenated so a trailing slash or a path in `SUPABASE_URL` cannot produce a header the
+    browser silently discards.
+  */
+  const photoOrigin = (() => {
+    try {
+      return storageUrl === '' ? '' : new URL(storageUrl).origin;
+    } catch {
+      return '';
+    }
+  })();
+  const app = new ExpressApp(authentication, process.env.DFENCE_REQUIRE_HTTPS === 'true', photoOrigin);
   // 7.3.1-7.3.5 — the five charts, over the same stores everything else reads.
   const analytics = new AnalyticsController(ac, clusters, scores, workOrders, reports);
   app.mount(new DashboardRoutes(ac, dashboard, analytics, ingestion));
@@ -839,6 +852,10 @@ async function main(): Promise<void> {
   app.mount(new AuditRoutes(ac, new AuditController(ac, auditStore)));
   // 5.1.5, 8.3.6 — the only path by which an image enters the system.
   app.mount(new UploadRoutes(ac, new PhotoUploadController(ac, objectStorage, auditStore)));
+  // The read half of the same story: an authorised manager asks for a link to one photograph,
+  // and gets one that expires (10.3.5). Without this, every image uploaded since 5.1.5 was built
+  // was stored and unreachable.
+  app.mount(new ImageRoutes(ac, objectStorage, residentReports, moderation));
   // §8's two halves, finally reachable over HTTP. Both were declared skeletons that threw, so the
   // dispatch, work-order and crew screens had controllers behind them and no door to reach them by.
   app.mount(new WorkOrderRoutes(ac, dispatch, lifecycle, staff));
