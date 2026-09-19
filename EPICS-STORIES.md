@@ -2296,9 +2296,9 @@ than mosquitoes.
 - Exclude referred reports from the recency driver.
 - Test that a referral produces neither a work order nor a treatment record.
 
-**Team decision still owed.** Bees, wasps and the three bird species sit between NEA and AVS. The
-shared-authority resolution must be written into the pest profiles before the Lab 5 demo — open point
-10 below.
+**Resolved 2026-09-19 — open point 10 below.** Bees and wasps go to NParks on the helpline; house
+crows, pigeons and Javan mynas go to AVS on the Animal Response Centre. Written into
+`config/pests.default.json` and pinned by tests A1–A3.
 
 ---
 
@@ -2454,11 +2454,20 @@ engine should be.
    are all judgement, not evidence. They are now collected in one table rather than scattered through
    the requirements as unmarked "shall" statements. Someone must be able to defend each in Q&A.
 10. **Shared NEA/AVS authority for bees, wasps and the three bird species (4.2.3, 8.6.2).**
-   *Open, and needed before the Lab 5 demo.* A pest profile holds exactly one dispatch authority, but
-   bees, wasps, house crows, pigeons and Javan mynas are handled by NEA in some circumstances and AVS
-   in others. Either the team picks one authority per pest and says why, or `PestProfile` grows a
-   second authority field and the referral screen offers a choice. The first is cheaper and defensible;
-   the second is more truthful. **Decide, and write it into `config/pest-profiles.default.json`.**
+   *Resolved 2026-09-19: one authority per pest, chosen by the channel each agency publishes.*
+   The question was posed as a choice between one authority per pest and a second authority field
+   with a choice on the referral screen. It is answered by asking what 8.6.3 actually puts in front
+   of a resident: an agency and a number to call. A screen that offers a resident who has just found
+   a hive a choice of two agencies has moved our uncertainty onto them.
+   So: **BeeWasp → NParks, 1800 471 7300**; **HouseCrow, Pigeon, JavanMyna → AVS (Animal Response
+   Centre), 1800 476 1600**. AVS lists the three birds together under Encountering Wildlife and its
+   bees and wasps page gives a *different* number — the NParks Helpline — which is why `NPARKS` is a
+   separate authority in the catalogue rather than a fourth pest pointed at AVS. Both pages read
+   2026-09-19. NEA remains the licensing authority for the operators who perform the removal; that
+   is a different fact from who a resident reports to, and the provisional NEA setting confused the
+   two. Written into `config/pests.default.json`; tests A1–A3 in `tests/pest-scoring.test.ts` hold
+   it, including one that asserts over the whole catalogue so a pest added later cannot inherit the
+   same gap.
 11. **Whether the seven-week schedule absorbs E11 at all (build order, weeks 8–10).** *Open.* Weeks
    8–10 are a sequence, not calendar time. Either E11 displaces week 7, or the project ships with
    weeks 8–9 only, or the TA's suggestion is answered in the requirements and diagrams and not in

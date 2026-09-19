@@ -1,8 +1,9 @@
 /**
  * D-Fence — apply the SQL migrations.
  *
- *     npx tsx src/tools/migrate.ts            # apply anything not yet applied
- *     npx tsx src/tools/migrate.ts --status   # list what has been applied, change nothing
+ *     npx tsx src/tools/migrate.ts             # apply anything not yet applied
+ *     npx tsx src/tools/migrate.ts --status    # list what has been applied, change nothing
+ *     npx tsx src/tools/migrate.ts --reconcile # accept an edited file's new checksum
  *
  * Deliberately small. A migration framework would be a dependency and a vocabulary to learn for a
  * schema that is one file long; what is actually needed is that a migration runs **once**, in
@@ -35,6 +36,7 @@ async function main(): Promise<void> {
     ssl: { ca: readFileSync(CA_PATH, 'utf8'), rejectUnauthorized: true },
   });
   await client.connect();
+  const reconcile = process.argv.includes('--reconcile');
 
   try {
     await client.query(`
@@ -71,9 +73,23 @@ async function main(): Promise<void> {
         continue;
       }
       if (previous !== undefined) {
+        if (reconcile) {
+          // Records that the file now hashes differently and that this was accepted. It does NOT
+          // re-run anything: the schema is whatever it already is, and this only stops a warning
+          // that has been investigated from being reprinted for ever.
+          //
+          // The investigation is `schema-drift.ts`, which replays every migration into a scratch
+          // schema inside a transaction it always rolls back, and compares the result against the
+          // live database column by column and constraint by constraint. Reconciling without
+          // running it first would be suppressing the alarm rather than answering it.
+          await client.query('UPDATE schema_migration SET checksum = $2 WHERE filename = $1', [file, checksum]);
+          console.log(`  ~ ${file} reconciled: ${previous} → ${checksum}`);
+          continue;
+        }
         // Refused rather than re-run. Re-running an edited migration is how one database ends up
         // with a column another does not have, and nothing reports it.
         console.log(`  ! ${file} was applied with a different checksum — write a new migration instead`);
+        console.log(`    (if schema-drift.ts reports no drift, --reconcile records the new checksum)`);
         process.exitCode = 1;
         continue;
       }

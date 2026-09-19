@@ -92,6 +92,50 @@ function report(
   return r;
 }
 
+// ---------------------------------------------------------- §6.15 the referral destination (8.6)
+
+/**
+ * Open point 10, closed. Four pests sat on a PROVISIONAL authority of NEA: bees and wasps, house
+ * crows, pigeons and Javan mynas. All four appear on AVS's published wildlife pages *and* are NEA
+ * public-health nuisance work, and a profile holds one authority.
+ *
+ * It is settled by asking what a resident is told to do, because that is what 8.6.3 puts on their
+ * screen. AVS lists house crows, pigeons and Javan mynas together and gives the Animal Response
+ * Centre; its bees and wasps page gives a *different* number, the NParks Helpline. Both read
+ * 2026-09-19. NEA licenses the operators who do the removal, which is a different fact from who a
+ * resident reports to.
+ */
+describe('A: every pest names the authority that publishes its channel (8.6.2, 8.6.3)', () => {
+  const c = config();
+
+  it('A1 — bees and wasps go to NParks on the helpline, not to the Animal Response Centre', () => {
+    const bee = c.pestProfile(PestType.BeeWasp);
+    expect(bee.dispatchAuthority).toBe('NParks');
+    // The numbers differ, which is the whole reason NPARKS is its own authority rather than a
+    // fourth pest pointed at AVS. A referral that names the right agency and the wrong number is
+    // still a resident who cannot reach anyone.
+    expect(bee.authorityContactNumber).toBe('1800 471 7300');
+    expect(bee.isReferrable()).toBe(true);
+  });
+
+  it('A2 — the three nuisance birds go to AVS', () => {
+    for (const pest of [PestType.HouseCrow, PestType.Pigeon, PestType.JavanMyna]) {
+      const profile = c.pestProfile(pest);
+      expect(profile.dispatchAuthority).toContain('AVS');
+      expect(profile.authorityContactNumber).toBe('1800 476 1600');
+    }
+  });
+
+  it('A3 — no profile is left on a provisional authority', () => {
+    // The case that keeps this closed. It asserts over the whole catalogue rather than over the
+    // four pests that were provisional, so a pest added later cannot quietly inherit the same gap.
+    for (const profile of c.pestProfiles.values()) {
+      expect(profile.dispatchAuthority.trim()).not.toBe('');
+      expect(profile.authorityContactNumber.trim()).not.toBe('');
+    }
+  });
+});
+
 // ---------------------------------------------------------------- §6.3 evidence tiers (4.3)
 
 describe('T: evidence tiers decide the driver set (4.3.4-4.3.10)', () => {

@@ -5,7 +5,7 @@
 
   "$contactNote": "NEA 6225 5632 verified against nea.gov.sg/contact-us on 2026-09-16. AVS Animal Response Centre 1800 476 1600 verified against nparks.gov.sg/contact-us the same day.",
 
-  "$authorityNote": "PROVISIONAL for BeeWasp, HouseCrow, Pigeon and JavanMyna. These four appear on the AVS published wildlife list AND are NEA public-health nuisance work; a profile holds one authority. NEA is set here because D-Fence covers built-up municipal estates, which is the NEA side of that split. This is open point 10 in EPICS-STORIES.md and needs a team decision before the Lab 5 demo - it is configuration, so changing it is a one-line edit.",
+  "$authorityNote": "RESOLVED 2026-09-19 (was open point 10). BeeWasp goes to NPARKS and HouseCrow, Pigeon and JavanMyna go to AVS, because those are the channels the authorities themselves publish to residents. AVS lists house crows, pigeons and Javan mynas together under Encountering Wildlife and gives the Animal Response Centre, 1800 476 1600 (avs.nparks.gov.sg/wildlife/encountering-wildlife/house-crows-pigeons-javan-mynas/, read 2026-09-19). AVS's bees and wasps page gives a DIFFERENT number - the NParks Helpline, 1800 471 7300 (avs.nparks.gov.sg/wildlife/encountering-wildlife/bees-and-wasps/, read 2026-09-19) - which is why NPARKS is a separate authority here rather than a fourth pest pointed at AVS. The earlier provisional NEA setting had an argument behind it (D-Fence covers built-up municipal estates, which is the NEA side of the split) but it loses to the published channel: 8.6.3 shows a resident an authority and a number to call, and a resident who calls NEA about a bee hive has been sent to the wrong place by us. NEA remains the licensing authority for the pest control operators who do the removal - that is a different fact from who a resident reports to.",
 
   "$taxonNote": "iNaturalist taxon ids, each resolved by id against api.inaturalist.org/v1/taxa on 2026-09-16 rather than by name search. Name search is unsafe here: q=Serpentes returns 26172, which is Squamata - the whole order, including skinks and monitor lizards - and overcounts snakes roughly threefold. Serpentes is 85553.",
 
@@ -42,6 +42,7 @@
   "authorities": {
     "NEA": { "name": "NEA", "contactNumber": "6225 5632" },
     "AVS": { "name": "AVS (NParks Animal Response Centre)", "contactNumber": "1800 476 1600" },
+    "NPARKS": { "name": "NParks", "contactNumber": "1800 471 7300" },
     "VCO": { "name": "Registered vector control operator", "contactNumber": "6225 5632" }
   },
 
@@ -55,17 +56,17 @@
     { "pestType": "Flea",          "pestClass": "VectorBorne", "evidenceTier": "C", "severityMultiplier": 0.75, "authority": "NEA", "observationTaxonId": null,   "$raw": "4+2+2+1 = 9; ONE iNat record in twelve months" },
     { "pestType": "Snake",         "pestClass": "Wildlife",    "evidenceTier": "B", "severityMultiplier": 0.75, "authority": "AVS", "observationTaxonId": 85553,  "$raw": "0+6+3+0 = 9; Serpentes, NOT Squamata" },
     { "pestType": "Crocodile",     "pestClass": "Wildlife",    "evidenceTier": "B", "severityMultiplier": 0.75, "authority": "AVS", "observationTaxonId": 26068,  "$raw": "0+6+3+0 = 9" },
-    { "pestType": "BeeWasp",       "pestClass": "Wildlife",    "evidenceTier": "B", "severityMultiplier": 0.75, "authority": "NEA", "observationTaxonId": 52747,  "$raw": "0+6+2+1 = 9; authority PROVISIONAL, see $authorityNote" },
-    { "pestType": "HouseCrow",     "pestClass": "Nuisance",    "evidenceTier": "B", "severityMultiplier": 0.75, "authority": "NEA", "observationTaxonId": 8031,   "$raw": "2+2+3+2 = 9; authority PROVISIONAL" },
+    { "pestType": "BeeWasp",       "pestClass": "Wildlife",    "evidenceTier": "B", "severityMultiplier": 0.75, "authority": "NPARKS", "observationTaxonId": 52747,  "$raw": "0+6+2+1 = 9; NParks Helpline, not the Animal Response Centre - see $authorityNote" },
+    { "pestType": "HouseCrow",     "pestClass": "Nuisance",    "evidenceTier": "B", "severityMultiplier": 0.75, "authority": "AVS", "observationTaxonId": 8031,   "$raw": "2+2+3+2 = 9" },
     { "pestType": "Civet",         "pestClass": "Wildlife",    "evidenceTier": "C", "severityMultiplier": 0.58, "authority": "AVS", "observationTaxonId": null,   "$raw": "2+2+1+2 = 7; 107 records a year" },
     { "pestType": "Bat",           "pestClass": "Wildlife",    "evidenceTier": "B", "severityMultiplier": 0.58, "authority": "AVS", "observationTaxonId": 40268,  "$raw": "2+2+1+2 = 7" },
-    { "pestType": "Pigeon",        "pestClass": "Nuisance",    "evidenceTier": "B", "severityMultiplier": 0.58, "authority": "NEA", "observationTaxonId": 3017,   "$raw": "2+0+3+2 = 7; authority PROVISIONAL" },
+    { "pestType": "Pigeon",        "pestClass": "Nuisance",    "evidenceTier": "B", "severityMultiplier": 0.58, "authority": "AVS", "observationTaxonId": 3017,   "$raw": "2+0+3+2 = 7" },
     { "pestType": "BedBug",        "pestClass": "Structural",  "evidenceTier": "C", "severityMultiplier": 0.5,  "authority": "NEA", "observationTaxonId": null,   "$raw": "0+2+2+2 = 6; ONE iNat record in twelve months - indoor pests are invisible to a biodiversity platform" },
     { "pestType": "Ant",           "pestClass": "Nuisance",    "evidenceTier": "B", "severityMultiplier": 0.5,  "authority": "VCO", "observationTaxonId": 47336,  "$raw": "2+2+1+1 = 6" },
     { "pestType": "Otter",         "pestClass": "Wildlife",    "evidenceTier": "C", "severityMultiplier": 0.5,  "authority": "AVS", "observationTaxonId": null,   "$raw": "0+2+2+2 = 6; 30/30 sampled records location-obscured" },
     { "pestType": "Termite",       "pestClass": "Structural",  "evidenceTier": "B", "severityMultiplier": 0.33, "authority": "VCO", "observationTaxonId": 118903, "$raw": "0+0+1+3 = 4" },
     { "pestType": "MonitorLizard", "pestClass": "Wildlife",    "evidenceTier": "B", "severityMultiplier": 0.33, "authority": "AVS", "observationTaxonId": 39392,  "$raw": "0+2+1+1 = 4" },
-    { "pestType": "JavanMyna",     "pestClass": "Nuisance",    "evidenceTier": "B", "severityMultiplier": 0.33, "authority": "NEA", "observationTaxonId": 145095, "$raw": "0+0+2+2 = 4; authority PROVISIONAL" },
+    { "pestType": "JavanMyna",     "pestClass": "Nuisance",    "evidenceTier": "B", "severityMultiplier": 0.33, "authority": "AVS", "observationTaxonId": 145095, "$raw": "0+0+2+2 = 4" },
     { "pestType": "Pangolin",      "pestClass": "Wildlife",    "evidenceTier": "C", "severityMultiplier": 0.25, "authority": "AVS", "observationTaxonId": null,   "$raw": "0+0+3+0 = 3; 12/12 sampled records location-obscured" },
     { "pestType": "Other",         "pestClass": "Nuisance",    "evidenceTier": "C", "severityMultiplier": 0.25, "authority": "NEA", "observationTaxonId": null,   "$raw": "5.1.15 requires a value for a pest the resident cannot name. Scored at the catalogue floor and from reports alone: an unidentified pest is evidence of something, and the moderator decides what." }
   ],
