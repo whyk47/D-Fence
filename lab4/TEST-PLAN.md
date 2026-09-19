@@ -16,7 +16,7 @@ cross-pest generalisation in `REQUIREMENTS.md` v0.9. v0.3 records what happened 
 `tests/pest-scoring.test.ts` (25 cases). §6.5 and §6.6 remain designed and not executed, because the
 two external gateways they test are build steps 7 and 8 and are not written.
 
-**The whole suite: `npx vitest run`, 801 tests in 39 files, 801 passing** — including
+**The whole suite: `npx vitest run`, 804 tests in 39 files, 804 passing** — including
 `tests/repository.test.ts`, which runs against live PostGIS and is the suite that caught the missing
 schema described in §6.8. One case,
 `rainfall.test.ts` J2, was failing when this pass began; it predated the v0.9 work and has since been
@@ -2113,4 +2113,63 @@ eliminate: tens of thousands of rows and several MB per run, growing daily. Both
 charging the project for the very bytes the change was made to stop paying for, once per test run,
 and it would have failed by timeout rather than by assertion — a failure that says nothing about
 whether the arithmetic is right.
+
+---
+
+## §6.14 — The requirement that cannot be satisfied indefinitely
+
+Every defect in §6.9 to §6.13 was code that was wrong. This one is a requirement that is right and
+unbounded, which is a harder thing to notice because the code implements it faithfully.
+
+**4.1.11** requires the score, tier and driver breakdown of *every* scoring cycle to be retained as
+history, and names no period. The scoring cycle runs every five minutes. On 2026-09-19 the database
+held 144 MB of the free tier's 500 MB, all of it written since 4 September, growing at **7.9 MB/day**
+— full in roughly 45 days. `driver_contribution` was half of it, at 4.6 MB/day: five to seven rows
+per score, one score per subject, 288 cycles a day. The rate is linear in pests as well as cycles,
+and three of the 22 configured pests currently reach a score.
+
+Egress (§6.10) was fixable by making one query cheaper. Disk is not the cost of a query but the
+accumulated cost of every cycle that has ever run, so the only levers are retention and plan.
+
+`src/tools/capacity-check.ts` measures it — read-only, rows per day taken from the data's own
+timestamps rather than assumed, bytes per row from `pg_total_relation_size` so that indexes count.
+It reports a 7-day and a 1-day window: the week is the *lower* figure, because it contains §6.11's
+ten-hour outage and several days on which only one pest scored. When they disagree the shorter one
+is what to plan against.
+
+### The proposed policy, and why it is only proposed
+
+Keep every cycle inside 14 days; beyond that keep the **last cycle of each UTC day**, so every day
+the system ran is still represented by a real, complete cycle rather than by an average of several.
+That takes steady-state growth from ~7.9 MB/day to ~0.03 MB/day and leaves the database stable at
+roughly 160 MB, indefinitely.
+
+`src/tools/prune-history.ts` implements it, defaults to a dry run, and requires `--apply`. **It is
+not wired into the scheduler and must not be:** a deletion running on the same five-minute timer as
+the scoring cycle would destroy history unattended, and the first miscomputed window would take the
+history with it before anyone read a log. Retention is a decision, so it is a command.
+
+It also needs a *new* requirement number rather than an edit to 4.1.11 — numbers are permanent —
+and until the team ratifies one, running `--apply` is a decision to retain less than the
+requirement as written demands.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| RT1 | `DOOMED_CYCLES` | three cycles on one old day, one on the next | the first two of day one; the day's last cycle and the lone next-day cycle survive |
+| RT2 | `DOOMED_CYCLES` | the whole live table | every selected cycle is older than the window; the fixture's five rows are untouched |
+| RT3 | `driver_contribution` | the whole live table | no contribution exists whose score does not |
+
+**RT2 is stated over the whole table rather than over the fixtures deliberately.** It is the
+property that makes the tool safe to run at all: the recent window is untouchable by construction,
+so an error in the daily grouping can only ever cost old resolution, never current history.
+
+**RT3 guards the reason `DOOMED_CYCLES` names one table.** `driver_contribution` follows its score
+by `ON DELETE CASCADE`. If that were ever dropped, the tool would leave half a million rows behind
+that no score explains and nothing reads — and it would leave them silently, because an orphaned
+breakdown raises nothing.
+
+**The selection is defined once, in `RetentionPolicy.ts`, and used by both the count and the
+delete.** Two statements describing the same set in different words would eventually disagree, and
+a dry run that reports one thing while the deletion does another is the single failure a deletion
+tool cannot be allowed to have.
 

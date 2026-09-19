@@ -48,6 +48,7 @@ import { PriorityScoreRepository } from '../src/persistence/PriorityScoreReposit
 import { PriorityScore } from '../src/entity/PriorityScore';
 import { EvidenceTier, PestType, SourceKind } from '../src/entity/enums';
 import { PestPriorityCalculator } from '../src/control/scoring/PestPriorityCalculator';
+import { DOOMED_CYCLES } from '../src/persistence/RetentionPolicy';
 
 const url = ConfigLoader.load().get('DATABASE_URL');
 const live = url !== '';
@@ -1041,5 +1042,104 @@ describe.skipIf(!live)('Every SourceKind is accepted by every table that constra
       ).resolves.toBeDefined();
       await db.query(`DELETE FROM ingestion_run WHERE source = $1 AND feature_count = 0 AND trigger = 'MANUAL' AND started_at > now() - interval '1 minute'`, [source]);
     }
+  });
+});
+
+/**
+ * §2.45 — the retention policy's selection, against live Postgres.
+ *
+ * `prune-history.ts` deletes what `DOOMED_CYCLES` selects, and the dry run counts the same set. The
+ * whole safety of the tool rests on that set being right, and it is expressed in SQL that no unit
+ * test can evaluate: `date_trunc`, `max() ... GROUP BY`, and an interval computed from `now()`.
+ *
+ * The fixtures sit in January 2025, two hours apart. Nothing else in the table is within a year of
+ * them, so the "last cycle of its day" grouping is decided entirely by rows this block wrote —
+ * a case built on live cycles would pass or fail depending on what the scheduler happened to do.
+ */
+describe.skipIf(!live)('The retention policy against live Postgres — §4.1.11', () => {
+  let db: Database;
+  let scores: PriorityScoreRepository;
+  const clusterId = randomUUID();
+  /** Three cycles on one old day, one on the next, one an hour ago. */
+  const day1 = ['2025-01-15T01:00:00Z', '2025-01-15T02:00:00Z', '2025-01-15T03:00:00Z'];
+  const day2 = '2025-01-16T01:00:00Z';
+  const recent = new Date(Date.now() - 3_600_000);
+
+  function score(at: Date, rank: number): PriorityScore {
+    const s = new PriorityScore();
+    s.clusterId = clusterId;
+    s.localityId = clusterId;
+    s.pestType = PestType.Mosquito;
+    s.computedAt = at;
+    s.score = 40 + rank;
+    s.tier = PriorityTier.Medium;
+    s.isDegraded = false;
+    s.excludedDrivers = [];
+    s.rank = rank;
+    s.contributions = [];
+    return s;
+  }
+
+  /** The doomed set, restricted to the timestamps this block owns. */
+  async function doomed(): Promise<string[]> {
+    const rows = (await db.query(
+      `SELECT computed_at FROM (${DOOMED_CYCLES}) d WHERE computed_at < '2025-02-01'::timestamptz
+        ORDER BY computed_at`,
+      [14],
+    )) as Array<{ computed_at: Date }>;
+    return rows.map((r) => new Date(r.computed_at).toISOString());
+  }
+
+  beforeAll(async () => {
+    db = new Database(url);
+    scores = new PriorityScoreRepository(db);
+    const ring = [[103.62, 1.2], [103.63, 1.2], [103.63, 1.21], [103.62, 1.21], [103.62, 1.2]]
+      .map((p) => p.join(' '))
+      .join(',');
+    await db.query(
+      'INSERT INTO cluster (id, object_id, locality, boundary, case_size, change_class, trajectory, is_active) ' +
+        "VALUES ($1, $2, 'Retention Test Locality', ST_GeogFromText($3), 5, 'UNCHANGED', 'Stable', true)",
+      [clusterId, 'retention-' + clusterId.slice(0, 8), 'POLYGON((' + ring + '))'],
+    );
+    await scores.saveAll([...day1, day2].map((t, i) => score(new Date(t), i + 1)));
+    await scores.saveAll([score(recent, 1)]);
+  });
+
+  afterAll(async () => {
+    await db.query('DELETE FROM priority_score WHERE cluster_id = $1', [clusterId]);
+    await db.query('DELETE FROM cluster WHERE id = $1', [clusterId]);
+    await db.close?.();
+  });
+
+  it('RT1 — beyond the window, the last cycle of each day is kept and the rest are not', async () => {
+    const gone = await doomed();
+
+    // 01:00 and 02:00 go; 03:00 is the last cycle of 15 January and stays. 16 January has only one
+    // cycle, so it is its own day's last and stays too — a day the system ran is never erased.
+    expect(gone).toEqual(['2025-01-15T01:00:00.000Z', '2025-01-15T02:00:00.000Z']);
+  });
+
+  it('RT2 — a cycle inside the window is never selected, whatever else is true of it', async () => {
+    const all = (await db.query(`SELECT computed_at FROM (${DOOMED_CYCLES}) d`, [14])) as Array<{
+      computed_at: Date;
+    }>;
+    const cutoff = Date.now() - 14 * 86_400_000;
+
+    // Stated over the whole table rather than over the fixtures, because this is the property that
+    // makes the tool safe to run at all: the recent window is untouchable by construction, so a
+    // mistake in the daily grouping can only ever cost old resolution, never current history.
+    expect(all.every((r) => new Date(r.computed_at).getTime() < cutoff)).toBe(true);
+    expect(await scores.historyFor(clusterId, 10)).toHaveLength(5);
+  });
+
+  it('RT3 — the breakdown cannot be orphaned from the score it explains (4.1.10)', async () => {
+    const orphans = (await db.query(
+      `SELECT count(*) n FROM driver_contribution c
+        WHERE NOT EXISTS (SELECT 1 FROM priority_score s WHERE s.id = c.priority_score_id)`,
+    )) as Array<{ n: string }>;
+
+    // The cascade is the reason `DOOMED_CYCLES` names only one table. If it were ever dropped, the
+    // tool would leave half a million rows behind that no score explains and nothing reads.
+    expect(Number(orphans[0]?.n)).toBe(0);
   });
 });
