@@ -1,16 +1,22 @@
 /**
  * D-Fence — the retention policy, stated once.
  *
- * Stereotype: <<persistence>>. Traces: 4.1.10, 4.1.11 (see the caveat below), 1.2.7, 1.4.3.
+ * Stereotype: <<persistence>>. Traces: 4.1.10, 4.1.11, 4.1.22, 4.1.23, 4.1.24, 1.2.7, 1.4.3.
  *
  * `prune-history.ts` counts what it would delete and then deletes it. Those are two statements
  * about the same set of rows, and if they were written separately they would eventually disagree —
  * a dry run that reports one thing and a deletion that does another is the one failure a deletion
  * tool cannot be allowed to have. So the set is defined here, once, and both use it.
  *
- * **The policy is a proposal, not a rule in force.** 4.1.11 requires the score, tier and driver
- * breakdown of every scoring cycle to be retained as history and names no period; keeping less is
- * a change to the requirement, which needs its own number. Nothing in `server.ts` imports this.
+ * **The policy is now a requirement.** It was a proposal until 2026-09-19, when 4.1.22 and 4.1.23
+ * were added to bound the retention 4.1.11 obliges: every cycle for at least 14 days, and beyond
+ * that at least one complete cycle for each day the system computed scores. 4.1.11's wording and
+ * number are unchanged. 4.1.24 writes down what was previously only an `ON DELETE CASCADE` — a
+ * breakdown may not be deleted apart from the score it explains.
+ *
+ * Nothing in `server.ts` imports this, and that is still deliberate: a bounded history is a
+ * requirement, but deleting on a five-minute timer alongside the scoring cycle is not what it
+ * requires. See the head of `prune-history.ts`.
  */
 
 /** Every cycle is kept this far back. Beyond it, one cycle per UTC day survives. */

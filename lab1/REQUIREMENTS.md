@@ -224,7 +224,7 @@ composite actor. See open point 1 in `EPICS-STORIES.md`.
 - **4.1.8** The system shall assign a priority tier of High when a cluster's score is 70.0 or above, Medium when it is between 40.0 and 69.9, and Low when it is below 40.0.
 - **4.1.9** The system shall read the tier thresholds from the configuration source defined by 10.6.2.
 - **4.1.10** The system shall store, for every scored cluster, each driver's normalised value and its weighted contribution to the final score.
-- **4.1.11** The system shall retain the score, tier and driver breakdown of every scoring cycle as history.
+- **4.1.11** The system shall retain the score, tier and driver breakdown of every scoring cycle as history. *(Bounded in v0.10 by 4.1.22 and 4.1.23. The obligation as written names no period; the number is permanent and the wording is unchanged.)*
 - **4.1.12** The system shall exclude any driver whose source is stale from the score.
 - **4.1.13** The system shall mark a score as DEGRADED when any driver has been excluded.
 - **4.1.14** The system shall rank active clusters in descending score order, breaking ties by case size and then by locality name.
@@ -235,6 +235,9 @@ composite actor. See open point 1 in `EPICS-STORIES.md`.
 - **4.1.19** The system shall renormalise the remaining driver weights to sum to 1.0 after a driver is excluded under 4.1.12. *(Split from 4.1.12 in v0.3 for atomicity.)*
 - **4.1.20** The system shall name every excluded driver alongside a score marked DEGRADED. *(Split from 4.1.13 in v0.3 for atomicity.)*
 - **4.1.21** The system shall normalise the premises mix driver using the value computed by 1.1.15 without further transformation.
+- **4.1.22** The system shall retain every scoring cycle's score, tier and driver breakdown for at least 14 days after the cycle was computed. *(Added in v0.10.)*
+- **4.1.23** The system shall retain, for each day on which it computed scores earlier than the period named in 4.1.22, at least one complete scoring cycle from that day. *(Added in v0.10.)*
+- **4.1.24** The system shall delete the driver breakdown of a scoring cycle only together with the score it explains. *(Added in v0.10. 4.1.10 requires the breakdown to be stored rather than recomputed, so a breakdown separated from its score is unreadable and a score without its breakdown cannot be explained.)*
 
 ---
 
@@ -703,3 +706,19 @@ changes:
 **Findings accepted but not yet actioned**, carried as open points in `EPICS-STORIES.md`: the
 NEA/town-council actor authority question, and the reason-length floor now applied by definition
 rather than by amending each requirement individually.
+
+**v0.10 (2026-09-19)** — one addition, forced by operation rather than by review:
+
+- Added 4.1.22, 4.1.23 and 4.1.24, which bound the retention 4.1.11 requires. 4.1.11 obliges the
+  system to keep every cycle and names no period. The scoring cycle runs every five minutes, so the
+  faithful implementation of it is unbounded growth: on 2026-09-19 the database held 144 MB of the
+  500 MB available and was growing 7.9 MB/day, which is full in about 45 days. The requirement was
+  not wrong, only unbounded — what it protects is the ability to see how a locality's priority moved
+  over time, and 288 cycles a day is far finer than any question asked of it. 4.1.22 keeps the
+  recent period at full resolution, where "what did it say at 3pm" is a real question; 4.1.23 keeps
+  every day the system ran represented by a real, complete cycle rather than by an average of
+  several. 4.1.11's wording and number are unchanged, as the numbering rule requires.
+- 4.1.24 states what was previously only an `ON DELETE CASCADE`: a breakdown may not be deleted
+  apart from its score. It is written down because retention is now a thing the system does on
+  purpose, and the cascade was the only thing preventing half a million rows that no score
+  explains.

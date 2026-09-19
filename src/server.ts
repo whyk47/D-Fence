@@ -6,10 +6,11 @@
  * Boots configuration, wires the object graph, ingests once so the dashboard has data on the first
  * request, schedules the two cycles from `ingestionIntervals`, and serves.
  *
- * It runs on the **in-memory stores**: Supabase does not exist yet, and a dashboard that only works
- * after a database is provisioned cannot be shown to the team this week. Swapping to Postgres is a
- * change to the four lines that construct the stores — which is the ports layer earning its keep.
- * The cost is honest and stated: restarting the process loses the history.
+ * Every store binds to Postgres when `DATABASE_URL` is set and to its in-memory implementation when
+ * it is not — the ports layer earning its keep, and the reason a contributor with no database can
+ * still run the whole application. The last three ports to move were the referral store and the two
+ * v0.9 reference sources, on 2026-09-19; before that their tables existed and their data lived in
+ * `Map`s that a container restart emptied.
  */
 import { ConfigLoader } from './config/ConfigLoader';
 import { Database } from './persistence/Database';
@@ -30,6 +31,11 @@ import { ModerationRoutes } from './boundary/http/ModerationRoutes';
 import { ReferralRoutes } from './boundary/http/ReferralRoutes';
 import { ReferralController } from './control/ReferralController';
 import { InMemoryReferralStore } from './persistence/memory/InMemoryReferralStore';
+import {
+  ObservationRepository,
+  OperatorRegistryRepository,
+  ReferralRepository,
+} from './persistence/PestReferenceRepositories';
 import { WorkOrderRoutes } from './boundary/http/WorkOrderRoutes';
 import { CrewRoutes } from './boundary/http/CrewRoutes';
 import { AuthRoutes } from './boundary/http/AuthRoutes';
@@ -57,7 +63,13 @@ import {
 } from './persistence/memory/InMemoryStores';
 import { InMemoryTreatmentRecordStore, InMemoryWorkOrderStore, RecordingNotifier } from './persistence/memory/InMemoryWorkOrderStores';
 import { InMemoryClusterLocator, InMemoryReportStore } from './persistence/memory/InMemoryReportStores';
-import { AccountStore, SessionStore } from './ports/Stores';
+import {
+  AccountStore,
+  ObservationStore,
+  OperatorRegistryStore,
+  ReferralStore,
+  SessionStore,
+} from './ports/Stores';
 import { Account } from './entity/Account';
 import { Uuid } from './entity/valueTypes';
 import { AccountRepository, SessionRepository } from './persistence/AccountRepository';
@@ -295,7 +307,12 @@ async function main(): Promise<void> {
     ac0, reports, locator, reportLifecycle, auditStore, objectStorage, config,
   );
   // 8.6 — referral, the path a wildlife case takes instead of a work order (8.1.14).
-  const referralStore = new InMemoryReferralStore();
+  //
+  // On Postgres since 2026-09-19. It was the store a restart hurt most: 8.6.6 tells a resident
+  // their report has gone to an authority and 8.6.7 shows the report as referred, so losing the
+  // referral left the report in a state whose explanation no longer existed.
+  const referralStore: ReferralStore =
+    database === null ? new InMemoryReferralStore() : new ReferralRepository(database);
   const alertTriggers = new AlertTriggerEvaluator(savedLocations, subscriptions, alertStore, locator);
   // 9.1.x — the map and the trend view read the same stores everything else writes to; nothing
   // here computes a second version of a score or a boundary.
@@ -340,12 +357,16 @@ async function main(): Promise<void> {
 
   // 1.5, 1.6 — the two v0.9 evidence sources.
   //
-  // Both are in-memory only. That is a real limitation and not an oversight: neither has a
-  // migration yet, so a restart re-geocodes the registry and re-fetches the observation window.
-  // Both are cheap enough to survive it (one cached pass, one 90-day page per tier B pest) and
-  // neither feeds a dengue score, so the cost of the gap falls entirely on the new pests.
-  const operatorRegistry = new InMemoryOperatorRegistryStore();
-  const observations = new InMemoryObservationStore();
+  // On Postgres since 2026-09-19. Migration 005 created their tables on the 17th and nothing wrote
+  // to them until now. In memory, 1.5.11's deduplication held only within one container lifetime —
+  // every restart re-admitted the whole window and `ExternalObservationDensity` counted sightings
+  // it had already counted, which looks like activity rather than like a fault — and 1.6.5's cache
+  // of 290 geocodes was discarded on each restart, costing 290 OneMap round trips to rebuild a
+  // file that is published once a year.
+  const operatorRegistry: OperatorRegistryStore =
+    database === null ? new InMemoryOperatorRegistryStore() : new OperatorRegistryRepository(database);
+  const observations: ObservationStore =
+    database === null ? new InMemoryObservationStore() : new ObservationRepository(database);
   const registryLoader = new OperatorRegistryLoader(new VCORegistryGateway(http), oneMap, operatorRegistry);
 
   // 1.5.1 — one job per tier B pest, because 1.5.2 makes the supplier call taxon by taxon and

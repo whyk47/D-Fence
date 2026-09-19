@@ -49,6 +49,14 @@ import { PriorityScore } from '../src/entity/PriorityScore';
 import { EvidenceTier, PestType, SourceKind } from '../src/entity/enums';
 import { PestPriorityCalculator } from '../src/control/scoring/PestPriorityCalculator';
 import { DOOMED_CYCLES } from '../src/persistence/RetentionPolicy';
+import {
+  ObservationRepository,
+  OperatorRegistryRepository,
+  ReferralRepository,
+} from '../src/persistence/PestReferenceRepositories';
+import { ObservationRecord } from '../src/entity/ObservationRecord';
+import { VectorControlOperator } from '../src/entity/VectorControlOperator';
+import { Referral } from '../src/entity/Referral';
 
 const url = ConfigLoader.load().get('DATABASE_URL');
 const live = url !== '';
@@ -1141,5 +1149,214 @@ describe.skipIf(!live)('The retention policy against live Postgres — §4.1.11'
     // The cascade is the reason `DOOMED_CYCLES` names only one table. If it were ever dropped, the
     // tool would leave half a million rows behind that no score explains and nothing reads.
     expect(Number(orphans[0]?.n)).toBe(0);
+  });
+});
+
+/**
+ * §2.46 — the three stores that had tables and no writer.
+ *
+ * Migration 005 created `observation_record`, `vector_control_operator`, `geocode_cache` and
+ * `referral` on 17 September. `server.ts` went on binding all three ports to their in-memory
+ * implementations, so the tables existed and stayed empty while the data lived in `Map`s that a
+ * container restart emptied.
+ *
+ * Each of the three failed differently, and none of them failed loudly:
+ *
+ *   - 1.5.11 keys observations by the supplier's id so overlapping runs do not count a sighting
+ *     twice. In memory that held only within one container lifetime, so every restart re-admitted
+ *     the whole window and the density driver counted records it had already counted.
+ *   - 1.6.5 caches 290 geocodes so a reload costs nothing the second time. In memory each restart
+ *     paid for all 290 again.
+ *   - 8.6.6 tells a resident their report went to an authority. A restart erased the referral and
+ *     left the report in a state whose explanation no longer existed.
+ */
+describe.skipIf(!live)('The three v0.9 stores against live Postgres — §1.5, §1.6, §8.6', () => {
+  let db: Database;
+  let observations: ObservationRepository;
+  let registry: OperatorRegistryRepository;
+  let referrals: ReferralRepository;
+  let accounts: AccountRepository;
+  let reports: ReportRepository;
+
+  const clusterId = randomUUID();
+  const accountId = randomUUID();
+  const reportId = randomUUID();
+  const prefix = 'zz-' + clusterId.slice(0, 8);
+  const OBSERVED = new Date('2026-09-10T00:00:00Z');
+
+  function observation(id: string, pest: PestType, on = OBSERVED): ObservationRecord {
+    return new ObservationRecord(
+      prefix + '-' + id, pest, 'Test taxon', on, new GeoPoint(1.205, 103.605), 30, 'research',
+      clusterId,
+    );
+  }
+
+  beforeAll(async () => {
+    db = new Database(url);
+    observations = new ObservationRepository(db);
+    registry = new OperatorRegistryRepository(db);
+    referrals = new ReferralRepository(db);
+    accounts = new AccountRepository(db);
+    reports = new ReportRepository(db);
+
+    const ring = [[103.604, 1.204], [103.607, 1.204], [103.607, 1.207], [103.604, 1.207], [103.604, 1.204]]
+      .map((p) => p.join(' '))
+      .join(',');
+    await db.query(
+      'INSERT INTO cluster (id, object_id, locality, boundary, case_size, change_class, trajectory, is_active) ' +
+        "VALUES ($1, $2, 'V09 Store Test', ST_GeogFromText($3), 3, 'UNCHANGED', 'Stable', true)",
+      [clusterId, prefix, 'POLYGON((' + ring + '))'],
+    );
+
+    const account = new Account();
+    account.id = accountId;
+    account.email = prefix + '@d-fence.test';
+    account.authUserId = 'auth-' + accountId;
+    account.emailVerified = true;
+    account.role = Role.Resident;
+    account.isActive = true;
+    account.telegramChatId = null;
+    account.createdAt = new Date();
+    await accounts.save(account);
+
+    const r = new Report();
+    r.id = reportId;
+    r.reporterId = accountId;
+    r.point = new GeoPoint(1.205, 103.605);
+    r.type = ReportType.StandingWater;
+    r.description = 'v0.9 store test';
+    r.clusterId = clusterId;
+    r.localityBinding = 'V09 Store Test';
+    r.corroborationCount = 0;
+    r.submittedAt = new Date();
+    r.moderatorId = null;
+    r.moderatedAt = null;
+    r.moderationReason = null;
+    r.workOrderId = null;
+    r.applyStatus(ReportStatus.Verified);
+    await reports.save(r);
+  });
+
+  afterAll(async () => {
+    await db.query('DELETE FROM referral WHERE report_id = $1', [reportId]);
+    await db.query('DELETE FROM observation_record WHERE locality_id = $1', [clusterId]);
+    await db.query('DELETE FROM vector_control_operator WHERE postal_code LIKE $1', [prefix + '%']);
+    await db.query('DELETE FROM geocode_cache WHERE postal_code LIKE $1', [prefix + '%']);
+    await db.query('DELETE FROM report WHERE id = $1', [reportId]);
+    await db.query('DELETE FROM account WHERE id = $1', [accountId]);
+    await db.query('DELETE FROM cluster WHERE id = $1', [clusterId]);
+    await db.close?.();
+  });
+
+  it('OB1 — a record already held is not counted again (1.5.11)', async () => {
+    const first = await observations.save([observation('a', PestType.Snake), observation('b', PestType.Snake)]);
+    const second = await observations.save([observation('b', PestType.Snake), observation('c', PestType.Snake)]);
+
+    // The return value is the *new* count, taken from RETURNING rather than from the input length:
+    // those two differ by exactly the overlap between runs, and the overlap is what 1.5.11 exists
+    // to discount. An overlapping run reporting 2 would inflate the driver by its own overlap.
+    expect(first).toBe(2);
+    expect(second).toBe(1);
+  });
+
+  it('OB2 — the density driver counts by pest, locality and window (4.1.24)', async () => {
+    // Rat and Macaque, because OB1 already wrote snakes to this locality. A case whose expected
+    // number depends on how many rows an earlier case happened to insert is a case that breaks the
+    // next time either one is edited.
+    await observations.save([
+      observation('d', PestType.Rat),
+      observation('e', PestType.Macaque),
+      observation('f', PestType.Rat, new Date('2026-01-01T00:00:00Z')),
+    ]);
+    const since = new Date('2026-09-01T00:00:00Z');
+
+    // Counted in SQL. Fetching rows to count them in JavaScript is how the rainfall driver came to
+    // move 3 MB every five minutes (§6.10), and this runs once per pest per locality per cycle.
+    expect(await observations.countByLocality(PestType.Rat, clusterId, since)).toBe(1);
+    expect(await observations.countByLocality(PestType.Macaque, clusterId, since)).toBe(1);
+    // The January rat is outside the window, and appears only once the window reaches back to it.
+    expect(await observations.countByLocality(PestType.Rat, clusterId, new Date('2025-01-01'))).toBe(2);
+  });
+
+  it('VC1 — the registry is replaced wholesale, and the geocode cache survives it (1.6.5, 1.6.6)', async () => {
+    const operator = (name: string, code: string): VectorControlOperator =>
+      new VectorControlOperator(name, '1', 'Test Street', code, '61234567', new GeoPoint(1.3, 103.8), new Date('2024-06-06'));
+
+    await registry.cacheCoordinate(prefix + '01', new GeoPoint(1.35, 103.85));
+    await registry.saveRegistry([operator('Alpha Pest', prefix + '01')], new Date('2024-06-06'));
+    await registry.saveRegistry([operator('Beta Pest', prefix + '02')], new Date('2024-06-06'));
+
+    const mine = (await registry.registry()).filter((o) => o.postalCode.startsWith(prefix));
+
+    // Replaced, not merged: the registry is a snapshot of a published file, and a merge would keep
+    // operators the publisher has since removed.
+    expect(mine.map((o) => o.companyName)).toEqual(['Beta Pest']);
+    // And the cache outlives the rows it described. 1.6.5 exists so a reload costs nothing the
+    // second time; a cache emptied with the registry would make every load re-resolve all 290.
+    expect((await registry.cachedCoordinate(prefix + '01'))?.latitude).toBeCloseTo(1.35, 4);
+  });
+
+  it('VC2 — an ungeocoded operator is stored rather than dropped (1.6.4, 1.6.8)', async () => {
+    await registry.saveRegistry(
+      [new VectorControlOperator('Gamma Pest', '2', 'Test Street', prefix + '03', '69876543', null, new Date('2024-06-06'))],
+      new Date('2024-06-06'),
+    );
+    const mine = (await registry.registry()).filter((o) => o.postalCode.startsWith(prefix));
+
+    // Its name and telephone are useful on their own, and 1.6.8 simply skips it when measuring
+    // distance. Dropping it would silently shrink the registry every time a geocode failed.
+    expect(mine).toHaveLength(1);
+    expect(mine[0]?.location).toBeNull();
+  });
+
+  it('RF1 — a referral survives, with the number the resident was given (8.6.3, 8.6.7)', async () => {
+    const referral = new Referral();
+    referral.id = randomUUID();
+    referral.reportId = reportId;
+    referral.destinationAuthority = 'NParks';
+    referral.destinationContactNumber = '1800 471 7300';
+    referral.reason = 'Hive on the void deck ceiling.';
+    referral.referredBy = accountId;
+    referral.referredAt = new Date();
+    await referrals.save(referral);
+
+    const found = await referrals.findByReport(reportId);
+
+    // The contact number is asserted because it is the part a resident acts on. A referral that
+    // comes back naming the right agency and no way to reach it has kept the audit and lost the
+    // point.
+    expect(found?.destinationAuthority).toBe('NParks');
+    expect(found?.destinationContactNumber).toBe('1800 471 7300');
+    expect(found?.isClosed()).toBe(false);
+    expect((await referrals.findOpen()).some((r) => r.reportId === reportId)).toBe(true);
+  });
+
+  it('RF2 — recording an outcome closes it, and it leaves the open list (8.6.8, 8.6.9)', async () => {
+    const referral = await referrals.findByReport(reportId);
+    expect(referral).not.toBeNull();
+    (referral as Referral).outcome = 'NParks removed the hive.';
+    (referral as Referral).outcomeRecordedAt = new Date();
+    await referrals.save(referral as Referral);
+
+    const reloaded = await referrals.findById((referral as Referral).id);
+    expect(reloaded?.isClosed()).toBe(true);
+    expect(reloaded?.outcome).toContain('removed the hive');
+    expect((await referrals.findOpen()).some((r) => r.reportId === reportId)).toBe(false);
+  });
+
+  it('RF3 — one report cannot be referred twice (8.6.7)', async () => {
+    const second = new Referral();
+    second.id = randomUUID();
+    second.reportId = reportId;
+    second.destinationAuthority = 'AVS';
+    second.destinationContactNumber = '1800 476 1600';
+    second.reason = 'A second referral for the same report.';
+    second.referredBy = accountId;
+    second.referredAt = new Date();
+
+    // The unique index raises rather than the second referral silently overwriting the first. That
+    // is why `save` conflicts on `id` and not on `report_id`: conflicting on the report would make
+    // "refer this twice" quietly replace the reason, the authority and the referring manager.
+    await expect(referrals.save(second)).rejects.toThrow();
   });
 });

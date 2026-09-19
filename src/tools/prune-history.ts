@@ -12,13 +12,13 @@
  * destroys history on a timer, and the first time its window was miscomputed it would take the
  * history with it before anyone read the log. Retention is a decision, so this is a command.
  *
- * ## The policy, and why 4.1.11 is the obstacle
+ * ## The policy
  *
  * 4.1.11 requires the score, tier and driver breakdown of *every* scoring cycle to be retained as
- * history, and names no period. Read literally it forbids this tool. The requirement was written
- * when a cycle meant one pest and a handful of clusters, and it is not wrong so much as unbounded:
- * what it protects is the ability to see how a locality's priority moved over time, and 288 cycles
- * a day is far finer than any question anyone asks of it.
+ * history and names no period, which read literally forbids this tool. It was not wrong so much as
+ * unbounded: what it protects is the ability to see how a locality's priority moved over time, and
+ * 288 cycles a day is far finer than any question anyone asks of it. **4.1.22 and 4.1.23 were added
+ * on 2026-09-19 to bound it**, leaving 4.1.11's number and wording untouched.
  *
  * So the policy keeps the *shape* of the history and drops its resolution:
  *
@@ -29,11 +29,8 @@
  *   - `driver_contribution` follows its score by ON DELETE CASCADE, which is why 4.1.10's breakdown
  *     never separates from the score it explains.
  *
- * That is roughly a 95% reduction in the growth rate, and it needs a new requirement — 4.1.21 or
- * whatever the next free number is — rather than an edit to 4.1.11, whose number is permanent.
- * **Until that requirement exists and the team has ratified it, this tool is a proposal you can
- * measure, not a policy in force.** Running it with --apply against a database is a decision to
- * retain less than 4.1.11 as written requires.
+ * That is roughly a 95% reduction in the growth rate. The dry run remains the default anyway: the
+ * requirement says what must be *kept*, and nothing obliges anyone to delete the rest today.
  *
  * Rainfall and ingestion runs are a different argument and carry no such requirement. The rainfall
  * driver reaches back 72 hours (1.2.7, 1.2.8) and nothing reads further; source health (1.4.3)
@@ -113,9 +110,8 @@ async function main(): Promise<void> {
 
   if (!apply) {
     console.log('\n  Nothing was deleted. Re-run with --apply to delete it.');
-    console.log('  Note that 4.1.11 as written requires every cycle to be retained: applying this');
-    console.log('  is a decision to retain less than the requirement says, and needs the new');
-    console.log('  requirement number the header describes.\n');
+    console.log('  What it would keep is what 4.1.22 and 4.1.23 require; what it would delete is');
+    console.log('  history those requirements do not oblige anyone to hold.\n');
     await db.close?.();
     return;
   }

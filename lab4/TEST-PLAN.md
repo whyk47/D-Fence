@@ -16,7 +16,7 @@ cross-pest generalisation in `REQUIREMENTS.md` v0.9. v0.3 records what happened 
 `tests/pest-scoring.test.ts` (25 cases). §6.5 and §6.6 remain designed and not executed, because the
 two external gateways they test are build steps 7 and 8 and are not written.
 
-**The whole suite: `npx vitest run`, 804 tests in 39 files, 804 passing** — including
+**The whole suite: `npx vitest run`, 814 tests in 39 files, 814 passing** — including
 `tests/repository.test.ts`, which runs against live PostGIS and is the suite that caught the missing
 schema described in §6.8. One case,
 `rainfall.test.ts` J2, was failing when this pass began; it predated the v0.9 work and has since been
@@ -2172,4 +2172,60 @@ breakdown raises nothing.
 delete.** Two statements describing the same set in different words would eventually disagree, and
 a dry run that reports one thing while the deletion does another is the single failure a deletion
 tool cannot be allowed to have.
+
+---
+
+## §6.15 — Three stores that had a table and no writer
+
+Migration 005 created `observation_record`, `vector_control_operator`, `geocode_cache` and
+`referral` on 17 September. `server.ts` went on binding all three ports to their in-memory
+implementations, so the tables existed and stayed empty while the data lived in `Map`s that a
+container restart emptied. The suite could not see it: every unit test runs against the in-memory
+store by design (10.6.3), and an in-memory store that loses everything on restart passes every test
+that does not restart it.
+
+Each failed differently, and none failed loudly.
+
+**Observations (1.5.11).** The supplier's observation id is the key precisely so that overlapping
+ingestion runs do not count a sighting twice. Held in a `Map`, that guarantee lasted one container
+lifetime: every restart re-admitted the entire window and `ExternalObservationDensity` counted
+records it had already counted. The driver is capped at 0.20, so the symptom was not an error — it
+was a locality that looked slightly busier after each restart.
+
+**The operator registry (1.6.5).** The geocode cache exists so that a reload costs nothing the
+second time. In memory it was discarded with the process, and every restart meant 290 OneMap round
+trips to rebuild a file published once a year.
+
+**Referrals (8.6.6, 8.6.7).** The worst of the three. A resident is told their report has gone to an
+authority, and the report is shown as referred rather than as having an open work order. A restart
+erased the referral and left the report in a state whose explanation no longer existed — the
+resident had been told something the system could no longer confirm.
+
+| # | Method | Test input | Expected output |
+|---|---|---|---|
+| OB1 | `save` | two records, then one repeat and one new | returns 2, then 1 |
+| OB2 | `countByLocality` | rats and a macaque, one rat outside the window | 1, 1, and 2 once the window reaches back |
+| VC1 | `saveRegistry` twice | a different operator each time | only the second survives; the geocode cache does not |
+| VC2 | `saveRegistry` | an operator with no coordinate | stored, with a null location |
+| RF1 | `save` / `findByReport` | a referral to NParks | authority *and* contact number survive; it is open |
+| RF2 | `save` with an outcome | a closed referral | closed on reload, and gone from the open list |
+| RF3 | `save` | a second referral for the same report | rejected |
+
+**OB1 asserts the return value, not the row count.** The number a run reports as its yield is the
+number of *new* records, taken from `RETURNING` rather than from the length of the input — and
+those two differ by exactly the overlap between runs, which is the quantity 1.5.11 exists to
+discount.
+
+**RF1 asserts the contact number and not only the authority**, because the number is the part a
+resident acts on. A referral that comes back naming the right agency and no way to reach it has
+kept the audit trail and lost the point.
+
+**RF3 is why `save` conflicts on `id` rather than on `report_id`.** A unique index enforces one
+referral per report. Conflicting on the report would let a second `refer()` silently overwrite the
+first referral's reason, authority and referring manager; conflicting on the id lets the constraint
+raise, which is the correct answer to "refer this twice".
+
+**OB2 uses rats and macaques because OB1 already wrote snakes to that locality.** A case whose
+expected number depends on how many rows an earlier case happened to insert breaks the next time
+either one is edited, and it breaks in a way that looks like a defect in the code under test.
 
